@@ -35,6 +35,7 @@
     <ClInclude Include="source\src\mvs.h" />
     <ClInclude Include="source\src\mvsi.h" />
     <ClInclude Include="source\src\mvsiutils.h" />
+    <ClInclude Include="source\src\EnvInfo.h" />
     <ClInclude Include="source\utils\CPPython\cppython.h" />
     <ClInclude Include="source\utils\CPPython\pystring.h" />
     <ClInclude Include="source\utils\MemoryMgr.h" />

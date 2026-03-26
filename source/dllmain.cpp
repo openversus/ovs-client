@@ -21,6 +21,8 @@ const char* OVS::OVS_Version = (const char*)CURRENT_HOOK_VERSION;
 
 EnvInfo* GEnvInfo = nullptr;
 
+EnvInfo* GEnvInfo = nullptr;
+
 Trampoline* GameTramp, * User32Tramp;
 
 void CreateConsole();
@@ -453,6 +455,97 @@ static DWORD WINAPI RegisterIdentityThread(LPVOID)
 {
     RegisterIdentity();
     return 0;
+}
+
+// Parse "http://host:port" or "https://host:port" into components.
+static bool ParseServerUrl(const std::string& url, std::wstring& outHost, INTERNET_PORT& outPort, bool& outHttps)
+{
+    std::string s = url;
+    outHttps = false;
+
+    if (s.substr(0, 8) == "https://") { outHttps = true; s = s.substr(8); }
+    else if (s.substr(0, 7) == "http://") { s = s.substr(7); }
+
+    size_t slash = s.find('/');
+    if (slash != std::string::npos) s = s.substr(0, slash);
+
+    size_t colon = s.rfind(':');
+    if (colon != std::string::npos) {
+        std::string portStr = s.substr(colon + 1);
+        s = s.substr(0, colon);
+        try { outPort = (INTERNET_PORT)std::stoi(portStr); }
+        catch (...) { outPort = outHttps ? 443 : 80; }
+    } else {
+        outPort = outHttps ? 443 : 80;
+    }
+
+    if (s.empty()) return false;
+    outHost = std::wstring(s.begin(), s.end());
+    return true;
+}
+
+// POST identity + hardware fingerprint to /api/identify on the OVS server.
+static void RegisterIdentity()
+{
+    if (!GEnvInfo) return;
+    if (SettingsMgr->szServerUrl.empty()) {
+        printf("[OVS] RegisterIdentity: szServerUrl is empty — skipping\n");
+        return;
+    }
+
+    std::string identity   = GEnvInfo->GetIdentity();
+    std::string hardwareId = GEnvInfo->HardwareID;
+
+    if (identity == "Unknown") {
+        printf("[OVS] RegisterIdentity: no Steam/Epic identity — skipping\n");
+        return;
+    }
+
+    std::wstring host;
+    INTERNET_PORT port;
+    bool isHttps;
+    if (!ParseServerUrl(SettingsMgr->szServerUrl, host, port, isHttps)) {
+        printf("[OVS] RegisterIdentity: failed to parse server URL: %s\n", SettingsMgr->szServerUrl.c_str());
+        return;
+    }
+
+    std::string body = "{\"steamId\":\"" + identity + "\",\"hardwareId\":\"" + hardwareId + "\"}";
+
+    HINTERNET hSession = WinHttpOpen(L"OVS/1.0",
+        WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+    if (!hSession) { printf("[OVS] RegisterIdentity: WinHttpOpen failed (%lu)\n", GetLastError()); return; }
+
+    HINTERNET hConnect = WinHttpConnect(hSession, host.c_str(), port, 0);
+    if (!hConnect) {
+        printf("[OVS] RegisterIdentity: WinHttpConnect failed (%lu)\n", GetLastError());
+        WinHttpCloseHandle(hSession); return;
+    }
+
+    DWORD flags = isHttps ? WINHTTP_FLAG_SECURE : 0;
+    HINTERNET hRequest = WinHttpOpenRequest(hConnect, L"POST", L"/api/identify",
+        nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, flags);
+    if (!hRequest) {
+        printf("[OVS] RegisterIdentity: WinHttpOpenRequest failed (%lu)\n", GetLastError());
+        WinHttpCloseHandle(hConnect); WinHttpCloseHandle(hSession); return;
+    }
+
+    std::wstring headers = L"Content-Type: application/json";
+    WinHttpAddRequestHeaders(hRequest, headers.c_str(), (DWORD)headers.size(), WINHTTP_ADDREQ_FLAG_ADD);
+
+    BOOL ok = WinHttpSendRequest(hRequest,
+        WINHTTP_NO_ADDITIONAL_HEADERS, 0,
+        (LPVOID)body.c_str(), (DWORD)body.size(), (DWORD)body.size(), 0);
+
+    if (ok && WinHttpReceiveResponse(hRequest, nullptr)) {
+        printf("[OVS] RegisterIdentity: OK — identity=%s hw=%.16s...\n",
+               identity.c_str(), hardwareId.c_str());
+    } else {
+        printf("[OVS] RegisterIdentity: request failed (%lu)\n", GetLastError());
+    }
+
+    WinHttpCloseHandle(hRequest);
+    WinHttpCloseHandle(hConnect);
+    WinHttpCloseHandle(hSession);
 }
 
 bool OnInitializeHook()
