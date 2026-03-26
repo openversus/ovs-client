@@ -12,11 +12,10 @@
 #pragma comment(lib, "Bcrypt.lib")
 
 // Collects platform identity (Steam/Epic) and a hardware fingerprint.
-// Hardware fingerprint = SHA256( CPU leaf0 + CPU leaf1 + MoboSerial + MAC )
+// Hardware fingerprint = SHA256( CPU leaf0 + CPU leaf1 + MoboSerial )
 //   - CPU leaf 0 : vendor ID + max supported leaf
 //   - CPU leaf 1 : processor signature (type | family | model | stepping) + feature flags
 //   - MoboSerial : SMBIOS Type 2 baseboard serial number (most stable hardware ID)
-//   - MAC        : first non-zero physical adapter address (additional entropy)
 struct EnvInfo
 {
     std::string SteamID;
@@ -36,6 +35,7 @@ struct EnvInfo
         SteamID = _Env("SteamID");
         GameID  = _Env("SteamGameId");
         AppID   = _Env("SteamAppId");
+
         EpicID  = _GetEpicID();
 
         memset(CpuLeaf0, 0, sizeof(CpuLeaf0));
@@ -87,7 +87,7 @@ private:
     }
 
     // Epic stores the account ID as a 32-char hex filename (no extension base name)
-    // inside %LOCALAPPDATA%\..\Local\EpicGamesLauncher\Saved\Data
+    // inside %LOCALAPPDATA%\...\Local\EpicGamesLauncher\Saved\Data
     std::string _GetEpicID()
     {
         PWSTR path = NULL;
@@ -238,20 +238,16 @@ private:
     }
 
     // Combines CPU leaf 0 (all 4 regs), CPU leaf 1 (all 4 regs),
-    // motherboard serial (SMBIOS Type 2), and MAC address.
-    // Mobo serial is the primary stable identifier; MAC adds entropy.
+    // and motherboard serial (SMBIOS Type 2).
+    // MAC excluded — too volatile due to VPNs, virtual adapters, and NIC changes.
     std::string _ComputeHardwareID()
     {
-        std::string mac = _GetMACAddress();
-
         char buf[512] = {};
         sprintf_s(buf,
-            "%d|%d|%d|%d|%08X|%08X|%08X|%08X|%s|%s",
+            "%d|%d|%d|%d|%08X|%s",
             CpuLeaf0[0], CpuLeaf0[1], CpuLeaf0[2], CpuLeaf0[3],
-            (unsigned int)CpuLeaf1[0], (unsigned int)CpuLeaf1[1],
-            (unsigned int)CpuLeaf1[2], (unsigned int)CpuLeaf1[3],
-            MoboSerial.c_str(),
-            mac.c_str()
+            (unsigned int)CpuLeaf1[0],  // processor signature only (family/model/stepping)
+            MoboSerial.c_str()
         );
 
         return _SHA256(std::string(buf));
