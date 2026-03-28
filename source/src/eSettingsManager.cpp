@@ -64,9 +64,6 @@ void eSettingsManager::Init()
     bPauseOnStart				= ini.ReadBoolean	("Settings.Debug",		"DebugPause",				false);
     bDebug						= ini.ReadBoolean	("Settings.Debug",		"DebugLogging",				false);
     bAllowNonMVS				= ini.ReadBoolean	("Settings.Debug",		"NonMVSPatching",			false);
-    bLoadDumper                 = ini.ReadBoolean   ("Settings.Debug",      "LoadDumper",               false);
-    bRunDumperOnLoad            = ini.ReadBoolean   ("Settings.Debug",      "RunDumperOnLoad",          false);
-    sDumperDLLPath              = ini.ReadString    ("Settings.Debug",      "DumperDLLPath",               "");
     
     // Settings
     iLogSize					= ini.ReadInteger	("Settings",			"LogSize",					50);

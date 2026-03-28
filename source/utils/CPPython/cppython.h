@@ -3,5 +3,5 @@
 
 namespace CPPython
 {
-    typedef PyString string; // Refer to PyString as CPPython::string
+	typedef PyString string; // Refer to PyString as CPPython::string
 }

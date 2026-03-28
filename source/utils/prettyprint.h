@@ -8,24 +8,24 @@ void SetColor(const char* color);
 
 enum ConsoleColors
 {
-    BLACK = 0,
-    BLUE,
-    GREEN,
-    AQUA,
-    RED,
-    PURPLE,
-    YELLOW,
-    WHITE,
-    GRAY,
-    LIGHTBLUE,
-    LIGHTGREEN,
-    LIGHTAQUA,
-    LIGHTRED,
-    LIGHTPURPLE,
-    LIGHTYELLOW,
-    BRIGHTWHITE,
+	BLACK = 0,
+	BLUE,
+	GREEN,
+	AQUA,
+	RED,
+	PURPLE,
+	YELLOW,
+	WHITE,
+	GRAY,
+	LIGHTBLUE,
+	LIGHTGREEN,
+	LIGHTAQUA,
+	LIGHTRED,
+	LIGHTPURPLE,
+	LIGHTYELLOW,
+	BRIGHTWHITE,
 
-    GREY = 8, // Synonym
+	GREY = 8, // Synonym
 };
 
 #ifndef COLORPRINT

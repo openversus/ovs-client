@@ -2,23 +2,32 @@
 #include "src/OVSUtils.h"
 #include "src/mvs.h"
 #include "src/OpenVersus.h"
-#include <tlhelp32.h> 
+#include "src/EnvInfo.h"
+#include <tlhelp32.h>
 #include <VersionHelpers.h>
 #include <string>
+#include <vector>
 #include <iostream>
 #include <filesystem>
 #include <fstream>
-#include <cstdlib>
+#include <winhttp.h>
+#include <wininet.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#pragma comment(lib, "winhttp.lib")
+#pragma comment(lib, "wininet.lib")
+#pragma comment(lib, "ws2_32.lib")
 
 namespace fs = std::filesystem;
 
-constexpr const char * CURRENT_HOOK_VERSION = "2026.02.02";
+constexpr const char * CURRENT_HOOK_VERSION = "2026.03.27";
 const char* OVS::OVS_Version = (const char*)CURRENT_HOOK_VERSION;
 
+EnvInfo* GEnvInfo = nullptr;
 Trampoline* GameTramp, * User32Tramp;
 
 void CreateConsole();
-void SpawnErrorBox(const char*);
+void SpawnError(const char*);
 void PreGameHooks();
 void ProcessSettings();
 bool OnInitializeHook();
@@ -36,7 +45,6 @@ LRESULT CALLBACK KeyboardProc(int code, WPARAM wParam, LPARAM lParam)
         {
             printf("Attempting F1 action\n");
             //OVS::ShowNotification("OVS Loaded", CURRENT_HOOK_VERSION, 10.f, true);
-            //RunDumper();
         }
 
     }
@@ -46,8 +54,6 @@ LRESULT CALLBACK KeyboardProc(int code, WPARAM wParam, LPARAM lParam)
 
 void CreateConsole()
 {
-    EnvInfo envInfo;
-
     FreeConsole();
     AllocConsole();
 
@@ -66,7 +72,7 @@ void CreateConsole()
     printfCyan("OpenVersus - It's better than Parsec\n");
     printfCyan("v%s\n\n", CURRENT_HOOK_VERSION);
     printfCyan("Binary releases available at: https://github.com/christopher-conley/OpenVersus\n");
-    printfCyan("Source code available at: https://github.com/openversus\n");
+    printfCyan("Source code and binary releases available at: https://github.com/openversus\n");
     printfCyan("Maintained by RosettaSt0ned and the MVS community\n");
 
     printfCyan("OpenVersus is originally based on the publicly-available code developed by thethiny and multiversuskoth, located at: \n");
@@ -80,7 +86,7 @@ void PreGameHooks()
     GameTramp = Trampoline::MakeTrampoline(GetModuleHandle(nullptr));
     if (SettingsMgr->iLogLevel)
         printf("Generated Trampolines\n");
-     IATable = ParsePEHeader();	 
+     IATable = ParsePEHeader();
 
 
     if (SettingsMgr->bDisableSignatureCheck)
@@ -111,18 +117,6 @@ void PreGameHooks()
     {
         HookMetadata::sActiveMods.bNotifs = OVS::Hooks::NotificationHooks(GameTramp);
     }
-    if ((SettingsMgr->bLoadDumper) && (SettingsMgr->bRunDumperOnLoad))
-    {
-        HookMetadata::sActiveMods.bLoadDumper = true;
-        HookMetadata::sActiveMods.bRunDumperOnLoad = true;
-        RunDumper();
-
-        bool DoneFileExists = false;
-        while (!DoneFileExists)
-        {
-            DoneFileExists = fs::exists("C:\\Users\\tool\\dump_done.txt");
-        }
-    }
 }
 
 void ProcessSettings()
@@ -139,7 +133,7 @@ void ProcessSettings()
     printfCyan("Parsed Settings\n");
 }
 
-void SpawnErrorBox(const char* msg)
+void SpawnError(const char* msg)
 {
     MessageBoxA(NULL, msg, "OpenVersus", MB_ICONEXCLAMATION);
 }
@@ -153,14 +147,14 @@ bool HandleWindowsVersion()
 
     if (IsWindows7SP1OrGreater())
     {
-        SpawnErrorBox("OVS doesn't officially support Windows 8 or 7 SP1. It may misbehave.");
+        SpawnError("OVS doesn't officially support Windows 8 or 7 SP1. It may misbehave.");
         return true;
     }
 
-    SpawnErrorBox("OVS doesn't support Windows 7 or Earlier. Might not work.");
+    SpawnError("OVS doesn't support Windows 7 or Earlier. Might not work.");
     return true;
 
-    
+
 }
 
 inline bool VerifyProcessName(std::string expected_process) {
@@ -187,6 +181,542 @@ void InitializeKeyboard()
     );
 }
 
+// Returns true if running under Proton/Wine (winex11.drv is only present in Wine)
+static bool IsProton()
+{
+    return GetModuleHandleA("winex11.drv") != nullptr;
+}
+
+// WinHTTP POST — works on Proton/Steam Deck (Wine's WinHTTP is solid)
+static bool PostViaWinHTTP(const std::string& url, const std::string& body)
+{
+    // Parse host, port, path from url
+    std::string hostStr = url;
+    std::string path = "/";
+    int port = 80;
+    bool https = false;
+
+    if (hostStr.substr(0, 8) == "https://") { hostStr = hostStr.substr(8); https = true; port = 443; }
+    else if (hostStr.substr(0, 7) == "http://") hostStr = hostStr.substr(7);
+
+    size_t slash = hostStr.find('/');
+    if (slash != std::string::npos) { path = hostStr.substr(slash); hostStr = hostStr.substr(0, slash); }
+    size_t colon = hostStr.rfind(':');
+    if (colon != std::string::npos) {
+        try { port = std::stoi(hostStr.substr(colon + 1)); } catch (...) {}
+        hostStr = hostStr.substr(0, colon);
+    }
+
+    std::wstring wHost(hostStr.begin(), hostStr.end());
+    std::wstring wPath(path.begin(), path.end());
+
+    HINTERNET hSession = WinHttpOpen(L"OVS/1.0", WINHTTP_ACCESS_TYPE_NO_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+    if (!hSession) { printf("[OVS] WinHTTP: WinHttpOpen failed (%lu)\n", GetLastError()); return false; }
+
+    HINTERNET hConnect = WinHttpConnect(hSession, wHost.c_str(), (INTERNET_PORT)port, 0);
+    if (!hConnect) { printf("[OVS] WinHTTP: WinHttpConnect failed (%lu)\n", GetLastError()); WinHttpCloseHandle(hSession); return false; }
+
+    DWORD flags = https ? WINHTTP_FLAG_SECURE : 0;
+    HINTERNET hRequest = WinHttpOpenRequest(hConnect, L"POST", wPath.c_str(), NULL, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, flags);
+    if (!hRequest) { printf("[OVS] WinHTTP: WinHttpOpenRequest failed (%lu)\n", GetLastError()); WinHttpCloseHandle(hConnect); WinHttpCloseHandle(hSession); return false; }
+
+    DWORD timeout = 5000;
+    WinHttpSetOption(hRequest, WINHTTP_OPTION_CONNECT_TIMEOUT, &timeout, sizeof(timeout));
+    WinHttpSetOption(hRequest, WINHTTP_OPTION_SEND_TIMEOUT,    &timeout, sizeof(timeout));
+    WinHttpSetOption(hRequest, WINHTTP_OPTION_RECEIVE_TIMEOUT, &timeout, sizeof(timeout));
+
+    BOOL ok = WinHttpSendRequest(hRequest, L"Content-Type: application/json\r\n", (DWORD)-1L,
+        (LPVOID)body.c_str(), (DWORD)body.size(), (DWORD)body.size(), 0);
+
+    if (!ok) printf("[OVS] WinHTTP: send failed (%lu)\n", GetLastError());
+    else {
+        WinHttpReceiveResponse(hRequest, NULL);
+        printf("[OVS] WinHTTP: OK\n");
+    }
+
+    WinHttpCloseHandle(hRequest);
+    WinHttpCloseHandle(hConnect);
+    WinHttpCloseHandle(hSession);
+    return ok;
+}
+
+// WinInet POST — works on Windows (native)
+static bool PostViaWinInet(const std::string& url, const std::string& body)
+{
+    std::string hostStr = url;
+    std::string path = "/";
+    int port = 80;
+
+    if (hostStr.substr(0, 8) == "https://") hostStr = hostStr.substr(8);
+    else if (hostStr.substr(0, 7) == "http://") hostStr = hostStr.substr(7);
+
+    size_t slash = hostStr.find('/');
+    if (slash != std::string::npos) { path = hostStr.substr(slash); hostStr = hostStr.substr(0, slash); }
+    size_t colon = hostStr.rfind(':');
+    if (colon != std::string::npos) {
+        try { port = std::stoi(hostStr.substr(colon + 1)); } catch (...) {}
+        hostStr = hostStr.substr(0, colon);
+    }
+
+    HINTERNET hInet = InternetOpenA("OVS/1.0", INTERNET_OPEN_TYPE_DIRECT, NULL, NULL, 0);
+    if (!hInet) { printf("[OVS] WinInet: InternetOpen failed (%lu)\n", GetLastError()); return false; }
+
+    DWORD timeout = 5000;
+    InternetSetOptionA(hInet, INTERNET_OPTION_CONNECT_TIMEOUT, &timeout, sizeof(timeout));
+    InternetSetOptionA(hInet, INTERNET_OPTION_SEND_TIMEOUT,    &timeout, sizeof(timeout));
+    InternetSetOptionA(hInet, INTERNET_OPTION_RECEIVE_TIMEOUT, &timeout, sizeof(timeout));
+
+    HINTERNET hConn = InternetConnectA(hInet, hostStr.c_str(), (INTERNET_PORT)port, NULL, NULL, INTERNET_SERVICE_HTTP, 0, 0);
+    if (!hConn) { printf("[OVS] WinInet: InternetConnect failed (%lu)\n", GetLastError()); InternetCloseHandle(hInet); return false; }
+
+    HINTERNET hReq = HttpOpenRequestA(hConn, "POST", path.c_str(), NULL, NULL, NULL, INTERNET_FLAG_NO_CACHE_WRITE | INTERNET_FLAG_RELOAD, 0);
+    if (!hReq) { printf("[OVS] WinInet: HttpOpenRequest failed (%lu)\n", GetLastError()); InternetCloseHandle(hConn); InternetCloseHandle(hInet); return false; }
+
+    const char* headers = "Content-Type: application/json\r\n";
+    BOOL ok = HttpSendRequestA(hReq, headers, (DWORD)strlen(headers), (LPVOID)body.c_str(), (DWORD)body.size());
+    if (!ok) printf("[OVS] WinInet: send failed (%lu)\n", GetLastError());
+    else     printf("[OVS] WinInet: OK\n");
+
+    InternetCloseHandle(hReq);
+    InternetCloseHandle(hConn);
+    InternetCloseHandle(hInet);
+    return ok;
+}
+
+// Find any loaded module that exports SteamAPI_ISteamUser_GetSteamID.
+// On Proton the DLL may have a different name than steam_api64.dll.
+static HMODULE FindSteamModule()
+{
+    // Try known names first
+    const char* names[] = {
+        "steam_api64.dll", "steamclient64.dll", "steamclient.dll",
+        "steam_api.dll", "gameoverlayrenderer64.dll", nullptr
+    };
+    for (int i = 0; names[i]; i++) {
+        HMODULE h = GetModuleHandleA(names[i]);
+        if (h && GetProcAddress(h, "SteamAPI_ISteamUser_GetSteamID"))
+            return h;
+    }
+
+    // Enumerate all loaded modules and look for the export
+    HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, 0);
+    if (hSnap == INVALID_HANDLE_VALUE) return nullptr;
+
+    MODULEENTRY32 me = { sizeof(me) };
+    if (Module32First(hSnap, &me)) {
+        do {
+            if (GetProcAddress(me.hModule, "SteamAPI_ISteamUser_GetSteamID")) {
+                CloseHandle(hSnap);
+                return me.hModule;
+            }
+        } while (Module32Next(hSnap, &me));
+    }
+    CloseHandle(hSnap);
+    return nullptr;
+}
+
+// Try to read SteamID from loginusers.vdf using Proton env vars
+static std::string ResolveSteamIDFromFile()
+{
+    std::vector<std::string> candidates;
+
+    const char* compat = std::getenv("STEAM_COMPAT_CLIENT_INSTALL_PATH");
+    if (compat && compat[0]) {
+        candidates.push_back(std::string(compat) + "/config/loginusers.vdf");
+        candidates.push_back(std::string(compat) + "\\config\\loginusers.vdf");
+    }
+
+    const char* home = std::getenv("HOME");
+    if (home && home[0]) {
+        candidates.push_back(std::string(home) + "/.steam/steam/config/loginusers.vdf");
+        candidates.push_back(std::string(home) + "/.local/share/Steam/config/loginusers.vdf");
+    }
+
+    // Hardcoded Steam Deck default paths as last resort
+    candidates.push_back("/home/deck/.steam/steam/config/loginusers.vdf");
+    candidates.push_back("/home/deck/.local/share/Steam/config/loginusers.vdf");
+    candidates.push_back("Z:\\home\\deck\\.steam\\steam\\config\\loginusers.vdf");
+    candidates.push_back("Z:\\home\\deck\\.local\\share\\Steam\\config\\loginusers.vdf");
+
+    for (const auto& path : candidates) {
+        std::ifstream f(path);
+        if (!f.is_open()) continue;
+
+        std::string line, lastId, mostRecentId;
+
+        while (std::getline(f, line)) {
+            size_t start = line.find_first_not_of(" \t");
+            if (start == std::string::npos) continue;
+            std::string trimmed = line.substr(start);
+
+            // SteamID64 key: quoted 15-20 digit number
+            if (trimmed.size() > 2 && trimmed.front() == '"' && trimmed.back() == '"') {
+                std::string key = trimmed.substr(1, trimmed.size() - 2);
+                if (key.size() >= 15 && key.size() <= 20 &&
+                    key.find_first_not_of("0123456789") == std::string::npos) {
+                    lastId = key;
+                }
+            }
+            if (!lastId.empty() && trimmed.find("\"MostRecent\"") != std::string::npos
+                && trimmed.find("\"1\"") != std::string::npos)
+                mostRecentId = lastId;
+        }
+
+        std::string result = mostRecentId.empty() ? lastId : mostRecentId;
+        if (!result.empty()) {
+            printf("[OVS] SteamID from file: %s\n", result.c_str());
+            return result;
+        }
+    }
+    return "";
+}
+
+static std::string ResolveSteamIDFromAPI()
+{
+    typedef void*    (__cdecl* SteamAPI_SteamUser_t)();
+    typedef uint64_t (__cdecl* SteamAPI_ISteamUser_GetSteamID_t)(void*);
+
+    // Poll for up to 30s for steam_api64.dll
+    HMODULE hSteam = nullptr;
+    for (int i = 0; i < 60 && !hSteam; i++) {
+        hSteam = FindSteamModule();
+        if (!hSteam) Sleep(500);
+    }
+
+    if (hSteam) {
+        auto pSteamUser  = (SteamAPI_SteamUser_t)            GetProcAddress(hSteam, "SteamAPI_SteamUser");
+        auto pGetSteamID = (SteamAPI_ISteamUser_GetSteamID_t) GetProcAddress(hSteam, "SteamAPI_ISteamUser_GetSteamID");
+
+        if (pSteamUser && pGetSteamID) {
+            void* pUser = nullptr;
+            for (int i = 0; i < 60 && !pUser; i++) { pUser = pSteamUser(); if (!pUser) Sleep(500); }
+            if (pUser) {
+                uint64_t id = pGetSteamID(pUser);
+                if (id) {
+                    char buf[32] = {};
+                    sprintf_s(buf, "%llu", (unsigned long long)id);
+                    printf("[OVS] SteamID from API: %s\n", buf);
+                    return std::string(buf);
+                }
+            }
+        }
+    }
+
+    // Fall back to loginusers.vdf
+    return ResolveSteamIDFromFile();
+}
+
+// ============================================================
+// Auto-update system — checks server for latest version,
+// downloads new .asi, renames old one, kills game to apply.
+// ============================================================
+
+static char g_UpdateDownloadUrl[512] = {};
+static char g_UpdateLatestVersion[64] = {};
+
+static int AutoUpdateHttpRequest(const char* host, int port, const char* path,
+                                  char* outBuf, int outBufSize)
+{
+    SOCKET sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (sock == INVALID_SOCKET) return -1;
+
+    DWORD timeout = 5000;
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
+    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (const char*)&timeout, sizeof(timeout));
+
+    struct sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons((u_short)port);
+    inet_pton(AF_INET, host, &addr.sin_addr);
+
+    if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) != 0)
+    {
+        closesocket(sock); return -1;
+    }
+
+    char request[512];
+    sprintf_s(request,
+        "GET %s HTTP/1.1\r\nHost: %s:%d\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        path, host, port);
+
+    if (send(sock, request, (int)strlen(request), 0) == SOCKET_ERROR)
+    {
+        closesocket(sock); return -1;
+    }
+
+    int totalRead = 0;
+    while (totalRead < outBufSize - 1)
+    {
+        int n = recv(sock, outBuf + totalRead, outBufSize - 1 - totalRead, 0);
+        if (n <= 0) break;
+        totalRead += n;
+    }
+    outBuf[totalRead] = '\0';
+    closesocket(sock);
+
+    char* body = strstr(outBuf, "\r\n\r\n");
+    if (!body) return -1;
+    body += 4;
+    int bodyLen = totalRead - (int)(body - outBuf);
+    memmove(outBuf, body, bodyLen + 1);
+    return bodyLen;
+}
+
+static bool AutoUpdateJsonGetString(const char* json, const char* key, char* out, int outSize)
+{
+    char pattern[128];
+    sprintf_s(pattern, "\"%s\"", key);
+    const char* pos = strstr(json, pattern);
+    if (!pos) return false;
+    pos += strlen(pattern);
+    while (*pos == ' ' || *pos == ':' || *pos == '\t') pos++;
+    if (*pos != '"') return false;
+    pos++;
+    int i = 0;
+    while (*pos && *pos != '"' && i < outSize - 1)
+        out[i++] = *pos++;
+    out[i] = '\0';
+    return i > 0;
+}
+
+static bool AutoUpdateParseUrl(const char* url, char* hostOut, int hostSize, int* portOut)
+{
+    const char* start = url;
+    if (strncmp(start, "http://", 7) == 0)       start += 7;
+    else if (strncmp(start, "https://", 8) == 0) start += 8;
+    const char* colon = strchr(start, ':');
+    const char* slash = strchr(start, '/');
+    if (colon && (!slash || colon < slash))
+    {
+        int hostLen = (int)(colon - start);
+        if (hostLen >= hostSize) return false;
+        memcpy(hostOut, start, hostLen);
+        hostOut[hostLen] = '\0';
+        *portOut = atoi(colon + 1);
+    }
+    else
+    {
+        int hostLen = slash ? (int)(slash - start) : (int)strlen(start);
+        if (hostLen >= hostSize) return false;
+        memcpy(hostOut, start, hostLen);
+        hostOut[hostLen] = '\0';
+        *portOut = 80;
+    }
+    return true;
+}
+
+static void DoPerformUpdate()
+{
+    printf("[AutoUpdate] Starting download from: %s\n", g_UpdateDownloadUrl);
+
+    char dllPath[MAX_PATH] = {};
+    GetModuleFileNameA(HookMetadata::CurrentDllModule, dllPath, MAX_PATH);
+    printf("[AutoUpdate] Current DLL: %s\n", dllPath);
+
+    char tempDir[MAX_PATH] = {};
+    GetTempPathA(MAX_PATH, tempDir);
+    char tempFile[MAX_PATH] = {};
+    sprintf_s(tempFile, "%sOpenVersus_update.asi", tempDir);
+
+    // Download via WinHTTP — works on both Windows and Proton/Steam Deck
+    {
+        wchar_t wHost[256] = {};
+        wchar_t wPath[512] = {};
+        INTERNET_PORT dlPort = 443;
+        bool dlHttps = false;
+
+        // Parse download URL into host/path/port
+        std::string dlUrl = g_UpdateDownloadUrl;
+        if (dlUrl.substr(0, 8) == "https://") { dlHttps = true; dlUrl = dlUrl.substr(8); }
+        else if (dlUrl.substr(0, 7) == "http://") { dlUrl = dlUrl.substr(7); }
+        size_t slash = dlUrl.find('/');
+        std::string dlHost = (slash != std::string::npos) ? dlUrl.substr(0, slash) : dlUrl;
+        std::string dlPathStr = (slash != std::string::npos) ? dlUrl.substr(slash) : "/";
+        size_t colon = dlHost.rfind(':');
+        if (colon != std::string::npos) {
+            try { dlPort = (INTERNET_PORT)std::stoi(dlHost.substr(colon + 1)); } catch (...) {}
+            dlHost = dlHost.substr(0, colon);
+        }
+        MultiByteToWideChar(CP_UTF8, 0, dlHost.c_str(), -1, wHost, 256);
+        MultiByteToWideChar(CP_UTF8, 0, dlPathStr.c_str(), -1, wPath, 512);
+
+        HINTERNET hSess = WinHttpOpen(L"OVS/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+            WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+        if (!hSess) { printf("[AutoUpdate] WinHttpOpen failed (%lu)\n", GetLastError()); return; }
+
+        HINTERNET hConn = WinHttpConnect(hSess, wHost, dlPort, 0);
+        if (!hConn) { WinHttpCloseHandle(hSess); printf("[AutoUpdate] WinHttpConnect failed\n"); return; }
+
+        DWORD flags = dlHttps ? WINHTTP_FLAG_SECURE : 0;
+        HINTERNET hReq = WinHttpOpenRequest(hConn, L"GET", wPath, nullptr,
+            WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, flags);
+        if (!hReq) { WinHttpCloseHandle(hConn); WinHttpCloseHandle(hSess); printf("[AutoUpdate] WinHttpOpenRequest failed\n"); return; }
+
+        if (!WinHttpSendRequest(hReq, WINHTTP_NO_ADDITIONAL_HEADERS, 0, nullptr, 0, 0, 0) ||
+            !WinHttpReceiveResponse(hReq, nullptr)) {
+            WinHttpCloseHandle(hReq); WinHttpCloseHandle(hConn); WinHttpCloseHandle(hSess);
+            printf("[AutoUpdate] Download request failed (%lu)\n", GetLastError());
+            return;
+        }
+
+        HANDLE hFile = CreateFileA(tempFile, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, nullptr);
+        if (hFile == INVALID_HANDLE_VALUE) {
+            WinHttpCloseHandle(hReq); WinHttpCloseHandle(hConn); WinHttpCloseHandle(hSess);
+            printf("[AutoUpdate] Failed to create temp file\n"); return;
+        }
+
+        DWORD totalWritten = 0;
+        DWORD bytesAvail = 0;
+        while (WinHttpQueryDataAvailable(hReq, &bytesAvail) && bytesAvail > 0) {
+            std::vector<char> buf(bytesAvail);
+            DWORD bytesRead = 0;
+            if (WinHttpReadData(hReq, buf.data(), bytesAvail, &bytesRead) && bytesRead > 0) {
+                DWORD written = 0;
+                WriteFile(hFile, buf.data(), bytesRead, &written, nullptr);
+                totalWritten += written;
+            }
+        }
+        CloseHandle(hFile);
+        WinHttpCloseHandle(hReq); WinHttpCloseHandle(hConn); WinHttpCloseHandle(hSess);
+        printf("[AutoUpdate] Downloaded %lu bytes to %s\n", totalWritten, tempFile);
+    }
+
+    HANDLE hFile = CreateFileA(tempFile, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+    if (hFile == INVALID_HANDLE_VALUE) {
+        printf("[AutoUpdate] Downloaded file not found\n");
+        return;
+    }
+    DWORD fileSize = GetFileSize(hFile, nullptr);
+    CloseHandle(hFile);
+    printf("[AutoUpdate] Downloaded %lu bytes\n", fileSize);
+
+    if (fileSize < 100000) {
+        printf("[AutoUpdate] File too small (%lu bytes), aborting\n", fileSize);
+        DeleteFileA(tempFile);
+        return;
+    }
+
+    char backupPath[MAX_PATH] = {};
+    sprintf_s(backupPath, "%s.bak", dllPath);
+    DeleteFileA(backupPath);
+
+    if (!MoveFileA(dllPath, backupPath)) {
+        printf("[AutoUpdate] Failed to rename current DLL to .bak (error %lu)\n", GetLastError());
+        DeleteFileA(tempFile);
+        return;
+    }
+    printf("[AutoUpdate] Renamed current DLL to .bak\n");
+
+    if (!MoveFileA(tempFile, dllPath)) {
+        printf("[AutoUpdate] Failed to move new DLL into place (error %lu)\n", GetLastError());
+        MoveFileA(backupPath, dllPath); // restore
+        return;
+    }
+
+    printf("[AutoUpdate] New DLL installed! Restarting game...\n");
+    Sleep(500);
+    TerminateProcess(GetCurrentProcess(), 0);
+}
+
+static void CheckForUpdate()
+{
+    if (SettingsMgr->szServerUrl.empty()) return;
+
+    char host[256] = {};
+    int port = 8000;
+    if (!AutoUpdateParseUrl(SettingsMgr->szServerUrl.c_str(), host, sizeof(host), &port)) {
+        printf("[AutoUpdate] Failed to parse server URL\n");
+        return;
+    }
+
+    char path[256];
+    sprintf_s(path, "/ovs/client-version?v=%s", OVS::OVS_Version);
+
+    char responseBuf[2048];
+    int bodyLen = AutoUpdateHttpRequest(host, port, path, responseBuf, sizeof(responseBuf));
+    if (bodyLen <= 0) {
+        printf("[AutoUpdate] Version check failed (no response)\n");
+        return;
+    }
+
+    char latestVersion[64] = {};
+    char downloadUrl[512] = {};
+    AutoUpdateJsonGetString(responseBuf, "latest_version", latestVersion, sizeof(latestVersion));
+    AutoUpdateJsonGetString(responseBuf, "download_url",   downloadUrl,   sizeof(downloadUrl));
+
+    printf("[AutoUpdate] Current: %s, Latest: %s\n", OVS::OVS_Version, latestVersion);
+
+    if (strstr(responseBuf, "\"is_latest\":true") || strstr(responseBuf, "\"is_latest\": true")) {
+        printf("[AutoUpdate] Already up to date\n");
+        return;
+    }
+
+    if (latestVersion[0] == '\0' || downloadUrl[0] == '\0') {
+        printf("[AutoUpdate] Missing version/URL in response, skipping\n");
+        return;
+    }
+
+    strncpy_s(g_UpdateLatestVersion, latestVersion, sizeof(g_UpdateLatestVersion) - 1);
+    strncpy_s(g_UpdateDownloadUrl,   downloadUrl,   sizeof(g_UpdateDownloadUrl)   - 1);
+
+    printf("[AutoUpdate] Update available (%s) — downloading automatically...\n", latestVersion);
+    DoPerformUpdate();
+}
+
+static DWORD WINAPI CheckForUpdateThread(LPVOID)
+{
+    Sleep(5000); // wait for game to settle before checking
+    CheckForUpdate();
+    return 0;
+}
+
+// ============================================================
+
+static void RegisterIdentity()
+{
+    if (!GEnvInfo) return;
+    if (SettingsMgr->szServerUrl.empty()) return;
+
+    // If SteamID wasn't set from env vars (Proton doesn't inject it),
+    // resolve it from the Steam API after SteamAPI_Init() completes.
+    if (GEnvInfo->SteamID == "Unknown" || GEnvInfo->SteamID.empty()) {
+        std::string apiId = ResolveSteamIDFromAPI();
+        if (!apiId.empty()) {
+            GEnvInfo->SteamID = apiId;
+            GEnvInfo->IsSteam = true;
+        }
+    }
+
+    std::string hardwareId = GEnvInfo->HardwareID;
+
+    std::string url = SettingsMgr->szServerUrl;
+    if (!url.empty() && url.back() == '/') url.pop_back();
+    url += "/api/identify";
+
+    std::string body = "{\"steamId\":\"" + GEnvInfo->SteamID
+        + "\",\"epicId\":\"" + GEnvInfo->EpicID
+        + "\",\"hardwareId\":\"" + hardwareId
+        + "\",\"clientVersion\":\"" + std::string(OVS::OVS_Version) + "\"}";
+
+    if (SettingsMgr->bDebug)
+    {
+        GEnvInfo->Print();
+    }
+
+    printf("[OVS] RegisterIdentity: %s\n", body.c_str());
+
+    bool ok = IsProton() ? PostViaWinHTTP(url, body) : PostViaWinInet(url, body);
+
+    if (ok) printf("[OVS] RegisterIdentity: done\n");
+    else    printf("[OVS] RegisterIdentity: failed\n");
+}
+
+static DWORD WINAPI RegisterIdentityThread(LPVOID)
+{
+    RegisterIdentity();
+    return 0;
+}
+
 bool OnInitializeHook()
 {
     FirstRunMgr->Init();
@@ -194,7 +724,7 @@ bool OnInitializeHook()
 
     if (!SettingsMgr->bAllowNonMVS && !(VerifyProcessName("MultiVersus-Win64-Shipping.exe") || VerifyProcessName("MultiVersus.exe") || VerifyProcessName("OVS.exe")))
     {
-        SpawnErrorBox("OVS only works with the original MVS steam game!");
+        SpawnError("OVS only works with the original MVS steam game!");
         return false;
     }
 
@@ -221,6 +751,9 @@ bool OnInitializeHook()
         MessageBoxA(0, "Freezing Game Until OK", ":)", MB_ICONINFORMATION);
     }
 
+    // Collect Steam/Epic identity and hardware fingerprint
+    GEnvInfo = new EnvInfo();
+
     // Hash Exe
     uint64_t EXEHash = HashTextSectionOfHost();
     CachedPatternsMgr->Init(EXEHash, CURRENT_HOOK_VERSION);
@@ -228,6 +761,12 @@ bool OnInitializeHook()
     ProcessSettings(); // Parse Settings
     PreGameHooks(); // Queue Blocker
     SpawnP2PServer();
+
+    // Register identity with OVS server — runs on a separate thread so it never blocks game launch
+    CreateThread(nullptr, 0, RegisterIdentityThread, nullptr, 0, nullptr);
+
+    // Check for DLL updates from the OVS server
+    CreateThread(nullptr, 0, CheckForUpdateThread, nullptr, 0, nullptr);
 
     return true;
 }

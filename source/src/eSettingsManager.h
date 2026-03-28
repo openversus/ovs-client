@@ -17,9 +17,6 @@ public:
     int	iLogLevel;
     bool bDebug;
     bool bAllowNonMVS;
-    bool bLoadDumper;
-    bool bRunDumperOnLoad;
-    std::string sDumperDLLPath;
 
 
     // Toggles

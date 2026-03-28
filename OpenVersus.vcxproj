@@ -33,6 +33,7 @@
     <ClInclude Include="source\detours.h" />
     <ClInclude Include="source\includes.h" />
     <ClInclude Include="source\IniReader.h" />
+    <ClInclude Include="source\src\EnvInfo.h" />
     <ClInclude Include="source\src\eSettingsManager.h" />
     <ClInclude Include="source\src\mvs.h" />
     <ClInclude Include="source\src\OpenVersus.h" />

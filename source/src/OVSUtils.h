@@ -140,9 +140,6 @@ void GetProcFromOpCode(uint64_t CallAddr, uint8_t JumpAddrSize, T** ProxyFuncPtr
 
 static void DummyVoidFunc() {}
 static void* DummyPtrFunc(...) {return nullptr;}
-bool RunDumper();
-bool RunDumper(HMODULE hModule);
-bool RunDumper(HMODULE hModule, bool useExported);
 
 
 namespace RegisterHacks {

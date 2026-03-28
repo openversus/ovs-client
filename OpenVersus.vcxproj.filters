@@ -113,6 +113,9 @@
     <ClInclude Include="source\detours.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="source\src\EnvInfo.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="README.md" />

@@ -671,33 +671,6 @@ namespace OVS::Hooks {
 
 };
 
-namespace OVS
-{
-    std::map<std::string, std::string> GetEnvVars()
-    {
-        std::map<std::string, std::string> envMap;
-        LPWCH envStrings = GetEnvironmentStringsW();
-        if (envStrings)
-        {
-            LPWCH current = envStrings;
-            while (*current)
-            {
-                std::wstring envEntry(current);
-                size_t pos = envEntry.find(L'=');
-                if (pos != std::wstring::npos)
-                {
-                    std::wstring key = envEntry.substr(0, pos);
-                    std::wstring value = envEntry.substr(pos + 1);
-                    envMap[std::string(key.begin(), key.end())] = std::string(value.begin(), value.end());
-                }
-                current += envEntry.size() + 1;
-            }
-            FreeEnvironmentStringsW(envStrings);
-        }
-        return envMap;
-    }
-}
-
 namespace OVS::Mods {
 
 }

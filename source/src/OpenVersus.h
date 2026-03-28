@@ -4,10 +4,6 @@
 #include <unordered_map>
 #include "mvs.h"
 #include "OVSUtils.h"
-#include <intrin.h>
-#include <shlobj_core.h>
-#include <KnownFolders.h>
-#include <filesystem>
 
 using namespace UE;
 
@@ -37,8 +33,6 @@ namespace OVS {
     };
 
     extern bool IsOVSUpdateRequired;
-
-    std::map<std::string, std::string> GetEnvVars();
 
     template<typename T>
     MVSGame::UMvsDialog* ShowDialog(const T* promptText, const T* description = nullptr, const T* button1 = nullptr, const T* button2 = nullptr, const T* button3 = nullptr, const int selectedButton = -1, bool ShowExitButton = false, bool ShowSpinner = false, bool ShowSolidBackground = true, bool HideActionBar = false);
@@ -119,80 +113,6 @@ namespace OVS {
     }
 }
 
-struct EnvInfo
-{
-    std::string GameVersion;
-    std::string BuildType;
-    std::string Platform;
-    std::string SteamID;
-    std::string GameID;
-    std::string AppID;
-    std::string EpicID;
-    std::string CpuIDAsString;
-    int CpuID[4];
-
-    bool IsSteam = false;
-    bool IsEpic = false;
-
-    EnvInfo()
-    {
-        GameVersion = "";
-        BuildType = "";
-        Platform = "";
-        SteamID = std::getenv("STEAMID") ? std::getenv("STEAMID") : "Unknown";
-        GameID = std::getenv("SteamGameId") ? std::getenv("SteamGameId") : "Unknown";
-        AppID = std::getenv("SteamAppId") ? std::getenv("SteamAppId") : "Unknown";
-        EpicID = GetEpicID();
-        std::fill(std::begin(CpuID), std::end(CpuID), 0);
-        __cpuid(CpuID, 0);
-        CpuIDAsString = CpuID[0] ? std::to_string(CpuID[0]) : "Unknown";
-
-        UpdatePlatforms();
-    }
-
-    void UpdatePlatforms()
-    {
-        IsSteam = (SteamID != "Unknown");
-        IsEpic = (SteamID != "Unknown");
-    }
-
-    std::string GetEpicID()
-    {
-        std::string EpicID = "Unknown";
-        PWSTR path = NULL;
-        HRESULT AppDataPathExists = SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, NULL, &path);
-        if (SUCCEEDED(AppDataPathExists))
-        {
-            std::wstring AppDataPath(path);
-            std::string AppDataPathStr(AppDataPath.begin(), AppDataPath.end());
-            std::string EpicIDFilePath = AppDataPathStr + "\\..\\Local\\EpicGamesLauncher\\Saved\\Data";
-            for (const auto& entry : std::filesystem::directory_iterator(EpicIDFilePath))
-            {
-                if (entry.is_regular_file())
-                {
-                    std::string filename = entry.path().filename().string();
-                    if (filename.find(".dat") != std::string::npos)
-                    {
-                        if (filename.length() < 32)
-                        {
-                            continue;
-                        }
-
-                        if (filename.find("_") != std::string::npos)
-                        {
-                            continue;
-                        }
-                        EpicID = filename.substr(0, 32);
-                    }
-                }
-            }
-
-        }
-
-        return EpicID;
-    }
-};
-
 namespace HookMetadata { //Namespace for helpers for game functions
     struct ActiveMods {
         bool bAntiSigCheck		= false;
@@ -202,8 +122,6 @@ namespace HookMetadata { //Namespace for helpers for game functions
         bool bUEFuncs			= false;
         bool bDialog			= false;
         bool bNotifs			= false;
-        bool bLoadDumper        = false;
-        bool bRunDumperOnLoad   = false;
     };
 
     struct LibMapsStruct {
