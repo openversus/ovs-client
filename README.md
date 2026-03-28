@@ -1,3 +1,16 @@
+# OpenVersus Mod Client
+
+This is the source repository of the OpenVersus client-side DLL, a fork based on the publicly-available original work of [thethiny](https://github.com/thethiny) and [multiversuskoth](https://github.com/multiversuskoth). The original repository is [located here](https://github.com/thethiny/MVSIASI/releases).
+
+The source code for the OpenVersus client-side DLL is available here, as well as prebuilt binary releases of the client. Binary releases are also maintained [in this repo](https://github.com/christopher-conley/openversus) for backward-compatibility.
+
+The current release is built with Visual Studio 2022 and 2026, using toolchain version 145. Opening the solution and building is all that's necessary at this point to locally build a version of the client. A more comprehensive `README` will be committed in the near future.
+
+
+The `README` file of the original source repository is as follows:
+
+---
+
 # MVSI Loader
 This will transform MVS game into MVS Infinite
 
