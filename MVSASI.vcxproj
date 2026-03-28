@@ -19,9 +19,9 @@
     <ClCompile Include="source\dllmain.cpp" />
     <ClCompile Include="source\IniReader.cpp" />
     <ClCompile Include="source\src\eSettingsManager.cpp" />
-    <ClCompile Include="source\src\mvs.cpp" />
-    <ClCompile Include="source\src\mvsi.cpp" />
-    <ClCompile Include="source\src\mvsutils.cpp" />
+    <ClCompile Include="source\src\MVS.cpp" />
+    <ClCompile Include="source\src\MVSUtils.cpp" />
+    <ClCompile Include="source\src\OpenVersus.cpp" />
     <ClCompile Include="source\utils\CPPython\pystring.cpp" />
     <ClCompile Include="source\utils\Patterns.cpp" />
     <ClCompile Include="source\utils\prettyprint.cpp" />
@@ -33,8 +33,8 @@
     <ClInclude Include="source\IniReader.h" />
     <ClInclude Include="source\src\eSettingsManager.h" />
     <ClInclude Include="source\src\mvs.h" />
-    <ClInclude Include="source\src\mvsi.h" />
-    <ClInclude Include="source\src\mvsiutils.h" />
+    <ClInclude Include="source\src\OpenVersus.h" />
+    <ClInclude Include="source\src\OVSUtils.h" />
     <ClInclude Include="source\src\EnvInfo.h" />
     <ClInclude Include="source\utils\CPPython\cppython.h" />
     <ClInclude Include="source\utils\CPPython\pystring.h" />
