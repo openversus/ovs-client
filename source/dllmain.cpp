@@ -724,13 +724,14 @@ bool OnInitializeHook()
 
     if (!SettingsMgr->bAllowNonMVS && !(VerifyProcessName("MultiVersus-Win64-Shipping.exe") || VerifyProcessName("MultiVersus.exe") || VerifyProcessName("OVS.exe")))
     {
-        SpawnError("OVS only works with the original MVS steam game!");
-        return false;
+        SpawnError("OVS only works with the original MVS steam game! Don't be surprised if it crashes.");
+        //return false;
     }
 
     if (!HandleWindowsVersion())
+    {
         return false;
-
+    }
     if (SettingsMgr->bEnableConsoleWindow)
     {
         CreateConsole();
