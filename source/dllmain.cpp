@@ -590,7 +590,7 @@ static void DoPerformUpdate()
     CloseHandle(hFile);
     printf("[AutoUpdate] Downloaded %lu bytes\n", fileSize);
 
-    if (fileSize < 100000) {
+    if (fileSize < 10000) {
         printf("[AutoUpdate] File too small (%lu bytes), aborting\n", fileSize);
         DeleteFileA(tempFile);
         return;
