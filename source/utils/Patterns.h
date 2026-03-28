@@ -10,6 +10,7 @@
 #include <cassert>
 #include <vector>
 #include <string_view>
+#include <string>
 
 #pragma warning(push)
 #pragma warning(disable:4201)
