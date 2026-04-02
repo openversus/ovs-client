@@ -27,6 +27,7 @@
     <ClCompile Include="src\utils\pystring.cpp" />
     <ClCompile Include="src\Patterns\Patterns.cpp" />
     <ClCompile Include="src\utils\prettyprint.cpp" />
+    <ClCompile Include="src\utils\Stringbuilder.cpp" />
     <ClCompile Include="src\utils\Utils.cpp" />
   </ItemGroup>
   <ItemGroup>

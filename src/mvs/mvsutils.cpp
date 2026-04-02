@@ -1,11 +1,14 @@
 #include "ovs/OpenVersus.h"
 #include "ovs/OVSUtils.h"
 #include "utils/prettyprint.h"
+#include "utils/Utils.hpp"
 #include <map>
+#include <cstdio>
 
 using namespace HookMetadata;
 using namespace Memory::VP;
 using namespace hook;
+using namespace OVS::Utils;
 
 LibMap IATable;
 
@@ -64,6 +67,16 @@ std::string toLower(std::string s)
     return new_string;
 }
 
+std::wstring toLower(std::wstring s)
+{
+    std::wstring new_string(L"");
+    for (int i = 0; i < s.length(); i++)
+    {
+        new_string += std::tolower(s[i]);
+    }
+    return new_string;
+}
+
 std::string toUpper(std::string s)
 {
     std::string new_string("");
@@ -74,10 +87,20 @@ std::string toUpper(std::string s)
     return new_string;
 }
 
-std::string GetFileName(std::string filename)
+std::wstring toUpper(std::wstring s)
 {
-    std::string basename;
-    size_t pos = filename.find_last_of("/\\"); // Or
+    std::wstring new_string(L"");
+    for (int i = 0; i < s.length(); i++)
+    {
+        new_string += std::toupper(s[i]);
+    }
+    return new_string;
+}
+
+std::wstring GetFileName(std::wstring filename)
+{
+    std::wstring basename;
+    size_t pos = filename.find_last_of(L"/\\"); // Or
     if (pos != -1)
     {
         basename = filename.substr(pos + 1);
@@ -86,25 +109,60 @@ std::string GetFileName(std::string filename)
     return filename;
 }
 
-std::string GetProcessName()
+std::wstring GetFileName(std::string filename)
 {
-    CHAR fileName[MAX_PATH + 1];
-    DWORD chars = GetModuleFileNameA(NULL, fileName, MAX_PATH + 1);
-    if (chars)
-    {
-        return GetFileName(std::string(fileName));
-    }
-    return "";
+    return GetFileName(ToWideStr(filename.c_str()));
 }
 
-std::string GetDirName()
+std::wstring GetFileNameW(std::wstring filename)
 {
-    CHAR fileName[MAX_PATH + 1];
-    DWORD chars = GetModuleFileNameA(NULL, fileName, MAX_PATH + 1);
+    return GetFileName(filename);
+}
+
+std::wstring GetFileNameW(std::string filename)
+{
+    return GetFileName(ToWideStr(filename.c_str()));
+}
+
+std::string GetFileNameA(std::wstring filename)
+{
+    return ToNarrowStr(GetFileName(filename).c_str());
+}
+
+std::string GetFileNameA(std::string filename)
+{
+    return GetFileNameA(ToWideStr(filename.c_str()));
+}
+
+std::wstring GetProcessName()
+{
+    WCHAR fileName[MAX_PATH + 1];
+    DWORD chars = GetModuleFileNameW(NULL, fileName, MAX_PATH + 1);
     if (chars)
     {
-        std::string basename;
-        std::string filename = std::string(fileName);
+        return GetFileName(fileName);
+    }
+    return L"";
+}
+
+std::string GetProcessNameA()
+{
+    return ToNarrowStr(GetProcessName().c_str());
+}
+
+std::wstring GetProcessNameW()
+{
+    return GetProcessName();
+}
+
+std::wstring GetDirName()
+{
+    WCHAR fileName[MAX_PATH + 1];
+    DWORD chars = GetModuleFileNameW(NULL, fileName, MAX_PATH + 1);
+    if (chars)
+    {
+        std::wstring basename;
+        std::wstring filename = std::wstring(fileName);
         size_t pos = filename.find_last_of('\\');
         if (pos != -1)
         {
@@ -113,7 +171,17 @@ std::string GetDirName()
         }
         return filename;
     }
-    return "";
+    return L"";
+}
+
+std::wstring GetDirNameW()
+{
+    return GetDirName();
+}
+
+std::string GetDirNameA()
+{
+    return ToNarrowStr(GetDirName().c_str());
 }
 
 HMODULE AwaitHModule(const char* name, uint64_t timeout)
@@ -127,14 +195,14 @@ HMODULE AwaitHModule(const char* name, uint64_t timeout)
             std::chrono::duration<double> now = std::chrono::system_clock::now() - start;
             if (now.count()*1000 > timeout)
             {
-                printf("No Handle %s\n", name);
+                wprintf(L"No Handle %s\n", std::wstring(name, name + strlen(name)).c_str());
                 return NULL;
             }
         }
         toAwait = GetModuleHandle(name);	
     }
     if (SettingsMgr->iLogLevel)
-        printf("Obtained Handle for %s\n", name);
+        wprintf(L"Obtained Handle for %s\n", std::wstring(name, name + strlen(name)).c_str());
     return toAwait;
 }
 
@@ -167,6 +235,7 @@ uint64_t* FindPattern(const char* pattern)
 uint64_t HookPattern(std::string Pattern, const char* PatternName, void* HookProc, int64_t PatternOffset, PatchTypeEnum PatchType, uint64_t PrePat, uint64_t* Entry)
 {
     uint64_t lpPattern;
+    std::wstring wPatternName(PatternName, PatternName + strlen(PatternName));
     if (PrePat)
     {
         lpPattern = PrePat;
@@ -174,14 +243,13 @@ uint64_t HookPattern(std::string Pattern, const char* PatternName, void* HookPro
     else
     {
         lpPattern = (uint64_t)FindPattern(GetModuleHandleA(NULL), Pattern);
-        std::wstring wPatternName(PatternName, PatternName + strlen(PatternName));
 
         if (lpPattern != NULL)
         {
             std::wstring wPattern(Pattern.begin(), Pattern.end());
             printfInfo(L"Searching for %s: %s", wPatternName.c_str(), wPattern.c_str());
             if (SettingsMgr->iLogLevel)
-                printfSuccess(L"%s Pattern found at %llx", wPatternName, lpPattern);
+                printfSuccess(L"%s Pattern found at %llx", wPatternName.c_str(), lpPattern);
         }
         else
         {
@@ -196,12 +264,12 @@ uint64_t HookPattern(std::string Pattern, const char* PatternName, void* HookPro
         uint64_t FuncEntry = GetDestinationFromOpCode(lpPattern + PatternOffset); // Already relative to game address so GetGameAddr is unnecessary
         *Entry = FuncEntry;
         if (SettingsMgr->iLogLevel)
-            printf("%s Function Entry found at %llx", PatternName, FuncEntry);
+            wprintf(L"%s Function Entry found at %llx", wPatternName.c_str(), FuncEntry);
     }
     
     uint64_t hook_address = lpPattern + PatternOffset;
     if (SettingsMgr->iLogLevel)
-        printf("Injecting at %llx", hook_address);
+        wprintf(L"Injecting at %llx", hook_address);
     InjectHook(hook_address, HookProc, PatchType);
     
     ResetColors();
@@ -518,7 +586,7 @@ namespace RegisterHacks {
     {
         if (bIsEnabled)
             return;
-        printf("Enabling Register Hack Functions\n");
+        wprintf(L"Enabling Register Hack Functions\n");
         uint8_t* CallSpace = new uint8_t[4*12 + 1]; // 12 is registers count, 1 is ret
         DWORD oldProtect;
         VirtualProtect(CallSpace, 4*12 + 1, PAGE_EXECUTE_READWRITE, &oldProtect);
@@ -592,13 +660,13 @@ uint64_t HashTextSectionOfHost()
             QueryPerformanceCounter(&end);
             double elapsedMs = (end.QuadPart - start.QuadPart) * 1000.0 / freq.QuadPart;
 
-            printf(".text hash: 0x%016llX | Time: %.3f ms\n", hash, elapsedMs);
+            wprintf(L".text hash: 0x%016llX | Time: %.3f ms\n", hash, elapsedMs);
             return hash;
         }
     }
 
     QueryPerformanceCounter(&end);
     double elapsedMs = (end.QuadPart - start.QuadPart) * 1000.0 / freq.QuadPart;
-    printf("Failed to find .text | Time: %.3f ms\n", elapsedMs);
+    wprintf(L"Failed to find .text | Time: %.3f ms\n", elapsedMs);
     return 0;
 }

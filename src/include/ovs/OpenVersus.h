@@ -4,13 +4,44 @@
 #include <unordered_map>
 #include "mvs/mvs.h"
 #include "ovs/OVSUtils.h"
+#include <string>
+#include <ostream>
+#include <map>
 
 using namespace UE;
 
 namespace OVS {
 
+    enum LogLevel
+    {
+        LOG_DEBUG,
+        LOG_INFO,
+        LOG_WARN,
+        LOG_ERROR,
+        LOG_CRITICAL
+    };
+
+    extern const wchar_t* WDEBUG_PREFIX;
+    extern const wchar_t* WINFO_PREFIX;
+    extern const wchar_t* WWARN_PREFIX;
+    extern const wchar_t* WERROR_PREFIX;
+    extern const wchar_t* WCRITICAL_PREFIX;
+
+    extern const wchar_t* INJECTOR_NAME;
+    extern const wchar_t* INJECTOR_VERSION;
+    extern const wchar_t* INJECTOR_DESCRIPTION;
+
+    extern std::map<LogLevel, std::wstring> LogPrefixMap;
+    extern std::map<LogLevel, std::wostream*> LogStreams;
+
     extern uint64_t EXEHash;
-    extern const wchar_t* OVS_Version;
+    inline constexpr const wchar_t* OVS_Version = L"2026.03.28";
+
+    inline const std::wstring& GetCurrentVersion()
+    {
+        static const std::wstring version(OVS::OVS_Version);
+        return version;
+    }
 
     namespace Proxies {
         //__int64									__fastcall	ReadFString(__int64, __int64);

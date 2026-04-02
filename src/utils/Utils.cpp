@@ -2,6 +2,8 @@
 #include "eSettingsManager/eSettingsManager.h"
 #include "utils/Utils.hpp"
 #include "utils/prettyprint.h"
+#include <exception>
+#include <iostream>
 #include <string>
 #include <sstream>
 #include <cstdlib>
@@ -12,6 +14,78 @@ using namespace OVS::Utils;
 
 namespace OVS::Utils
 {
+
+    template<typename CBuffer>
+    size_t GetSizeOfBuffer(const CBuffer* inputBuffer)
+    {
+        if (inputBuffer == nullptr)
+        {
+            return -1;
+        }
+        size_t BufferSize = 0;
+        while (inputBuffer[BufferSize] != static_cast<CBuffer>(0))
+        {
+            BufferSize++;
+            is_null_pointer_v<CBuffer>;
+        }
+        return BufferSize;
+    }
+
+    std::wstring GetTimeStampAsWString()
+    {
+        return GetTimeStampAsWString(std::chrono::system_clock::now());
+    }
+
+    std::wstring GetTimeStampAsWString(std::chrono::system_clock::time_point inputTime)
+    {
+        time_t tnow = std::chrono::system_clock::to_time_t(inputTime);
+        tm localtimeObject;
+        //auto localtimeObject = *localtime_s(&tnow);
+        localtime_s(&localtimeObject, &tnow);
+        wchar_t* tmpBuffer = new wchar_t[40];
+        wcsftime(tmpBuffer, 40, L"%Y-%m-%dT%H:%M:%S", &localtimeObject);
+        wstring timestamp(tmpBuffer);
+
+        size_t bufferSize = GetSizeOfBuffer(tmpBuffer);
+        wchar_t* returnObject = new wchar_t[bufferSize + 1];
+        wcsncpy_s(returnObject, bufferSize + 1, tmpBuffer, bufferSize);
+        wstring result = wstring(returnObject);
+
+        delete[] tmpBuffer;
+        delete[] returnObject;
+
+        return result;
+    }
+
+    // Core logging implementation - all Write* templates call this eventually
+    void WriteOutput(LogLevel loglevel, const wstring& message, bool addNL)
+    {
+        auto prefixIt = LogPrefixMap.find(loglevel);
+        auto streamIt = LogStreams.find(loglevel);
+        wstring prefix = (prefixIt != LogPrefixMap.end()) ? prefixIt->second : L"";
+
+        //switch (loglevel)
+        //{
+        //case LOG_INFO:
+        //case LOG_WARN:
+        //case LOG_CRITICAL:
+        //    prefix += L' ';
+        //    break;
+        //default:
+        //    break;
+        //}
+
+        wostream* stream = (streamIt != LogStreams.end()) ? streamIt->second : &std::wcout;
+        wstring outputText = prefix + L'[' + (GetTimeStampAsWString()) + L"]: " + message;
+
+        if (addNL)
+        {
+            outputText += L'\n';
+        }
+
+        (*stream) << outputText;
+    }
+
     // Overload for wide string pointers
     void DebugPrintWrapper(const wchar_t* message, const wchar_t* color)
     {
@@ -92,7 +166,7 @@ namespace OVS::Utils
     }
 
     int AutoUpdateHttpRequest(const wchar_t* whost, int port, const wchar_t* wpath,
-        char* outBuf, int outBufSize)
+        wchar_t* outBuf, int outBufSize)
     {
         SOCKET sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
         if (sock == INVALID_SOCKET) return -1;
@@ -130,30 +204,35 @@ namespace OVS::Utils
         }
 
         int totalRead = 0;
+        char* tmpBuf = new char[outBufSize];
         while (totalRead < outBufSize - 1)
         {
-            int n = recv(sock, outBuf + totalRead, outBufSize - 1 - totalRead, 0);
+            int n = recv(sock, tmpBuf + totalRead, outBufSize - 1 - totalRead, 0);
             if (n <= 0) break;
             totalRead += n;
         }
         outBuf[totalRead] = '\0';
         closesocket(sock);
 
-        char* body = strstr(outBuf, "\r\n\r\n");
+        char* body = strstr(tmpBuf, "\r\n\r\n");
         if (!body) return -1;
         body += 4;
-        int bodyLen = totalRead - (int)(body - outBuf);
-        memmove(outBuf, body, bodyLen + 1);
+        int bodyLen = totalRead - (int)(body - tmpBuf);
+        wchar_t* tmpBufW = new wchar_t[bodyLen + 1];
+        size_t convertedChars = 0;
+        mbstowcs_s(&convertedChars, tmpBufW, bodyLen + 1, body, bodyLen);
+        memmove(outBuf, tmpBufW, convertedChars * sizeof(wchar_t));
+        //memmove(outBuf, body, bodyLen + 1);
         return bodyLen;
     }
 
-    bool AutoUpdateJsonGetString(const char* json, const char* key, char* out, int outSize)
+    bool AutoUpdateJsonGetString(const wchar_t* json, const wchar_t* key, wchar_t* out, int outSize)
     {
-        char pattern[128];
-        sprintf_s(pattern, "\"%s\"", key);
-        const char* pos = strstr(json, pattern);
+        wchar_t pattern[128];
+        swprintf_s(pattern, sizeof(key), L"\"%s\"", key);
+        const wchar_t* pos = wcsstr(json, pattern);
         if (!pos) return false;
-        pos += strlen(pattern);
+        pos += wcslen(pattern);
         while (*pos == ' ' || *pos == ':' || *pos == '\t') pos++;
         if (*pos != '"') return false;
         pos++;
@@ -255,5 +334,91 @@ namespace OVS::Utils
         DebugPrintWrapper(debugStream.str(), ConsoleColors::YELLOW);
 
         return returnObject;
+    }
+
+    std::wstring ToWideStr(const char* str)
+    {
+        if (!str || *str == '\0')
+            return std::wstring();
+
+        int len = MultiByteToWideChar(CP_UTF8, 0, str, -1, nullptr, 0);
+        if (len <= 0)
+        {
+            return std::wstring();
+        }
+
+        std::wstring result(len - 1, L'\0');
+        MultiByteToWideChar(CP_UTF8, 0, str, -1, &result[0], len);
+        return result;
+    }
+
+    std::string ToNarrowStr(const wchar_t* str)
+    {
+        if (!str || *str == L'\0')
+        {
+            return std::string();
+        }
+
+        int len = WideCharToMultiByte(CP_UTF8, 0, str, -1, nullptr, 0, nullptr, nullptr);
+        if (len <= 0)
+            return std::string();
+
+        std::string result(len - 1, '\0');
+        WideCharToMultiByte(CP_UTF8, 0, str, -1, &result[0], len, nullptr, nullptr);
+        return result;
+    }
+
+    bool SetLocaleConfig()
+    {
+        try
+        {
+            char* current_locale_cstrI = std::setlocale(LC_ALL, nullptr);
+            std::string current_localeI = current_locale_cstrI ? current_locale_cstrI : "C";
+
+            wchar_t localeName[LOCALE_NAME_MAX_LENGTH];
+            int result = GetUserDefaultLocaleName(localeName, LOCALE_NAME_MAX_LENGTH);
+
+            if (result == 0)
+            {
+                // Failed to get user locale, fallback to "en-US"
+                wcscpy_s(localeName, L"en-US");
+            }
+
+            // Create the UTF-8 variant of the locale (e.g., "en-US.UTF-8")
+            std::wstring utf8_locale = std::wstring(localeName) + L".UTF-8";
+
+            // Set the UTF-8 variant of their actual locale and configure console for UTF-8
+            // for cross-platform compatibility (Windows, Proton, Steam Deck)
+            //_wsetlocale(LC_ALL, utf8_locale.c_str());
+            SetConsoleCP(CP_UTF8);
+            SetConsoleOutputCP(CP_UTF8);
+
+            //auto currentLocale = setlocale(LC_ALL, nullptr);
+            std::locale::global(std::locale("en_US.UTF-8"));
+            std::wclog.imbue(std::locale());
+            std::wcin.imbue(std::locale());
+            std::wcout.imbue(std::locale());
+            std::wcerr.imbue(std::locale());
+            std::clog.imbue(std::locale());
+            std::cin.imbue(std::locale());
+            std::cout.imbue(std::locale());
+            std::cerr.imbue(std::locale());
+
+            _free_locale(nullptr);
+
+
+            HANDLE conHandle = GetStdHandle(STD_OUTPUT_HANDLE);
+            DWORD conMode = 0;
+            GetConsoleMode(conHandle, &conMode);
+            conMode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+            SetConsoleMode(conHandle, conMode);
+
+            return true;
+        }
+        catch (const std::exception& e)
+        {
+            WriteError(L"Failed to set locale: " + ToWideStr(e.what()));
+            return false;
+        }
     }
 }

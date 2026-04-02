@@ -23,8 +23,7 @@
 namespace fs = std::filesystem;
 using namespace OVS::Utils;
 
-constexpr const wchar_t * CURRENT_HOOK_VERSION = L"2026.03.28";
-const wchar_t* OVS::OVS_Version = (const wchar_t*)CURRENT_HOOK_VERSION;
+std::wstring CURRENT_HOOK_VERSION = OVS::GetCurrentVersion();
 
 EnvInfo* GEnvInfo = nullptr;
 Trampoline* GameTramp, * User32Tramp;
@@ -47,7 +46,7 @@ LRESULT CALLBACK KeyboardProc(int code, WPARAM wParam, LPARAM lParam)
     {
         if (GetAsyncKeyState(VK_F1))
         {
-            printf("Attempting F1 action\n");
+            wprintf(L"Attempting F1 action\n");
             //OVS::ShowNotification("OVS Loaded", CURRENT_HOOK_VERSION, 10.f, true);
         }
 
@@ -65,6 +64,8 @@ void CreateConsole()
     freopen_s(&fNull, "CONOUT$", "w", stdout);
     freopen_s(&fNull, "CONOUT$", "w", stderr);
 
+    bool isUTF8 = SetLocaleConfig();
+
     std::wstring consoleName = L"OpenVersus Debug Console";
     SetConsoleTitleW(consoleName.c_str());
     HookMetadata::Console = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -74,7 +75,9 @@ void CreateConsole()
     SetConsoleMode(HookMetadata::Console, dwMode);
 
     printfCyan(L"OpenVersus - It's better than Parsec\n");
-    printfCyan(L"v%s\n\n", CURRENT_HOOK_VERSION);
+    //printfCyan(L"v%ls\n\n", CURRENT_HOOK_VERSION.c_str());
+    //printfCyan(L"v%ls\n\n", OVS::OVS_Version);
+    printfCyan(L"v%ls\n\n", L"2026.03.28");
     printfCyan(L"Binary releases available at: https://github.com/christopher-conley/OpenVersus\n");
     printfCyan(L"Source code and binary releases available at: https://github.com/openversus\n");
     printfCyan(L"Maintained by RosettaSt0ned and the MVS community\n");
@@ -89,7 +92,7 @@ void PreGameHooks()
 {
     GameTramp = Trampoline::MakeTrampoline(GetModuleHandle(nullptr));
     if (SettingsMgr->iLogLevel)
-        printf("Generated Trampolines\n");
+        wprintf(L"Generated Trampolines\n");
      IATable = ParsePEHeader();
 
 
@@ -162,7 +165,7 @@ bool HandleWindowsVersion()
 }
 
 inline bool VerifyProcessName(std::string expected_process) {
-    std::string process_name = GetProcessName();
+    std::string process_name = GetProcessNameA();
 
     for (size_t i = 0; i < process_name.length(); ++i) {
         process_name[i] = std::tolower(process_name[i]);
@@ -446,24 +449,24 @@ static std::wstring ResolveSteamIDFromAPI()
 // downloads new .asi, renames old one, kills game to apply.
 // ============================================================
 
-static char g_UpdateDownloadUrl[512] = {};
-static char g_UpdateLatestVersion[64] = {};
+static wchar_t g_UpdateDownloadUrl[512] = {};
+static wchar_t g_UpdateLatestVersion[64] = {};
 
 
 
 
 static void DoPerformUpdate()
 {
-    printf("[AutoUpdate] Starting download from: %s\n", g_UpdateDownloadUrl);
+    wprintf(L"[AutoUpdate] Starting download from: %ls\n", g_UpdateDownloadUrl);
 
-    char dllPath[MAX_PATH] = {};
-    GetModuleFileNameA(HookMetadata::CurrentDllModule, dllPath, MAX_PATH);
-    printf("[AutoUpdate] Current DLL: %s\n", dllPath);
+    wchar_t dllPath[MAX_PATH] = {};
+    GetModuleFileNameW(HookMetadata::CurrentDllModule, dllPath, MAX_PATH);
+    wprintf(L"[AutoUpdate] Current DLL: %s\n", dllPath);
 
-    char tempDir[MAX_PATH] = {};
-    GetTempPathA(MAX_PATH, tempDir);
-    char tempFile[MAX_PATH] = {};
-    sprintf_s(tempFile, "%sOpenVersus_update.asi", tempDir);
+    wchar_t tempDir[MAX_PATH] = {};
+    GetTempPathW(MAX_PATH, tempDir);
+    wchar_t tempFile[MAX_PATH] = {};
+    swprintf_s(tempFile, MAX_PATH, L"%sOpenVersus_update.asi", tempDir);
 
     // Download via WinHTTP — works on both Windows and Proton/Steam Deck
     {
@@ -473,43 +476,43 @@ static void DoPerformUpdate()
         bool dlHttps = false;
 
         // Parse download URL into host/path/port
-        std::string dlUrl = g_UpdateDownloadUrl;
-        if (dlUrl.substr(0, 8) == "https://") { dlHttps = true; dlUrl = dlUrl.substr(8); }
-        else if (dlUrl.substr(0, 7) == "http://") { dlUrl = dlUrl.substr(7); }
+        std::wstring dlUrl = g_UpdateDownloadUrl;
+        if (dlUrl.substr(0, 8) == L"https://") { dlHttps = true; dlUrl = dlUrl.substr(8); }
+        else if (dlUrl.substr(0, 7) == L"http://") { dlUrl = dlUrl.substr(7); }
         size_t slash = dlUrl.find('/');
-        std::string dlHost = (slash != std::string::npos) ? dlUrl.substr(0, slash) : dlUrl;
-        std::string dlPathStr = (slash != std::string::npos) ? dlUrl.substr(slash) : "/";
+        std::wstring dlHost = (slash != std::wstring::npos) ? dlUrl.substr(0, slash) : dlUrl;
+        std::wstring dlPathStr = (slash != std::wstring::npos) ? dlUrl.substr(slash) : L"/";
         size_t colon = dlHost.rfind(':');
-        if (colon != std::string::npos) {
+        if (colon != std::wstring::npos) {
             try { dlPort = (INTERNET_PORT)std::stoi(dlHost.substr(colon + 1)); } catch (...) {}
             dlHost = dlHost.substr(0, colon);
         }
-        MultiByteToWideChar(CP_UTF8, 0, dlHost.c_str(), -1, wHost, 256);
-        MultiByteToWideChar(CP_UTF8, 0, dlPathStr.c_str(), -1, wPath, 512);
+        //MultiByteToWideChar(CP_UTF8, 0, dlHost.c_str(), -1, wHost, 256);
+        //MultiByteToWideChar(CP_UTF8, 0, dlPathStr.c_str(), -1, wPath, 512);
 
         HINTERNET hSess = WinHttpOpen(L"OVS/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
             WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
-        if (!hSess) { printf("[AutoUpdate] WinHttpOpen failed (%lu)\n", GetLastError()); return; }
+        if (!hSess) { wprintf(L"[AutoUpdate] WinHttpOpen failed (%lu)\n", GetLastError()); return; }
 
         HINTERNET hConn = WinHttpConnect(hSess, wHost, dlPort, 0);
-        if (!hConn) { WinHttpCloseHandle(hSess); printf("[AutoUpdate] WinHttpConnect failed\n"); return; }
+        if (!hConn) { WinHttpCloseHandle(hSess); wprintf(L"[AutoUpdate] WinHttpConnect failed\n"); return; }
 
         DWORD flags = dlHttps ? WINHTTP_FLAG_SECURE : 0;
         HINTERNET hReq = WinHttpOpenRequest(hConn, L"GET", wPath, nullptr,
             WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, flags);
-        if (!hReq) { WinHttpCloseHandle(hConn); WinHttpCloseHandle(hSess); printf("[AutoUpdate] WinHttpOpenRequest failed\n"); return; }
+        if (!hReq) { WinHttpCloseHandle(hConn); WinHttpCloseHandle(hSess); wprintf(L"[AutoUpdate] WinHttpOpenRequest failed\n"); return; }
 
         if (!WinHttpSendRequest(hReq, WINHTTP_NO_ADDITIONAL_HEADERS, 0, nullptr, 0, 0, 0) ||
             !WinHttpReceiveResponse(hReq, nullptr)) {
             WinHttpCloseHandle(hReq); WinHttpCloseHandle(hConn); WinHttpCloseHandle(hSess);
-            printf("[AutoUpdate] Download request failed (%lu)\n", GetLastError());
+            wprintf(L"[AutoUpdate] Download request failed (%lu)\n", GetLastError());
             return;
         }
 
-        HANDLE hFile = CreateFileA(tempFile, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, nullptr);
+        HANDLE hFile = CreateFileW(tempFile, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, nullptr);
         if (hFile == INVALID_HANDLE_VALUE) {
             WinHttpCloseHandle(hReq); WinHttpCloseHandle(hConn); WinHttpCloseHandle(hSess);
-            printf("[AutoUpdate] Failed to create temp file\n"); return;
+            wprintf(L"[AutoUpdate] Failed to create temp file\n"); return;
         }
 
         DWORD totalWritten = 0;
@@ -525,42 +528,42 @@ static void DoPerformUpdate()
         }
         CloseHandle(hFile);
         WinHttpCloseHandle(hReq); WinHttpCloseHandle(hConn); WinHttpCloseHandle(hSess);
-        printf("[AutoUpdate] Downloaded %lu bytes to %s\n", totalWritten, tempFile);
+        wprintf(L"[AutoUpdate] Downloaded %lu bytes to %s\n", totalWritten, tempFile);
     }
 
-    HANDLE hFile = CreateFileA(tempFile, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+    HANDLE hFile = CreateFileW(tempFile, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
     if (hFile == INVALID_HANDLE_VALUE) {
-        printf("[AutoUpdate] Downloaded file not found\n");
+        wprintf(L"[AutoUpdate] Downloaded file not found\n");
         return;
     }
     DWORD fileSize = GetFileSize(hFile, nullptr);
     CloseHandle(hFile);
-    printf("[AutoUpdate] Downloaded %lu bytes\n", fileSize);
+    wprintf(L"[AutoUpdate] Downloaded %lu bytes\n", fileSize);
 
     if (fileSize < 10000) {
-        printf("[AutoUpdate] File too small (%lu bytes), aborting\n", fileSize);
-        DeleteFileA(tempFile);
+        wprintf(L"[AutoUpdate] File too small (%lu bytes), aborting\n", fileSize);
+        DeleteFileW(tempFile);
         return;
     }
 
-    char backupPath[MAX_PATH] = {};
-    sprintf_s(backupPath, "%s.bak", dllPath);
-    DeleteFileA(backupPath);
+    wchar_t backupPath[MAX_PATH] = {};
+    swprintf_s(backupPath, MAX_PATH, L"%s.bak", dllPath);
+    DeleteFileW(backupPath);
 
-    if (!MoveFileA(dllPath, backupPath)) {
-        printf("[AutoUpdate] Failed to rename current DLL to .bak (error %lu)\n", GetLastError());
-        DeleteFileA(tempFile);
+    if (!MoveFileW(dllPath, backupPath)) {
+        wprintf(L"[AutoUpdate] Failed to rename current DLL to .bak (error %lu)\n", GetLastError());
+        DeleteFileW(tempFile);
         return;
     }
-    printf("[AutoUpdate] Renamed current DLL to .bak\n");
+    wprintf(L"[AutoUpdate] Renamed current DLL to .bak\n");
 
-    if (!MoveFileA(tempFile, dllPath)) {
-        printf("[AutoUpdate] Failed to move new DLL into place (error %lu)\n", GetLastError());
-        MoveFileA(backupPath, dllPath); // restore
+    if (!MoveFileW(tempFile, dllPath)) {
+        wprintf(L"[AutoUpdate] Failed to move new DLL into place (error %lu)\n", GetLastError());
+        MoveFileW(backupPath, dllPath); // restore
         return;
     }
 
-    printf("[AutoUpdate] New DLL installed! Restarting game...\n");
+    wprintf(L"[AutoUpdate] New DLL installed! Restarting game...\n");
     Sleep(500);
     TerminateProcess(GetCurrentProcess(), 0);
 }
@@ -572,41 +575,41 @@ static void CheckForUpdate()
     std::wstring wUrl(SettingsMgr->szServerUrl.begin(), SettingsMgr->szServerUrl.end());
     ParsedURL parsed = OVS::Utils::AutoUpdateParseUrl(wUrl);
     if (!parsed.bParseSuccess) {
-        printf("[AutoUpdate] Failed to parse server URL\n");
+        wprintf(L"[AutoUpdate] Failed to parse server URL\n");
         return;
     }
 
     wchar_t path[256];
     swprintf_s(path, 256, L"/ovs/client-version?v=%s", OVS::OVS_Version);
 
-    char responseBuf[2048];
+    wchar_t responseBuf[2048];
     int bodyLen = OVS::Utils::AutoUpdateHttpRequest(parsed.Host.c_str(), _wtoi(parsed.Port.c_str()), path, responseBuf, sizeof(responseBuf));
     if (bodyLen <= 0) {
-        printf("[AutoUpdate] Version check failed (no response)\n");
+        wprintf(L"[AutoUpdate] Version check failed (no response)\n");
         return;
     }
 
-    char latestVersion[64] = {};
-    char downloadUrl[512] = {};
-    OVS::Utils::AutoUpdateJsonGetString(responseBuf, "latest_version", latestVersion, sizeof(latestVersion));
-    OVS::Utils::AutoUpdateJsonGetString(responseBuf, "download_url",   downloadUrl,   sizeof(downloadUrl));
+    wchar_t latestVersion[64] = {};
+    wchar_t downloadUrl[512] = {};
+    OVS::Utils::AutoUpdateJsonGetString(responseBuf, L"latest_version", latestVersion, sizeof(latestVersion));
+    OVS::Utils::AutoUpdateJsonGetString(responseBuf, L"download_url",   downloadUrl,   sizeof(downloadUrl));
 
-    wprintf(L"[AutoUpdate] Current: %ls, Latest: %hs\n", OVS::OVS_Version, latestVersion);
+    wprintf(L"[AutoUpdate] Current: %ls, Latest: %ls\n", OVS::OVS_Version, latestVersion);
 
-    if (strstr(responseBuf, "\"is_latest\":true") || strstr(responseBuf, "\"is_latest\": true")) {
-        printf("[AutoUpdate] Already up to date\n");
+    if (wcsstr(responseBuf, L"\"is_latest\":true") || wcsstr(responseBuf, L"\"is_latest\": true")) {
+        wprintf(L"[AutoUpdate] Already up to date\n");
         return;
     }
 
     if (latestVersion[0] == '\0' || downloadUrl[0] == '\0') {
-        printf("[AutoUpdate] Missing version/URL in response, skipping\n");
+        wprintf(L"[AutoUpdate] Missing version/URL in response, skipping\n");
         return;
     }
 
-    strncpy_s(g_UpdateLatestVersion, latestVersion, sizeof(g_UpdateLatestVersion) - 1);
-    strncpy_s(g_UpdateDownloadUrl,   downloadUrl,   sizeof(g_UpdateDownloadUrl)   - 1);
+    wcsncpy_s(g_UpdateLatestVersion, latestVersion, sizeof(g_UpdateLatestVersion) - 1);
+    wcsncpy_s(g_UpdateDownloadUrl,   downloadUrl,   sizeof(g_UpdateDownloadUrl)   - 1);
 
-    printf("[AutoUpdate] Update available (%s) — downloading automatically...\n", latestVersion);
+    wprintf(L"[AutoUpdate] Update available (%s) — downloading automatically...\n", latestVersion);
     DoPerformUpdate();
 }
 
@@ -638,10 +641,24 @@ static void RegisterIdentity()
     if (!url.empty() && url.back() == L'/') url.pop_back();
     url += L"/api/identify";
 
-    std::wstring body = L"{\"steamId\":\"" + GEnvInfo->SteamID
-        + L"\",\"epicId\":\"" + GEnvInfo->EpicID
-        + L"\",\"hardwareId\":\"" + GEnvInfo->HardwareID
-        + L"\",\"clientVersion\":\"" + std::wstring(OVS::OVS_Version) + L"\"}";
+    StringBuilder sb = L"{\"steamId\":\"";
+    sb.Append(GEnvInfo->SteamID)
+        .Append(L"\",\"epicId\":\"")
+        .Append(GEnvInfo->EpicID)
+        .Append(L"\",\"hardwareId\":\"")
+        .Append(GEnvInfo->HardwareID)
+        .Append(L"\",\"clientVersion\":\"")
+        .Append(OVS::OVS_Version)
+        .Append(L"\"}");
+
+    //std::wstring body = L"{\"steamId\":\"" + GEnvInfo->SteamID
+    //    + L"\",\"epicId\":\"" + GEnvInfo->EpicID
+    //    + L"\",\"hardwareId\":\"" + GEnvInfo->HardwareID
+    //    + L"\",\"clientVersion\":\"" + std::wstring(OVS::OVS_Version) + L"\"}";
+
+    std::wstring body = sb.ToString();
+
+    wprintf(L"Will send body to OVS server: %ls\n", body.c_str());
 
     if (SettingsMgr->bDebug)
     {
@@ -703,11 +720,11 @@ bool OnInitializeHook()
     // Hash Exe
     uint64_t EXEHash = HashTextSectionOfHost();
     // Convert version to narrow string for CachedPatternsMgr
-    int versionLen = WideCharToMultiByte(CP_UTF8, 0, CURRENT_HOOK_VERSION, -1, nullptr, 0, nullptr, nullptr);
+    int versionLen = WideCharToMultiByte(CP_UTF8, 0, CURRENT_HOOK_VERSION.c_str(), -1, nullptr, 0, nullptr, nullptr);
     std::string narrowVersion;
     if (versionLen > 0) {
         narrowVersion.resize(versionLen - 1);
-        WideCharToMultiByte(CP_UTF8, 0, CURRENT_HOOK_VERSION, -1, &narrowVersion[0], versionLen, nullptr, nullptr);
+        WideCharToMultiByte(CP_UTF8, 0, CURRENT_HOOK_VERSION.c_str(), -1, &narrowVersion[0], versionLen, nullptr, nullptr);
     }
     CachedPatternsMgr->Init(EXEHash, narrowVersion.c_str());
 

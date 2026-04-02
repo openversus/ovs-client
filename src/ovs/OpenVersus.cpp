@@ -1,10 +1,38 @@
+#include "utils/Utils.hpp"
 #include "ovs/OpenVersus.h"
 #include "utils/prettyprint.h"
+#include <string>
+#include <ostream>
 
 
 HookMetadata::ActiveMods			HookMetadata::sActiveMods;
 HookMetadata::LibMapsStruct			HookMetadata::sLFS;
 bool OVS::IsOVSUpdateRequired = false;
+
+namespace OVS
+{
+    const wchar_t* WDEBUG_PREFIX = L"\033[0m[\x1b[33mDBG\033[0m] ";
+    const wchar_t* WINFO_PREFIX = L"\033[0m[\x1b[32mNFO\033[0m] ";
+    const wchar_t* WWARN_PREFIX = L"\033[0m[\x1b[33mWRN\033[0m] ";
+    const wchar_t* WERROR_PREFIX = L"\033[0m[\x1b[31mERR\033[0m] ";
+    const wchar_t* WCRITICAL_PREFIX = L"\033[0m[\x1b[31m\x1b[5mCRT\x1b[25m\033[0m] ";
+
+    std::map<LogLevel, std::wstring> LogPrefixMap = {
+        { LOG_DEBUG, WDEBUG_PREFIX },
+        { LOG_INFO, WINFO_PREFIX },
+        { LOG_WARN, WWARN_PREFIX },
+        { LOG_ERROR, WERROR_PREFIX },
+        { LOG_CRITICAL, WCRITICAL_PREFIX }
+    };
+
+    std::map<LogLevel, std::wostream*> LogStreams = {
+        { LOG_DEBUG, &std::wclog },
+        { LOG_INFO, &std::wcout },
+        { LOG_WARN, &std::wcerr },
+        { LOG_ERROR, &std::wcerr },
+        { LOG_CRITICAL, &std::wcerr }
+    };
+}
 
 namespace OVS::Proxies {
 
@@ -33,11 +61,11 @@ namespace OVS::Proxies {
     }
 
     void __cdecl DummyPrint(uint64_t* a) {
-        printf("DUMMY PRINT! %p\n", a);
+        wprintf(L"DUMMY PRINT! %p\n", a);
     }
 
     void __cdecl TestCallback(uint64_t* a) {
-        printf("Test Callback! %p\n", a);
+        wprintf(L"Test Callback! %p\n", a);
     }
 
     MVSGame::UFighterGameInstance* CopyFighterInstance(MVSGame::UFighterGameInstance* t, uint64_t* a2)
@@ -269,7 +297,7 @@ namespace OVS::Hooks {
 
     bool DisableSignatureCheck(Trampoline* GameTramp)
     {
-        printf("\n==DisableSignatureCheck==\n");
+        wprintf(L"\n==DisableSignatureCheck==\n");
         if (SettingsMgr->pSigCheck.empty())
         {
             printfRed(L"pSigCheck Not Specified. Please Add Pattern to ini file!\n");
@@ -285,7 +313,7 @@ namespace OVS::Hooks {
 
         lpSigCheckPattern += 0x30;
         if (SettingsMgr->iLogLevel)
-            printf("SigCheck Pattern found at: %p\n", (uint64_t*)lpSigCheckPattern);
+            wprintf(L"SigCheck Pattern found at: %p\n", (uint64_t*)lpSigCheckPattern);
 
         // Old method
         //uint64_t CalledFuncAddr = GetDestinationFromOpCode(hook_address+7, 1, 5, 4);
@@ -308,7 +336,7 @@ namespace OVS::Hooks {
 
     bool PatchSunsetSetterIntoOVSChecker(Trampoline* GameTramp)
     {
-        printf("\n==Override Sunset Function==\n");
+        wprintf(L"\n==Override Sunset Function==\n");
         std::string pattern = SettingsMgr->pSunsetDate;
         if (pattern.empty())
         {
@@ -325,7 +353,7 @@ namespace OVS::Hooks {
 
         if (SettingsMgr->iLogLevel)
         {
-            printf("SunsetDate Pattern Found at: %p\n", (uint64_t*)lpPattern);
+            wprintf(L"SunsetDate Pattern Found at: %p\n", (uint64_t*)lpPattern);
         }
 
         MakeProxyFromOpCode(GameTramp, lpPattern + 7, (uint8_t)4, OVS::Proxies::OVSOfflineModeChecker, &MVSGame::Init_thread_header, PATCH_CALL);
@@ -339,10 +367,10 @@ namespace OVS::Hooks {
 
         if (SettingsMgr->iLogLevel)
         {
-            printf("Init_thread_header Function Found at: %p\n", MVSGame::Init_thread_header);
-            printf("Init_thread_footer Function Found at: %p\n", MVSGame::Init_thread_footer);
-            printf("FDateTime Function Found at: %p\n", MVSGame::FDateTime);
-            printf("SunsetDate Object Found at: %p\n", MVSGame::kSunsetDate);
+            wprintf(L"Init_thread_header Function Found at: %p\n", MVSGame::Init_thread_header);
+            wprintf(L"Init_thread_footer Function Found at: %p\n", MVSGame::Init_thread_footer);
+            wprintf(L"FDateTime Function Found at: %p\n", MVSGame::FDateTime);
+            wprintf(L"SunsetDate Object Found at: %p\n", MVSGame::kSunsetDate);
         }
                 
         // Jump to the cleanup function
@@ -375,7 +403,7 @@ namespace OVS::Hooks {
 
     bool OverrideProdEndpointsData(Trampoline* GameTramp)
     {
-        printf("\n==OverrideGameEndpointsData==\n");
+        wprintf(L"\n==OverrideGameEndpointsData==\n");
         std::string pattern = SettingsMgr->pProdEndpointLoader;
         if (pattern.empty())
         {
@@ -398,7 +426,7 @@ namespace OVS::Hooks {
 
         lpPattern += 0x0A;
         if (SettingsMgr->iLogLevel)
-            printf("ProdEndpointLoader Pattern Found at: %p\n", (uint64_t*)lpPattern);
+            wprintf(L"ProdEndpointLoader Pattern Found at: %p\n", (uint64_t*)lpPattern);
 
         MakeProxyFromOpCode(GameTramp, lpPattern, 4, OVS::Proxies::OverrideProdEndpoint, &MVSGame::SetFStringValue, PATCH_CALL);
 
@@ -408,7 +436,7 @@ namespace OVS::Hooks {
 
     bool OverrideGameEndpointsData(Trampoline* GameTramp)
     {
-        printf("\n==OverrideGameEndpointsData==\n");
+        wprintf(L"\n==OverrideGameEndpointsData==\n");
         std::string pattern = SettingsMgr->pEndpointLoader;
         if (pattern.empty())
         {
@@ -431,7 +459,7 @@ namespace OVS::Hooks {
 
         lpPattern += 0x0A;
         if (SettingsMgr->iLogLevel)
-            printf("EndpointLoader Pattern Found at: %p\n", (uint64_t*)lpPattern);
+            wprintf(L"EndpointLoader Pattern Found at: %p\n", (uint64_t*)lpPattern);
 
         MakeProxyFromOpCode(GameTramp, lpPattern, 4, OVS::Proxies::OverrideGameEndpoint, &MVSGame::GetEndpointKeyValue, PATCH_CALL);
 
@@ -441,7 +469,7 @@ namespace OVS::Hooks {
 
     bool DialogHooks(Trampoline* GameTramp)
     {
-        printf("\n==Dialog Funcs==\n");
+        wprintf(L"\n==Dialog Funcs==\n");
         if (!HookMetadata::sActiveMods.bUEFuncs)
         {
             printfError(L"UE Funcs were not enabled therefore Dialog cannot be used!");
@@ -467,9 +495,9 @@ namespace OVS::Hooks {
 
         if (SettingsMgr->iLogLevel)
         {
-            printf("Dialog Pattern Found at: %p\n", (uint64_t*)lpPattern);
-            printf("AddDialog at %p\n", MVSGame::UMvsFrontendManager::AddDialogPtr);
-            printf("FrontendManager at %p\n", MVSGame::GetFrontendManager);
+            wprintf(L"Dialog Pattern Found at: %p\n", (uint64_t*)lpPattern);
+            wprintf(L"AddDialog at %p\n", MVSGame::UMvsFrontendManager::AddDialogPtr);
+            wprintf(L"FrontendManager at %p\n", MVSGame::GetFrontendManager);
         }
 
         if (!SettingsMgr->pDialogParams.empty())
@@ -482,7 +510,7 @@ namespace OVS::Hooks {
 
                 if (SettingsMgr->iLogLevel)
                 {
-                    printf("DialogParams Pattern Found at: %p\n", (uint64_t*)lpPattern);
+                    wprintf(L"DialogParams Pattern Found at: %p\n", (uint64_t*)lpPattern);
                 }
 
             }
@@ -504,8 +532,8 @@ namespace OVS::Hooks {
 
         if (SettingsMgr->iLogLevel)
         {
-            printf("DialogCallback Pattern Found at: %p\n", (uint64_t*)lpPattern);
-            printf("DialogCallback at %p\n", MVSGame::SingleParamDialogCallbackSetter);
+            wprintf(L"DialogCallback Pattern Found at: %p\n", (uint64_t*)lpPattern);
+            wprintf(L"DialogCallback at %p\n", MVSGame::SingleParamDialogCallbackSetter);
         }
 
 
@@ -527,8 +555,8 @@ namespace OVS::Hooks {
 
                 if (SettingsMgr->iLogLevel)
                 {
-                    printf("QuitGameCallback Pattern Found at: %p\n", (uint64_t*)lpPattern);
-                    printf("QuitGameCallback at %p\n", MVSGame::QuitGame);
+                    wprintf(L"QuitGameCallback Pattern Found at: %p\n", (uint64_t*)lpPattern);
+                    wprintf(L"QuitGameCallback at %p\n", MVSGame::QuitGame);
                 }
             }
         }
@@ -541,7 +569,7 @@ namespace OVS::Hooks {
     {
         MVSGame::UMvsNotificationManager::GetNotifManagerPtr = (MVSGame::UMvsNotificationManager::GetNotifManagerType)GetGameAddr(0x1428B1D60);
 
-        printf("\n==Notification Funcs==\n");
+        wprintf(L"\n==Notification Funcs==\n");
         if (!HookMetadata::sActiveMods.bUEFuncs)
         {
             printfError(L"UE Funcs were not enabled therefore Notifications cannot be used!");
@@ -569,9 +597,9 @@ namespace OVS::Hooks {
 
         if (SettingsMgr->iLogLevel)
         {
-            printf("Notifications Pattern Found at: %p\n", (uint64_t*)lpPattern);
-            printf("ShowNotification at %p\n", MVSGame::UMvsNotificationManager::RequestShowNotificationPtr);
-            printf("NotificationManager at %p\n", MVSGame::UMvsNotificationManager::GetNotifManagerPtr);
+            wprintf(L"Notifications Pattern Found at: %p\n", (uint64_t*)lpPattern);
+            wprintf(L"ShowNotification at %p\n", MVSGame::UMvsNotificationManager::RequestShowNotificationPtr);
+            wprintf(L"NotificationManager at %p\n", MVSGame::UMvsNotificationManager::GetNotifManagerPtr);
         }
 
 
@@ -581,7 +609,7 @@ namespace OVS::Hooks {
 
     bool HookUEFuncs(Trampoline* GameTramp)
     {
-        printf("\n==UE Funcs==\n");
+        wprintf(L"\n==UE Funcs==\n");
         if (SettingsMgr->pFText.empty())
         {
             printfError(L"pFText Not Specified. Please Add Pattern to ini file!");
@@ -603,10 +631,10 @@ namespace OVS::Hooks {
 
         if (SettingsMgr->iLogLevel)
         {
-            printf("FText Pattern Found at: %p\n", (uint64_t*)lpPattern);
-            printf("FText::FromString at: %p\n", FText::FromString);
-            printf("FText::FromName at: %p\n", FText::FromName);
-            printf("FText::GetEmpty at: %p\n", FText::GetEmpty);
+            wprintf(L"FText Pattern Found at: %p\n", (uint64_t*)lpPattern);
+            wprintf(L"FText::FromString at: %p\n", FText::FromString);
+            wprintf(L"FText::FromName at: %p\n", FText::FromName);
+            wprintf(L"FText::GetEmpty at: %p\n", FText::GetEmpty);
         }
 
         // FName
@@ -626,7 +654,7 @@ namespace OVS::Hooks {
 
         if (SettingsMgr->iLogLevel)
         {
-            printf("CFName Pattern Found at: %p\n", (uint64_t*)lpPattern);
+            wprintf(L"CFName Pattern Found at: %p\n", (uint64_t*)lpPattern);
         }
 
         GetProcFromOpCode(lpPattern + 79, 4, &FName::FNameCharConstructor); // 0x142BB5FC0
@@ -644,15 +672,15 @@ namespace OVS::Hooks {
         }
         if (SettingsMgr->iLogLevel)
         {
-            printf("WCFname Pattern Found at: %p\n", (uint64_t*)lpPattern);
+            wprintf(L"WCFname Pattern Found at: %p\n", (uint64_t*)lpPattern);
         }
         FName::FNameWCharConstructor = (FName::FNameConstructorWCharType)GetGameAddr(lpPattern - 32); // 0x142BB6120
 
         if (SettingsMgr->iLogLevel)
         {
-            printf("FName::ToString at: %p\n", FName::ToStringPtr);
-            printf("FName::FName(char*) at: %p\n", FName::FNameCharConstructor);
-            printf("FName::FName(wchar_t*) at: %p\n", FName::FNameWCharConstructor);
+            wprintf(L"FName::ToString at: %p\n", FName::ToStringPtr);
+            wprintf(L"FName::FName(char*) at: %p\n", FName::FNameCharConstructor);
+            wprintf(L"FName::FName(wchar_t*) at: %p\n", FName::FNameWCharConstructor);
         }
 
         if (SettingsMgr->pFighterInstance.empty())
@@ -672,8 +700,8 @@ namespace OVS::Hooks {
 
         if (SettingsMgr->iLogLevel)
         {
-            printf("FighterInstance Pattern Found at: %p\n", (uint64_t*)lpPattern);
-            printf("FighterInstance Proxied from %p to %p\n", MVSGame::UFigherGameInstanceConst, OVS::Proxies::CopyFighterInstance);
+            wprintf(L"FighterInstance Pattern Found at: %p\n", (uint64_t*)lpPattern);
+            wprintf(L"FighterInstance Proxied from %p to %p\n", MVSGame::UFigherGameInstanceConst, OVS::Proxies::CopyFighterInstance);
         }
 
         printfSuccess(L"All Required UE Funcs Found!");
