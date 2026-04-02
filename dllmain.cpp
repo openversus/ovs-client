@@ -23,14 +23,14 @@
 namespace fs = std::filesystem;
 using namespace OVS::Utils;
 
-std::wstring CURRENT_HOOK_VERSION = OVS::GetCurrentVersion();
+static const std::wstring CURRENT_HOOK_VERSION = OVS::GetCurrentVersion();
 
 EnvInfo* GEnvInfo = nullptr;
 Trampoline* GameTramp, * User32Tramp;
 ConsoleColors debugColor = ConsoleColors::YELLOW;
 
 void CreateConsole();
-void SpawnError(const char*);
+void SpawnError(const wchar_t* msg);
 void PreGameHooks();
 void ProcessSettings();
 bool OnInitializeHook();
@@ -75,9 +75,7 @@ void CreateConsole()
     SetConsoleMode(HookMetadata::Console, dwMode);
 
     printfCyan(L"OpenVersus - It's better than Parsec\n");
-    //printfCyan(L"v%ls\n\n", CURRENT_HOOK_VERSION.c_str());
-    //printfCyan(L"v%ls\n\n", OVS::OVS_Version);
-    printfCyan(L"v%ls\n\n", L"2026.03.28");
+    printfCyan(L"v%ls\n\n", CURRENT_HOOK_VERSION.c_str());
     printfCyan(L"Binary releases available at: https://github.com/christopher-conley/OpenVersus\n");
     printfCyan(L"Source code and binary releases available at: https://github.com/openversus\n");
     printfCyan(L"Maintained by RosettaSt0ned and the MVS community\n");
@@ -140,9 +138,9 @@ void ProcessSettings()
     printfCyan(L"Parsed Settings\n");
 }
 
-void SpawnError(const char* msg)
+void SpawnError(const wchar_t* msg)
 {
-    MessageBoxA(NULL, msg, "OpenVersus", MB_ICONEXCLAMATION);
+    MessageBoxW(NULL, msg, L"OpenVersus", MB_ICONEXCLAMATION);
 }
 
 bool HandleWindowsVersion()
@@ -154,18 +152,18 @@ bool HandleWindowsVersion()
 
     if (IsWindows7SP1OrGreater())
     {
-        SpawnError("OVS doesn't officially support Windows 8 or 7 SP1. It may misbehave.");
+        SpawnError(L"OVS doesn't officially support Windows 8 or 7 SP1. It may misbehave.");
         return true;
     }
 
-    SpawnError("OVS doesn't support Windows 7 or Earlier. Might not work.");
+    SpawnError(L"OVS doesn't support Windows 7 or Earlier. Might not work.");
     return true;
 
 
 }
 
-inline bool VerifyProcessName(std::string expected_process) {
-    std::string process_name = GetProcessNameA();
+inline bool VerifyProcessName(std::wstring expected_process) {
+    std::wstring process_name = GetProcessNameW();
 
     for (size_t i = 0; i < process_name.length(); ++i) {
         process_name[i] = std::tolower(process_name[i]);
@@ -684,9 +682,9 @@ bool OnInitializeHook()
     FirstRunMgr->Init();
     SettingsMgr->Init();
 
-    if (!SettingsMgr->bAllowNonMVS && !(VerifyProcessName("MultiVersus-Win64-Shipping.exe") || VerifyProcessName("MultiVersus.exe") || VerifyProcessName("OVS.exe")))
+    if (!SettingsMgr->bAllowNonMVS && !(VerifyProcessName(L"MultiVersus-Win64-Shipping.exe") || VerifyProcessName(L"MultiVersus.exe") || VerifyProcessName(L"OVS.exe")))
     {
-        SpawnError("OVS only works with the original MVS steam game! Don't be surprised if it crashes.");
+        SpawnError(L"OVS only works with the original MVS steam game! Don't be surprised if it crashes.");
         //return false;
     }
 
@@ -703,15 +701,15 @@ bool OnInitializeHook()
     {
         if (!(HookMetadata::KeyboardProcHook = SetWindowsHookEx(WH_KEYBOARD, KeyboardProc, HookMetadata::CurrentDllModule, GetCurrentThreadId())))
         {
-            char x[100];
-            sprintf(x, "Failed To Hook Keyboard FN: 0x%X", GetLastError());
-            MessageBox(NULL, x, "Error", MB_ICONERROR);
+            wchar_t x[100];
+            wsprintfW(x, L"Failed To Hook Keyboard FN: 0x%X", GetLastError());
+            MessageBoxW(NULL, x, L"Error", MB_ICONERROR);
         }
     }
 
     if (SettingsMgr->bPauseOnStart)
     {
-        MessageBoxA(0, "Freezing Game Until OK", ":)", MB_ICONINFORMATION);
+        MessageBoxW(0, L"Freezing Game Until OK", L":)", MB_ICONINFORMATION);
     }
 
     // Collect Steam/Epic identity and hardware fingerprint

@@ -35,7 +35,7 @@ namespace OVS {
     extern std::map<LogLevel, std::wostream*> LogStreams;
 
     extern uint64_t EXEHash;
-    inline constexpr const wchar_t* OVS_Version = L"2026.03.28";
+    inline constexpr const wchar_t* OVS_Version = L"2026.04.02";
 
     inline const std::wstring& GetCurrentVersion()
     {
