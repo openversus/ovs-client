@@ -56,7 +56,7 @@ namespace hook
 	private:
 		static ptrdiff_t get_process_base();
 
-		void Initialize(std::string_view pattern);
+		void Initialize(std::wstring_view pattern);
 
 		bool ConsiderHint(uintptr_t offset);
 
@@ -78,19 +78,19 @@ namespace hook
 		}
 
 	public:
-		explicit pattern(std::string_view pattern)
+		explicit pattern(std::wstring_view pattern)
 			: pattern(get_process_base())
 		{
 			Initialize(std::move(pattern));
 		}
 
-		inline pattern(void* module, std::string_view pattern)
+		inline pattern(void* module, std::wstring_view pattern)
 			: pattern(reinterpret_cast<uintptr_t>(module))
 		{
 			Initialize(std::move(pattern));
 		}
 
-		inline pattern(uintptr_t begin, uintptr_t end, std::string_view pattern)
+		inline pattern(uintptr_t begin, uintptr_t end, std::wstring_view pattern)
 			: m_rangeStart(begin), m_rangeEnd(end)
 		{
 			Initialize(std::move(pattern));
@@ -171,18 +171,18 @@ namespace hook
 #endif
 	};
 
-	inline pattern make_module_pattern(void* module, std::string_view bytes)
+	inline pattern make_module_pattern(void* module, std::wstring_view bytes)
 	{
 		return pattern(module, std::move(bytes));
 	}
 
-	inline pattern make_range_pattern(uintptr_t begin, uintptr_t end, std::string_view bytes)
+	inline pattern make_range_pattern(uintptr_t begin, uintptr_t end, std::wstring_view bytes)
 	{
 		return pattern(begin, end, std::move(bytes));
 	}
 
 	template<typename T = void>
-	inline auto get_pattern(std::string_view pattern_string, ptrdiff_t offset = 0)
+	inline auto get_pattern(std::wstring_view pattern_string, ptrdiff_t offset = 0)
 	{
 		return pattern(std::move(pattern_string)).get_first<T>(offset);
 	}

@@ -22,11 +22,11 @@ int64 GetGameEntryPoint()
 
 int64 GetUser32EntryPoint()
 {
-    static __int64 addr = reinterpret_cast<__int64>(GetModuleHandle("user32.dll"));
+    static __int64 addr = reinterpret_cast<__int64>(GetModuleHandle(L"user32.dll"));
     return addr;
 }
 
-int64 GetModuleEntryPoint(const char* name)
+int64 GetModuleEntryPoint(const wchar_t* name)
 {
     static __int64 addr = reinterpret_cast<__int64>(GetModuleHandle(name));
     return addr;
@@ -49,7 +49,7 @@ int64 GetUser32Addr(__int64 addr)
     return GetUser32EntryPoint() + addr;
 }
 
-int64 GetModuleAddr(__int64 addr, const char* name)
+int64 GetModuleAddr(__int64 addr, const wchar_t* name)
 {
     return GetModuleEntryPoint(name) + addr;
 }
@@ -134,6 +134,62 @@ std::string GetFileNameA(std::string filename)
     return GetFileNameA(ToWideStr(filename.c_str()));
 }
 
+std::wstring GetFileNameWithoutExt(std::wstring filename)
+{
+    std::wstring basename = GetFileName(filename);
+    size_t pos = basename.find_last_of(L'.');
+    if (pos != -1)
+    {
+        return basename.substr(0, pos);
+    }
+    return basename;
+}
+
+std::wstring GetFileNameWithoutExtW(std::string filename)
+{
+    return GetFileNameWithoutExt(ToWideStr(filename.c_str()));
+}
+
+std::wstring GetFileNameWithoutExtW(std::wstring filename)
+{
+    return GetFileNameWithoutExt(filename);
+}
+
+std::string GetFileNameWithoutExtA(std::string filename)
+{
+    return ToNarrowStr(GetFileNameWithoutExt(ToWideStr(filename.c_str())).c_str());
+}
+
+std::string GetFileNameWithoutExtA(std::wstring filename)
+{
+    return ToNarrowStr(GetFileNameWithoutExt(filename).c_str());
+}
+
+std::wstring GetFileBaseName(std::wstring filename)
+{
+    return GetFileNameWithoutExt(GetFileName(filename));
+}
+
+std::wstring GetFileBaseNameW(std::wstring filename)
+{
+    return GetFileBaseName(filename);
+}
+
+std::wstring GetFileBaseNameW(std::string filename)
+{
+    return GetFileBaseName(ToWideStr(filename.c_str()));
+}
+
+std::string GetFileBaseNameA(std::wstring filename)
+{
+    return ToNarrowStr(GetFileBaseName(filename).c_str());
+}
+
+std::string GetFileBaseNameA(std::string filename)
+{
+    return GetFileBaseNameA(ToWideStr(filename.c_str()));
+}
+
 std::wstring GetProcessName()
 {
     WCHAR fileName[MAX_PATH + 1];
@@ -174,9 +230,29 @@ std::wstring GetDirName()
     return L"";
 }
 
+std::wstring GetDirName(HMODULE hModule)
+{
+    WCHAR fileName[MAX_PATH + 1];
+    DWORD chars = GetModuleFileNameW(hModule, fileName, MAX_PATH + 1);
+    if (chars)
+    {
+        std::wstring filename = std::wstring(fileName);
+        size_t pos = filename.find_last_of('\\');
+        if (pos != std::wstring::npos)
+            return filename.substr(0, pos);
+        return filename;
+    }
+    return L"";
+}
+
 std::wstring GetDirNameW()
 {
     return GetDirName();
+}
+
+std::wstring GetDirNameW(HMODULE hModule)
+{
+    return GetDirName(hModule);
 }
 
 std::string GetDirNameA()
@@ -184,7 +260,12 @@ std::string GetDirNameA()
     return ToNarrowStr(GetDirName().c_str());
 }
 
-HMODULE AwaitHModule(const char* name, uint64_t timeout)
+std::string GetDirNameA(HMODULE hModule)
+{
+    return ToNarrowStr(GetDirName(hModule).c_str());
+}
+
+HMODULE AwaitHModule(const wchar_t* name, uint64_t timeout)
 {
     HMODULE toAwait = NULL;
     auto start = std::chrono::system_clock::now();
@@ -195,14 +276,14 @@ HMODULE AwaitHModule(const char* name, uint64_t timeout)
             std::chrono::duration<double> now = std::chrono::system_clock::now() - start;
             if (now.count()*1000 > timeout)
             {
-                wprintf(L"No Handle %s\n", std::wstring(name, name + strlen(name)).c_str());
+                wprintf(L"No Handle %s\n", std::wstring(name, name + wcslen(name)).c_str());
                 return NULL;
             }
         }
         toAwait = GetModuleHandle(name);	
     }
     if (SettingsMgr->iLogLevel)
-        wprintf(L"Obtained Handle for %s\n", std::wstring(name, name + strlen(name)).c_str());
+        wprintf(L"Obtained Handle for %s\n", std::wstring(name, name + wcslen(name)).c_str());
     return toAwait;
 }
 
@@ -212,7 +293,7 @@ uint64_t stoui64h(std::string szString)
 }
 
 
-uint64_t* FindPattern(void* handle, std::string_view bytes)
+uint64_t* FindPattern(void* handle, std::wstring_view bytes)
 {
     hook::pattern pCamPattern = hook::make_module_pattern(handle, bytes); // Make pattern external
     if (!pCamPattern.count_hint(1).empty())
@@ -222,27 +303,27 @@ uint64_t* FindPattern(void* handle, std::string_view bytes)
     return nullptr;
 }
 
-uint64_t* FindPattern(std::string pattern)
+uint64_t* FindPattern(std::wstring pattern)
 {
-    return FindPattern(GetModuleHandleA(NULL), pattern);
+    return FindPattern(GetModuleHandleW(NULL), pattern);
 }
 
-uint64_t* FindPattern(const char* pattern)
+uint64_t* FindPattern(const wchar_t* pattern)
 {
-    return FindPattern(std::string(pattern));
+    return FindPattern(std::wstring(pattern));
 }
 
-uint64_t HookPattern(std::string Pattern, const char* PatternName, void* HookProc, int64_t PatternOffset, PatchTypeEnum PatchType, uint64_t PrePat, uint64_t* Entry)
+uint64_t HookPattern(std::wstring Pattern, const wchar_t* PatternName, void* HookProc, int64_t PatternOffset, PatchTypeEnum PatchType, uint64_t PrePat, uint64_t* Entry)
 {
     uint64_t lpPattern;
-    std::wstring wPatternName(PatternName, PatternName + strlen(PatternName));
+    std::wstring wPatternName(PatternName, PatternName + wcslen(PatternName));
     if (PrePat)
     {
         lpPattern = PrePat;
     }
     else
     {
-        lpPattern = (uint64_t)FindPattern(GetModuleHandleA(NULL), Pattern);
+        lpPattern = (uint64_t)FindPattern(GetModuleHandleW(NULL), Pattern);
 
         if (lpPattern != NULL)
         {
@@ -332,7 +413,7 @@ uint64_t GetDestinationFromOpCode(uint64_t Caller, uint64_t Offset, uint64_t Fun
     return uint64_t(Caller + offset) + FuncLen;
 }
 
-void SetCheatPattern(std::string pattern, std::string name, uint64_t** lpPattern)
+void SetCheatPattern(std::wstring pattern, std::wstring name, uint64_t** lpPattern)
 {
     if (!pattern.empty())
     {
@@ -342,7 +423,7 @@ void SetCheatPattern(std::string pattern, std::string name, uint64_t** lpPattern
             std::wstring wPattern(pattern.begin(), pattern.end());
             printfInfo(L"Searching for %s: %s", wName.c_str(), wPattern.c_str());
         }
-        *lpPattern = FindPattern(GetModuleHandleA(NULL), pattern);
+        *lpPattern = FindPattern(GetModuleHandleW(NULL), pattern);
 
         std::wstring wName(name.begin(), name.end());
         if (*lpPattern != nullptr)
@@ -361,10 +442,10 @@ void SetCheatPattern(std::string pattern, std::string name, uint64_t** lpPattern
 
 LibMap ParsePEHeader()
 {
-    PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)GetModuleHandleA(NULL);
+    PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)GetModuleHandleW(NULL);
     PIMAGE_NT_HEADERS pNTHeader = (PIMAGE_NT_HEADERS)RVAtoLP((PBYTE)pDosHeader, pDosHeader->e_lfanew);
     if (pNTHeader->Signature != IMAGE_NT_SIGNATURE)
-        RaiseException("NT Signature Failed!", -1); // Not an EXE
+        RaiseException(L"NT Signature Failed!", -1); // Not an EXE
 
     LibMap IAT{};
 
@@ -372,7 +453,7 @@ LibMap ParsePEHeader()
 
     for (int i = 0; pImportDesc[i].Characteristics != 0; i++)
     {
-        std::string szLibrary = (char*)RVAtoLP(pDosHeader, pImportDesc[i].Name);
+        std::wstring szLibrary = (wchar_t*)RVAtoLP(pDosHeader, pImportDesc[i].Name);
         if (!pImportDesc[i].FirstThunk || !pImportDesc[i].OriginalFirstThunk)
             continue;
 
@@ -388,10 +469,10 @@ LibMap ParsePEHeader()
 
             PIMAGE_IMPORT_BY_NAME import = (PIMAGE_IMPORT_BY_NAME)RVAtoLP(pDosHeader, pOrigThunk->u1.AddressOfData);
 
-            std::string FuncName = (char*)import->Name;
+            std::wstring FuncName = (wchar_t*)import->Name;
             FunctionsMap[FuncName] = pThunk->u1.Function;
         }
-        std::string szLibraryStoreName = toLower(szLibrary);
+        std::wstring szLibraryStoreName = toLower(szLibrary);
         IAT[szLibraryStoreName] = FunctionsMap;
     }
 
@@ -399,44 +480,44 @@ LibMap ParsePEHeader()
 
 }
 
-int StringToVK(std::string sKey)
+int StringToVK(std::wstring sKey)
 {
     for (auto& c : sKey) c = toupper(c); // To Upper sKey
 
-    if (sKey == "SHIFT")
+    if (sKey == L"SHIFT")
     {
         return VK_SHIFT;
     }
 
-    if (sKey == "TAB")
+    if (sKey == L"TAB")
     {
         return VK_TAB;
     }
 
-    if (sKey == "SPACE")
+    if (sKey == L"SPACE")
     {
         return VK_SPACE;
     }
 
-    if (sKey == "ALT")
+    if (sKey == L"ALT")
     {
         return VK_MENU;
     }
 
-    if (sKey.substr(0, 6) == "NUMPAD") // Numpad
+    if (sKey.substr(0, 6) == L"NUMPAD") // Numpad
     {
-        char cLast = sKey[6];
+        wchar_t cLast = sKey[6];
         switch (cLast)
         {
-        case '+':
+        case L'+':
             return VK_ADD;
-        case '-':
+        case L'-':
             return VK_SUBTRACT;
-        case 'E': //NUMPAD Enter
+        case L'E': //NUMPAD Enter
             return VK_RETURN;
-        case '*':
+        case L'*':
             return VK_MULTIPLY;
-        case '/':
+        case L'/':
             return VK_DIVIDE;
         default:
             return cLast + 0x30; // NUMPAD Number
@@ -445,41 +526,41 @@ int StringToVK(std::string sKey)
     }
     if (sKey.length() == 1)
     {
-        if (sKey[0] >= '0' && sKey[0] <= 'Z' && sKey[0] != 0x40) // Letter or Number. 0x40 is not available which is @
+        if (sKey[0] >= L'0' && sKey[0] <= L'Z' && sKey[0] != 0x40) // Letter or Number. 0x40 is not available which is @
             return sKey[0]; // Letters and Numbers' VK are their ASCII Repr
-        if (sKey[0] == '/' || sKey[0] == '?')
+        if (sKey[0] == L'/' || sKey[0] == L'?')
             return VK_OEM_2;
-        if (sKey[0] == '-')
+        if (sKey[0] == L'-')
             return VK_OEM_MINUS;
-        if (sKey[0] == '+')
+        if (sKey[0] == L'+')
             return VK_OEM_PLUS;
-        if (sKey[0] == '`' || sKey[0] == '~')
+        if (sKey[0] == L'`' || sKey[0] == L'~')
             return VK_OEM_3;
     }
 
-    if (sKey[0] == 'F' && sKey.length() > 1 && sKey.length() <= 3) // F1-F12 buttons
+    if (sKey[0] == L'F' && sKey.length() > 1 && sKey.length() <= 3) // F1-F12 buttons
     {
-        std::string digits = sKey.substr(1, sKey.length() - 1).c_str();
+        std::wstring digits = sKey.substr(1, sKey.length() - 1).c_str();
         return std::stoi(digits.c_str()) + 0x70 - 1;
     }
 
     // Arrows
-    if (sKey == "DOWN")
+    if (sKey == L"DOWN")
         return VK_DOWN;
-    if (sKey == "UP")
+    if (sKey == L"UP")
         return VK_UP;
-    if (sKey == "LEFT")
+    if (sKey == L"LEFT")
         return VK_LEFT;
-    if (sKey == "RIGHT")
+    if (sKey == L"RIGHT")
         return VK_RIGHT;
 
-    RaiseException("Button Binding Unsupported!");
+    RaiseException(L"Button Binding Unsupported!");
 }
 
-void RaiseException(const char* Message, int64_t ErrorCode)
+void RaiseException(const wchar_t* Message, int64_t ErrorCode)
 {
-    std::string ErrorMessage = "Error: " + std::string(Message);
-    MessageBoxA(0, ErrorMessage.c_str(), "Error", MB_ICONERROR);
+    std::wstring ErrorMessage = L"Error: " + std::wstring(Message);
+    MessageBoxW(0, ErrorMessage.c_str(), L"Error", MB_ICONERROR);
     throw(ErrorCode);
 }
 
@@ -490,7 +571,7 @@ bool IsHex(char c)
 
 bool IsBase(char c, int base)
 {
-    std::string alpha = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz+/";
+    std::wstring alpha = L"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz+/";
     return alpha.substr(0, base).find(c) != -1;
 }
 
@@ -498,7 +579,7 @@ bool IsBase(char c, int base)
 LibFuncStruct ParseLibFunc(CPPython::string path)
 {
     LibFuncStruct LFS;
-    auto vars = path.rsplit(".", 1);
+    auto vars = path.rsplit(L".", 1);
 
     if (vars.size() != 2)
         //RaiseException("Incorrect Argument", -1);
@@ -510,7 +591,7 @@ LibFuncStruct ParseLibFunc(CPPython::string path)
     LFS.ProcName = vars[1];
     LFS.ProcNameW = std::wstring(LFS.ProcName.begin(), LFS.ProcName.end());
 
-    LFS.LibName = CPPython::string(LFS.LibName).endswith(".dll") || CPPython::string(LFS.LibName).endswith(".exe") ? LFS.LibName : LFS.LibName + ".dll";
+    LFS.LibName = CPPython::string(LFS.LibName).endswith(L".dll") || CPPython::string(LFS.LibName).endswith(L".exe") ? LFS.LibName : LFS.LibName + L".dll";
     LFS.LibNameW = std::wstring(LFS.LibName.begin(), LFS.LibName.end());
 
     LFS.bIsValid = true;

@@ -1,4 +1,5 @@
 #pragma once
+#include "constants.hpp"
 #include <string>
 #include "IniReader/IniReader.h"
 
@@ -12,11 +13,11 @@ public:
     bool bEnableKeyboardHotkeys;
 
     // Debug
-    bool bEnableConsoleWindow;
-    bool bPauseOnStart;
-    int	iLogLevel;
-    bool bDebug;
-    bool bAllowNonMVS;
+    bool   bEnableConsoleWindow;
+    bool   bPauseOnStart;
+    size_t iLogLevel;
+    bool   bDebug;
+    bool   bAllowNonMVS;
 
 
     // Toggles
@@ -29,33 +30,33 @@ public:
     // Addresses
 
     // Patterns
-    std::string pSigCheck;
-    std::string pEndpointLoader;
-    std::string pProdEndpointLoader;
-    std::string pSunsetDate;
-    std::string pFText;
-    std::string pCFName;
-    std::string pWCFname;
-    std::string pDialog;
-    std::string pDialogParams;
-    std::string pFighterInstance;
-    std::string pDialogCallback;
-    std::string pQuitGameCallback;
-    std::string	pNotifs;
+    std::wstring pSigCheck;
+    std::wstring pEndpointLoader;
+    std::wstring pProdEndpointLoader;
+    std::wstring pSunsetDate;
+    std::wstring pFText;
+    std::wstring pCFName;
+    std::wstring pWCFname;
+    std::wstring pDialog;
+    std::wstring pDialogParams;
+    std::wstring pFighterInstance;
+    std::wstring pDialogCallback;
+    std::wstring pQuitGameCallback;
+    std::wstring pNotifs;
 
 
     // Menu Section
-    std::string hkMenu;
-    int iVKMenuToggle;
+    std::wstring hkMenu;
+    size_t iVKMenuToggle;
 
     //Other
-    int iLogSize;
+    size_t iLogSize;
     bool FORCE_CHECK_VER = false;
-    std::string szGameVer;
-    std::string szModLoader;
-    std::string szAntiCheatEngine;
-    std::string szCurlSetOpt;
-    std::string szCurlPerform;
+    std::wstring szGameVer;
+    std::wstring szModLoader;
+    std::wstring szAntiCheatEngine;
+    std::wstring szCurlSetOpt;
+    std::wstring szCurlPerform;
 
     //Private Server
     std::wstring szServerUrl;
@@ -79,36 +80,41 @@ public:
         bHookUE = true;
         bDialog = true;
         bNotifs = true;
-        hkMenu = "F1";
+        hkMenu = L"F1";
         iVKMenuToggle = 0x70; // VK_F1
         iLogSize = 50;
         bEnableServerProxy = true;
         bEnableProdServerProxy = true;
 
-        pSigCheck = "";
-        pEndpointLoader = "";
-        pProdEndpointLoader = "";
-        pSunsetDate = "";
-        pFText = "";
-        pCFName = "";
-        pWCFname = "";
-        pDialog = "";
-        pDialogParams = "";
-        pFighterInstance = "";
-        pDialogCallback = "";
-        pQuitGameCallback = "";
-        pNotifs = "";
+        pSigCheck = L"";
+        pEndpointLoader = L"";
+        pProdEndpointLoader = L"";
+        pSunsetDate = L"";
+        pFText = L"";
+        pCFName = L"";
+        pWCFname = L"";
+        pDialog = L"";
+        pDialogParams = L"";
+        pFighterInstance = L"";
+        pDialogCallback = L"";
+        pQuitGameCallback = L"";
+        pNotifs = L"";
 
-        szGameVer = "";
-        szModLoader = "";
-        szAntiCheatEngine = "";
-        szCurlSetOpt = "";
-        szCurlPerform = "";
+        szGameVer = L"";
+        szModLoader = L"";
+        szAntiCheatEngine = L"";
+        szCurlSetOpt = L"";
+        szCurlPerform = L"";
 
         szServerUrl = L"";
         szProdServerUrl = L"";
     }
 
+    bool Save(CIniReader* ini, OVS::OVSSetting value);
+    bool SaveSettings(CIniReader* ini, OVS::OVSSetting values[]);
+
+    private:
+        CIniReader* ini;
 };
 
 class eFirstRunManager
@@ -138,23 +144,23 @@ public:
     {
         if (nullptr == ini)
         {
-            ini = new CIniReader("OVSState.ini");
+            ini = new CIniReader(L"OVSState.ini");
         }
-        bPaidModWarned = ini->ReadBoolean("FirstRun", "PaidModWarned", false);
+        bPaidModWarned = ini->ReadBoolean(L"FirstRun", L"PaidModWarned", false);
     }
 };
 
 class eCachedPatternsManager
 {
 private:
-    char* Hash = nullptr;
+    wchar_t* Hash = nullptr;
     CIniReader* ini;
     static __int64 GameAddr;
 
 public:
-    void Init(uint64_t Hash, const char* version);
-    void Save(char *key, uint64_t offset);
-    uint64_t eCachedPatternsManager::Load(char* key);
+    void Init(uint64_t Hash, const wchar_t* version);
+    void Save(wchar_t *key, uint64_t offset);
+    uint64_t eCachedPatternsManager::Load(wchar_t* key);
     
     ~eCachedPatternsManager() { if (Hash) delete[] Hash; }
 };

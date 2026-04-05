@@ -10,21 +10,22 @@
 #include <map>
 
 #define         RVAtoLP( base, offset )     ((PBYTE)base + offset)
-#define         FuncMap                     std::map<std::string, ULONGLONG>
-#define         LibMap                      std::map<std::string, FuncMap>
+#define         FuncMap                     std::map<std::wstring, ULONGLONG>
+#define         LibMap                      std::map<std::wstring, FuncMap>
 #define         FNAME_STR(FName)            MVSGame::FNameFunc::ToStr(*FName)
 typedef         __int64                     int64;
 
 int64           GetGameEntryPoint();
 int64           GetUser32EntryPoint();
-int64           GetModuleEntryPoint(const char* name);
+int64           GetModuleEntryPoint(const wchar_t* name);
 int64           GetGameAddr(__int64 addr);
 int64           GetUser32Addr(__int64 addr);
-int64           GetModuleAddr(__int64 addr, const char* name);
+int64           GetModuleAddr(__int64 addr, const wchar_t* name);
 std::wstring    GetProcessName();
 std::wstring    GetProcessNameW();
 std::string     GetProcessNameA();
 std::wstring    GetDirName();
+std::wstring    GetDirName(HMODULE hModule);
 std::wstring    GetDirNameW();
 std::string     GetDirNameA();
 std::wstring    toLower(std::wstring s);
@@ -37,20 +38,20 @@ std::wstring    GetFileNameW(std::wstring filename);
 std::wstring    GetFileNameW(std::string filename);
 std::string     GetFileNameA(std::wstring filename);
 std::string     GetFileNameA(std::string filename);
-HMODULE         AwaitHModule(const char* name, uint64_t timeout = 0);
+HMODULE         AwaitHModule(const wchar_t* name, uint64_t timeout = 0);
 uint64_t        stoui64h(std::string szString);
-uint64_t*       FindPattern(void* handle, std::string_view bytes);
-uint64_t*       FindPattern(std::string pattern);
-uint64_t*       FindPattern(const char* pattern);
-uint64_t        HookPattern(std::string Pattern, const char* PatternName, void* HookProc, int64_t PatternOffset = 0, PatchTypeEnum PatchType = PatchTypeEnum::PATCH_CALL, uint64_t PrePat = NULL, uint64_t* Entry = nullptr);
+uint64_t*       FindPattern(void* handle, std::wstring_view bytes);
+uint64_t*       FindPattern(std::wstring pattern);
+uint64_t*       FindPattern(const wchar_t* pattern);
+uint64_t        HookPattern(std::wstring Pattern, const wchar_t* PatternName, void* HookProc, int64_t PatternOffset = 0, PatchTypeEnum PatchType = PatchTypeEnum::PATCH_CALL, uint64_t PrePat = NULL, uint64_t* Entry = nullptr);
 uint64_t        GetDestinationFromOpCode(uint64_t Caller, uint64_t Offset = 1, uint64_t FuncLen = 5, uint16_t size = 4);
 int32_t         GetOffsetFromOpCode(uint64_t Caller, uint64_t Offset, uint16_t size);
 void            ConditionalJumpToJump(uint64_t HookAddress, uint32_t Offset);
 void            ConditionalJumpToJump(uint64_t HookAddress);
-void            SetCheatPattern(std::string pattern, std::string name, uint64_t** lpPattern);
+void            SetCheatPattern(std::wstring pattern, std::wstring name, uint64_t** lpPattern);
 LibMap          ParsePEHeader();
-int             StringToVK(std::string);
-void            RaiseException(const char*, int64_t = 1);
+int             StringToVK(std::wstring);
+void            RaiseException(const wchar_t*, int64_t = 1);
 bool            IsHex(char);
 bool            IsBase(char c, int = 16);
 
@@ -64,22 +65,22 @@ private:
 
 public:
     PatternFinder() = default;
-    PatternFinder(const std::string pattern) { *this = pattern; }
+    PatternFinder(const std::wstring pattern) { *this = pattern; }
     operator uint64_t () { return address; }
     operator uint64_t* () { return (uint64_t*)address; }
     operator __int64() { return __int64(address);  }
     operator bool() { return bool(address); }
     PatternFinder& operator+=(const uint64_t b) { address += b; return *this; }
-    PatternFinder& operator=(const std::string pattern)
+    PatternFinder& operator=(const std::wstring pattern)
     {
-        uint64_t returned = CachedPatternsMgr->Load((char*)pattern.c_str());
+        uint64_t returned = CachedPatternsMgr->Load((wchar_t*)pattern.c_str());
 
         if (returned)
             address = returned;
         else
         {
             address = (uint64_t)FindPattern(pattern);
-            CachedPatternsMgr->Save((char*)pattern.c_str(), address);
+            CachedPatternsMgr->Save((wchar_t*)pattern.c_str(), address);
         }
 
         return *this;
@@ -107,9 +108,9 @@ public:
 };
 
 struct LibFuncStruct {
-    std::string FullName;
-    std::string LibName;
-    std::string ProcName;
+    std::wstring FullName;
+    std::wstring LibName;
+    std::wstring ProcName;
     std::wstring FullNameW;
     std::wstring LibNameW;
     std::wstring ProcNameW;

@@ -1,6 +1,8 @@
 #pragma once
+#include "constants.hpp"
 #include "eSettingsManager/eSettingsManager.h"
 #include "utils/Utils.hpp"
+#include "ovs/OVSUtils.h"
 #include "utils/prettyprint.h"
 #include <exception>
 #include <iostream>
@@ -44,12 +46,12 @@ namespace OVS::Utils
         localtime_s(&localtimeObject, &tnow);
         wchar_t* tmpBuffer = new wchar_t[40];
         wcsftime(tmpBuffer, 40, L"%Y-%m-%dT%H:%M:%S", &localtimeObject);
-        wstring timestamp(tmpBuffer);
+        std::wstring timestamp(tmpBuffer);
 
         size_t bufferSize = GetSizeOfBuffer(tmpBuffer);
         wchar_t* returnObject = new wchar_t[bufferSize + 1];
         wcsncpy_s(returnObject, bufferSize + 1, tmpBuffer, bufferSize);
-        wstring result = wstring(returnObject);
+        std::wstring result = std::wstring(returnObject);
 
         delete[] tmpBuffer;
         delete[] returnObject;
@@ -58,11 +60,11 @@ namespace OVS::Utils
     }
 
     // Core logging implementation - all Write* templates call this eventually
-    void WriteOutput(LogLevel loglevel, const wstring& message, bool addNL)
+    void WriteOutput(LogLevel loglevel, const std::wstring& message, bool addNL)
     {
         auto prefixIt = LogPrefixMap.find(loglevel);
         auto streamIt = LogStreams.find(loglevel);
-        wstring prefix = (prefixIt != LogPrefixMap.end()) ? prefixIt->second : L"";
+        std::wstring prefix = (prefixIt != LogPrefixMap.end()) ? prefixIt->second : L"";
 
         //switch (loglevel)
         //{
@@ -75,8 +77,8 @@ namespace OVS::Utils
         //    break;
         //}
 
-        wostream* stream = (streamIt != LogStreams.end()) ? streamIt->second : &std::wcout;
-        wstring outputText = prefix + L'[' + (GetTimeStampAsWString()) + L"]: " + message;
+        std::wostream* stream = (streamIt != LogStreams.end()) ? streamIt->second : &std::wcout;
+        std::wstring outputText = prefix + L'[' + (GetTimeStampAsWString()) + L"]: " + message;
 
         if (addNL)
         {

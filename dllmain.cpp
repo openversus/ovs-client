@@ -1,4 +1,5 @@
 #include "includes.h"
+#include "constants.hpp"
 #include "ovs/OVSUtils.h"
 #include "mvs/mvs.h"
 #include "ovs/OpenVersus.h"
@@ -713,18 +714,13 @@ bool OnInitializeHook()
     }
 
     // Collect Steam/Epic identity and hardware fingerprint
+    // This is used to make accounts more "sticky", so people don't have to
+    // reset their name/perks/etc every time their IP changes or they switch between Proton and native.
     GEnvInfo = new EnvInfo();
 
     // Hash Exe
     uint64_t EXEHash = HashTextSectionOfHost();
-    // Convert version to narrow string for CachedPatternsMgr
-    int versionLen = WideCharToMultiByte(CP_UTF8, 0, CURRENT_HOOK_VERSION.c_str(), -1, nullptr, 0, nullptr, nullptr);
-    std::string narrowVersion;
-    if (versionLen > 0) {
-        narrowVersion.resize(versionLen - 1);
-        WideCharToMultiByte(CP_UTF8, 0, CURRENT_HOOK_VERSION.c_str(), -1, &narrowVersion[0], versionLen, nullptr, nullptr);
-    }
-    CachedPatternsMgr->Init(EXEHash, narrowVersion.c_str());
+    CachedPatternsMgr->Init(EXEHash, CURRENT_HOOK_VERSION.c_str());
 
     ProcessSettings(); // Parse Settings
     PreGameHooks(); // Queue Blocker

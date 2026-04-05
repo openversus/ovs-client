@@ -1,89 +1,99 @@
+#include "includes.h"
+#include "constants.hpp"
+#include "utils/prettyprint.h"
 #include "IniReader/IniReader.h"
 #include <iostream>
+#include "utils/Utils.hpp"
+#include "ovs/OVSUtils.h"
+#include <string>
+#include <vector>
 #include <windows.h>
 #include <cinttypes>
 using namespace std;
 #pragma warning(disable:4996)
 EXTERN_C IMAGE_DOS_HEADER __ImageBase;
 
-CIniReader::CIniReader(char* szFileName)
+CIniReader::CIniReader(const wchar_t* szFileName)
 {
-	char			moduleName[MAX_PATH];
-	char			dllPath[MAX_PATH];
-	char			iniName[MAX_PATH];
-	char*			tempPointer;
+    std::wstring dirName = GetDirName((HMODULE)&__ImageBase);
+    std::wstring iniName = OVS::OVS_Config_File;
 
-	GetModuleFileName((HINSTANCE)&__ImageBase, moduleName, MAX_PATH);
-	tempPointer = strrchr(moduleName, '.');
-	*tempPointer = '\0';
-	tempPointer = strrchr(moduleName, '\\');
-	strncpy(iniName, tempPointer + 1, 255);
-	strcat(iniName, ".ini");
-	strncpy(dllPath, moduleName, (tempPointer - moduleName + 1));
-	dllPath[tempPointer - moduleName + 1] = '\0';
-	if (strcmp(szFileName, "") == 0) //if (szFileName == "")
-	{
-	strcat(dllPath, iniName);
-	} else {
-	strcat(dllPath, szFileName);
-	}
+    if (wcscmp(szFileName, L"") == 0) //if (szFileName == L"")
+    {
+        m_szFileName = dirName + L"\\" + iniName;
 
- memset(m_szFileName, 0x00, 255);
- memcpy(m_szFileName, dllPath, strlen(dllPath));
+    }
+    else
+    {
+        m_szFileName = dirName + L"\\" + szFileName;
+    }
 }
-int CIniReader::ReadInteger(char* szSection, char* szKey, int iDefaultValue)
+
+void CIniReader::GetConfigFilename()
 {
- int iResult = GetPrivateProfileInt(szSection,  szKey, iDefaultValue, m_szFileName); 
- return iResult;
+    printfYellow(L"[OVS] INI File: %s\n", m_szFileName.c_str());
 }
-float CIniReader::ReadFloat(char* szSection, char* szKey, float fltDefaultValue)
+
+size_t CIniReader::ReadInteger(const wchar_t* szSection, const wchar_t* szKey, size_t iDefaultValue)
 {
- char szResult[255];
- char szDefault[255];
+    size_t iResult = GetPrivateProfileInt(szSection, szKey, static_cast<int>(iDefaultValue), m_szFileName.c_str());
+    return iResult;
+}
+
+float CIniReader::ReadFloat(const wchar_t* szSection, const wchar_t* szKey, float fltDefaultValue)
+{
+ wchar_t szResult[255];
+ wchar_t szDefault[255];
  float fltResult;
- _snprintf(szDefault, 255, "%f",fltDefaultValue);
- GetPrivateProfileString(szSection,  szKey, szDefault, szResult, 255, m_szFileName); 
- fltResult = (float)atof(szResult);
+ _snwprintf_s(szDefault, 255, _TRUNCATE, L"%f",fltDefaultValue);
+ GetPrivateProfileString(szSection,  szKey, szDefault, szResult, 255, m_szFileName.c_str()); 
+ fltResult = (float)_wtof(szResult);
  return fltResult;
 }
-bool CIniReader::ReadBoolean(char* szSection, char* szKey, bool bolDefaultValue)
+
+bool CIniReader::ReadBoolean(const wchar_t* szSection, const wchar_t* szKey, bool bolDefaultValue)
 {
- char szResult[255];
- char szDefault[255];
+ wchar_t szResult[255];
+ wchar_t szDefault[255];
  bool bolResult;
- _snprintf(szDefault, 255, "%s", bolDefaultValue ? "True" : "False");
- GetPrivateProfileString(szSection, szKey, szDefault, szResult, 255, m_szFileName); 
- bolResult =  (strcmp(szResult, "True") == 0 || 
-		strcmp(szResult, "true") == 0) ? true : false;
+ _snwprintf_s(szDefault, 255, _TRUNCATE, L"%s", bolDefaultValue ? L"true" : L"false");
+ GetPrivateProfileString(szSection, szKey, szDefault, szResult, 255, m_szFileName.c_str()); 
+ bolResult =  (wcscmp(szResult, L"true") == 0 || 
+        wcscmp(szResult, L"True") == 0) ? true : false;
  return bolResult;
 }
-char* CIniReader::ReadString(char* szSection, char* szKey, const char* szDefaultValue)
+
+wchar_t* CIniReader::ReadString(const wchar_t* szSection, const wchar_t* szKey, const wchar_t* szDefaultValue)
 {
- char* szResult = new char[255];
- memset(szResult, 0x00, 255);
+ wchar_t* szResult = new wchar_t[255];
+ wmemset(szResult, 0x00, 255);
  GetPrivateProfileString(szSection,  szKey, 
-		szDefaultValue, szResult, 255, m_szFileName); 
+        szDefaultValue, szResult, 255, m_szFileName.c_str()); 
  return szResult;
 }
-void CIniReader::WriteInteger(char* szSection, char* szKey, uint64_t iValue)
+
+void CIniReader::WriteInteger(const wchar_t* szSection, const wchar_t* szKey, size_t iValue)
 {
-	char szValue[255];
-	_snprintf_s(szValue, 255, "%" PRIu64, iValue);
-	WritePrivateProfileString(szSection, szKey, szValue, m_szFileName);
+    wchar_t szValue[255];
+    _snwprintf_s(szValue, 255, _TRUNCATE, L"%" PRIu64, iValue);
+    WritePrivateProfileString(szSection, szKey, szValue, m_szFileName.c_str());
 }
-void CIniReader::WriteFloat(char* szSection, char* szKey, float fltValue)
+
+void CIniReader::WriteFloat(const wchar_t* szSection, const wchar_t* szKey, float fltValue)
 {
-	char szValue[255];
-	_snprintf(szValue, 255, "%f", fltValue);
-	WritePrivateProfileString(szSection, szKey, szValue, m_szFileName);
+    wchar_t szValue[255];
+    _snwprintf_s(szValue, 255, _TRUNCATE, L"%f", fltValue);
+    WritePrivateProfileString(szSection, szKey, szValue, m_szFileName.c_str());
 }
-void CIniReader::WriteBoolean(char* szSection, char* szKey, bool bolValue)
+
+void CIniReader::WriteBoolean(const wchar_t* szSection, const wchar_t* szKey, bool bolValue)
 {
-	char szValue[255];
-	_snprintf(szValue, 255, "%s", bolValue ? "True" : "False");
-	WritePrivateProfileString(szSection, szKey, szValue, m_szFileName);
+    wchar_t szValue[255];
+    _snwprintf_s(szValue, 255, _TRUNCATE, L"%s", bolValue ? L"true" : L"false");
+    WritePrivateProfileString(szSection, szKey, szValue, m_szFileName.c_str());
 }
-void CIniReader::WriteString(char* szSection, char* szKey, char* szValue)
+
+void CIniReader::WriteString(const wchar_t* szSection, const wchar_t* szKey, const wchar_t* szValue)
 {
-	WritePrivateProfileString(szSection, szKey, szValue, m_szFileName);
+    WritePrivateProfileString(szSection, szKey, szValue, m_szFileName.c_str());
 }

@@ -1,5 +1,9 @@
 #pragma once
+#ifndef OVS_H
+#define OVS_H
+
 #include "includes.h"
+#include "constants.hpp"
 #include "Trampoline/Trampoline.h"
 #include <unordered_map>
 #include "mvs/mvs.h"
@@ -12,42 +16,17 @@ using namespace UE;
 
 namespace OVS {
 
-    enum LogLevel
-    {
-        LOG_DEBUG,
-        LOG_INFO,
-        LOG_WARN,
-        LOG_ERROR,
-        LOG_CRITICAL
-    };
+    // OVSSetting is now defined in constants.hpp
 
-    extern const wchar_t* WDEBUG_PREFIX;
-    extern const wchar_t* WINFO_PREFIX;
-    extern const wchar_t* WWARN_PREFIX;
-    extern const wchar_t* WERROR_PREFIX;
-    extern const wchar_t* WCRITICAL_PREFIX;
-
-    extern const wchar_t* INJECTOR_NAME;
-    extern const wchar_t* INJECTOR_VERSION;
-    extern const wchar_t* INJECTOR_DESCRIPTION;
-
-    extern std::map<LogLevel, std::wstring> LogPrefixMap;
-    extern std::map<LogLevel, std::wostream*> LogStreams;
-
-    extern uint64_t EXEHash;
-    inline constexpr const wchar_t* OVS_Version = L"2026.04.02";
-
-    inline const std::wstring& GetCurrentVersion()
-    {
-        static const std::wstring version(OVS::OVS_Version);
-        return version;
-    }
+    extern OVSSetting OVSDefaultSettingsArray[];
+    extern const size_t OVSDefaultSettingsArrayCount;
+    OVSSetting GetOVSSettingByName(const wchar_t* name);
 
     namespace Proxies {
         //__int64									__fastcall	ReadFString(__int64, __int64);
         //MVSGame::FName*							__fastcall	ReadFNameToWStr(MVSGame::FName&, char*);
         HANDLE									__stdcall	CreateFile(LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode, LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition, DWORD dwFlagsAndAttributes, HANDLE hTemplateFile);
-        const char**							__fastcall	OverrideGameEndpoint(int64_t*, const char*);
+        const char**							__fastcall	OverrideGameEndpoint(int64_t*, const wchar_t*);
         int64_t*								__fastcall	OverrideProdEndpoint(int64_t*, const wchar_t*);
         bool									__fastcall  OVSOfflineModeChecker(int32_t*);
         MVSGame::UFighterGameInstance*			__fastcall CopyFighterInstance(MVSGame::UFighterGameInstance*, uint64_t*);
@@ -169,3 +148,4 @@ namespace HookMetadata { //Namespace for helpers for game functions
     extern HMODULE				CurrentDllModule;
     extern HANDLE				Console;
 };
+#endif // OVS_H

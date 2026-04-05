@@ -54,7 +54,7 @@ std::vector<PyString> PyString::rsplit(PyString ToFind, int MaxSplit)
 
 PyString PyString::lower()
 {
-	PyString new_string("");
+	PyString new_string(L"");
 	for (int i = 0; i < this->length(); i++)
 	{
 		new_string += std::tolower((*this)[i]);
@@ -64,7 +64,7 @@ PyString PyString::lower()
 
 PyString PyString::upper()
 {
-	PyString new_string("");
+	PyString new_string(L"");
 	for (int i = 0; i < this->length(); i++)
 	{
 		new_string += std::toupper((*this)[i]);
@@ -74,7 +74,7 @@ PyString PyString::upper()
 
 PyString PyString::join(PyString *str, uint64_t size)
 {
-	PyString x = "";
+	PyString x = L"";
 	for (uint64_t i = 0; i < size; i++)
 	{
 		x += str[i];
@@ -128,7 +128,7 @@ PyString PyString::strip(PyString ToStrip)
 
 bool PyString::startswith(PyString Start)
 {
-	return strncmp(*this, Start, Start.length()) == 0;
+	return wcsncmp(*this, Start, Start.length()) == 0;
 }
 
 bool PyString::endswith(PyString End)
@@ -136,7 +136,7 @@ bool PyString::endswith(PyString End)
 	if (End.length() > this->length())
 		return false;
 	PyString NewStr = this->substr(this->length() - End.length());
-	return strncmp(NewStr, End, End.length()) == 0;
+	return wcsncmp(NewStr, End, End.length()) == 0;
 }
 
 PyString PyString::replace(PyString Replacement, PyString ReplaceWith)
@@ -146,7 +146,7 @@ PyString PyString::replace(PyString Replacement, PyString ReplaceWith)
 
 	if (this->length() == Replacement.length())
 	{
-		return strcmp(this->c_str(), Replacement.c_str()) ? (*this) : ReplaceWith;
+		return wcscmp(this->c_str(), Replacement.c_str()) ? (*this) : ReplaceWith;
 	}
 
 	size_t i = 0;
@@ -155,7 +155,7 @@ PyString PyString::replace(PyString Replacement, PyString ReplaceWith)
 	while (i < NewStr.length())
 	{
 		PyString s1 = NewStr.substr(i, Replacement.length());
-		if (strncmp(s1.c_str(), Replacement.c_str(), Replacement.length()) == 0)
+		if (wcsncmp(s1.c_str(), Replacement.c_str(), Replacement.length()) == 0)
 		{
 			NewStr = NewStr.substr(0, i) + ReplaceWith + NewStr.substr(i + Replacement.length(), NewStr.length() - i - Replacement.length());
 			i += ReplaceWith.length();

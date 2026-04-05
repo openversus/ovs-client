@@ -23,7 +23,7 @@
 template <std::uint64_t FnvPrime, std::uint64_t OffsetBasis>
 struct basic_fnv_1
 {
-	std::uint64_t operator()(std::string_view text) const
+	std::uint64_t operator()(std::wstring_view text) const
 	{
 		std::uint64_t hash = OffsetBasis;
 		for (auto it : text)
@@ -59,30 +59,30 @@ static auto& getHints()
 }
 #endif
 
-static void TransformPattern(std::string_view pattern, std::basic_string<uint8_t>& data, std::basic_string<uint8_t>& mask)
+static void TransformPattern(std::wstring_view pattern, std::basic_string<uint8_t>& data, std::basic_string<uint8_t>& mask)
 {
 	uint8_t tempDigit = 0;
 	bool tempFlag = false;
 
-	auto tol = [] (char ch) -> uint8_t
+	auto tol = [] (wchar_t ch) -> uint8_t
 	{
-		if (ch >= 'A' && ch <= 'F') return uint8_t(ch - 'A' + 10);
-		if (ch >= 'a' && ch <= 'f') return uint8_t(ch - 'a' + 10);
-		return uint8_t(ch - '0');
+		if (ch >= L'A' && ch <= L'F') return uint8_t(ch - L'A' + 10);
+		if (ch >= L'a' && ch <= L'f') return uint8_t(ch - L'a' + 10);
+		return uint8_t(ch - L'0');
 	};
 
 	for (auto ch : pattern)
 	{
-		if (ch == ' ')
+		if (ch == L' ')
 		{
 			continue;
 		}
-		else if (ch == '?')
+		else if (ch == L'?')
 		{
 			data.push_back(0);
 			mask.push_back(0);
 		}
-		else if ((ch >= '0' && ch <= '9') || (ch >= 'A' && ch <= 'F') || (ch >= 'a' && ch <= 'f'))
+		else if ((ch >= L'0' && ch <= L'9') || (ch >= L'A' && ch <= L'F') || (ch >= L'a' && ch <= L'f'))
 		{
 			uint8_t thisDigit = tol(ch);
 
@@ -134,7 +134,7 @@ public:
 	inline uintptr_t end() const   { return m_end; }
 };
 
-void pattern::Initialize(std::string_view pattern)
+void pattern::Initialize(std::wstring_view pattern)
 {
 	// get the hash for the base pattern
 #if PATTERNS_USE_HINTS
@@ -198,7 +198,7 @@ void pattern::EnsureMatches(uint32_t maxCount)
 
 	ptrdiff_t Last[256];
 
-	std::fill(std::begin(Last), std::end(Last), lastWild == std::string::npos ? -1 : static_cast<ptrdiff_t>(lastWild) );
+	std::fill(std::begin(Last), std::end(Last), lastWild == std::wstring::npos ? -1 : static_cast<ptrdiff_t>(lastWild) );
 
 	for ( ptrdiff_t i = 0; i < static_cast<ptrdiff_t>(maskSize); ++i )
 	{

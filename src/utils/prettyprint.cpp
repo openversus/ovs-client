@@ -162,15 +162,7 @@ void printfColor(const wchar_t* const Format, ...)
 {
 	va_list args;
 	va_start(args, Format);
-
-	// Convert wide format string to UTF-8
-	int utf8Len = WideCharToMultiByte(CP_UTF8, 0, Format, -1, nullptr, 0, nullptr, nullptr);
-	if (utf8Len > 0) {
-		std::string utf8Format(utf8Len - 1, '\0');
-		WideCharToMultiByte(CP_UTF8, 0, Format, -1, &utf8Format[0], utf8Len, nullptr, nullptr);
-		vprintf(utf8Format.c_str(), args);
-	}
-
+	vwprintf(Format, args);
 	va_end(args);
 }
 
@@ -179,15 +171,7 @@ void printfColor(ConsoleColors color, const wchar_t* const Format, ...)
 	va_list args;
 	va_start(args, Format);
 	SetColor(color);
-
-	// Convert and print with args
-	int utf8Len = WideCharToMultiByte(CP_UTF8, 0, Format, -1, nullptr, 0, nullptr, nullptr);
-	if (utf8Len > 0) {
-		std::string utf8Format(utf8Len - 1, '\0');
-		WideCharToMultiByte(CP_UTF8, 0, Format, -1, &utf8Format[0], utf8Len, nullptr, nullptr);
-		vprintf(utf8Format.c_str(), args);
-	}
-
+	vwprintf(Format, args);
 	ResetColors();
 	va_end(args);
 }
@@ -197,15 +181,7 @@ void printfColor(const wchar_t* color, const wchar_t* const Format, ...)
 	va_list args;
 	va_start(args, Format);
 	SetColor(color);
-
-	// Convert and print with args
-	int utf8Len = WideCharToMultiByte(CP_UTF8, 0, Format, -1, nullptr, 0, nullptr, nullptr);
-	if (utf8Len > 0) {
-		std::string utf8Format(utf8Len - 1, '\0');
-		WideCharToMultiByte(CP_UTF8, 0, Format, -1, &utf8Format[0], utf8Len, nullptr, nullptr);
-		vprintf(utf8Format.c_str(), args);
-	}
-
+	vwprintf(Format, args);
 	ResetColors();
 	va_end(args);
 }
@@ -215,17 +191,9 @@ void printfColorNl(ConsoleColors color, const wchar_t* const Format, ...)
 	va_list args;
 	va_start(args, Format);
 	SetColor(color);
-
-	// Convert and print with args
-	int utf8Len = WideCharToMultiByte(CP_UTF8, 0, Format, -1, nullptr, 0, nullptr, nullptr);
-	if (utf8Len > 0) {
-		std::string utf8Format(utf8Len - 1, '\0');
-		WideCharToMultiByte(CP_UTF8, 0, Format, -1, &utf8Format[0], utf8Len, nullptr, nullptr);
-		vprintf(utf8Format.c_str(), args);
-	}
-
+	vwprintf(Format, args);
 	ResetColors();
-	printf("\n");
+	wprintf(L"\n");
 	va_end(args);
 }
 
@@ -234,16 +202,8 @@ void printfColorNl(const wchar_t* color, const wchar_t* const Format, ...)
 	va_list args;
 	va_start(args, Format);
 	SetColor(color);
-
-	// Convert and print with args
-	int utf8Len = WideCharToMultiByte(CP_UTF8, 0, Format, -1, nullptr, 0, nullptr, nullptr);
-	if (utf8Len > 0) {
-		std::string utf8Format(utf8Len - 1, '\0');
-		WideCharToMultiByte(CP_UTF8, 0, Format, -1, &utf8Format[0], utf8Len, nullptr, nullptr);
-		vprintf(utf8Format.c_str(), args);
-	}
-
+	vwprintf(Format, args);
 	ResetColors();
-	printf("\n");
+	wprintf(L"\n");
 	va_end(args);
 }

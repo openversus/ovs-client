@@ -1,5 +1,7 @@
+#include "constants.hpp"
 #include "utils/Utils.hpp"
 #include "ovs/OpenVersus.h"
+#include "ovs/OVSUtils.h"
 #include "utils/prettyprint.h"
 #include <string>
 #include <ostream>
@@ -8,6 +10,50 @@
 HookMetadata::ActiveMods			HookMetadata::sActiveMods;
 HookMetadata::LibMapsStruct			HookMetadata::sLFS;
 bool OVS::IsOVSUpdateRequired = false;
+
+OVS::OVSSetting OVS::OVSDefaultSettingsArray[] = {
+    // Debug Settings
+    { L"bEnableConsoleWindow", L"Settings.Debug", L"ShowConsole", L"bool", true },
+    { L"bPauseOnStart", L"Settings.Debug", L"DebugPause", L"bool", false },
+    { L"bDebug", L"Settings.Debug", L"DebugLogging", L"bool", false },
+    { L"bAllowNonMVS", L"Settings.Debug", L"NonMVSPatching", L"bool", false },
+    // Settings
+    { L"iLogSize", L"Settings", L"LogSize", L"int", (size_t)50, true },
+    { L"iLogLevel", L"Settings", L"LogLevel", L"int", (size_t)0, true },
+    { L"szModLoader", L"Settings", L"ModLoader", L"string", L"Kernel32.CreateFileW" },
+    { L"szAntiCheatEngine", L"Settings", L"AntiCheatEngine", L"string", L"User32.EnumChildWindows" },
+    { L"szCurlSetOpt", L"Settings", L"CurlSetOpt", L"string", L"libcurl.curl_easy_setopt" },
+    { L"szCurlPerform", L"Settings", L"CurlPerform", L"string", L"libcurl.curl_easy_perform" },
+    { L"bEnableKeyboardHotkeys", L"Settings", L"EnableKeyboardHotkeys", L"booL", true },
+    // Keybinds
+    { L"hkMenu", L"Settings.Keybinds", L"ToggleMenu", L"string", L"F1" },
+    // Patches
+    { L"bSunsetDate", L"Patches", L"SunsetDate", L"booL", true },
+    { L"bDisableSignatureCheck", L"Patches", L"PakLoader", L"booL", true },
+    // Features
+    { L"bHookUE", L"Features", L"HookUE", L"booL", true },
+    { L"bDialog", L"Features", L"Dialog", L"booL", true },
+    { L"bNotifs", L"Features", L"Notifications", L"booL", true },
+    { L"pSigCheck", L"Patterns", L"SigCheck", L"string", OVS::Patterns::SigCheck },
+    { L"pEndpointLoader", L"Patterns", L"EndpointLoader", L"string", OVS::Patterns::EndpointLoader },
+    { L"pProdEndpointLoader", L"Patterns", L"ProdEndpointLoader", L"string", OVS::Patterns::ProdEndpointLoader },
+    { L"pSunsetDate", L"Patterns", L"SunsetDate", L"string", OVS::Patterns::SunsetDate },
+    { L"pFText", L"Patterns.UE", L"FText", L"string", OVS::Patterns::FText },
+    { L"pCFName", L"Patterns.UE", L"CFName", L"string", OVS::Patterns::CFName },
+    { L"pWCFname", L"Patterns.UE", L"WCFName", L"string", OVS::Patterns::WCFName },
+    { L"pDialog", L"Patterns.MVS", L"Dialog", L"string", OVS::Patterns::Dialog },
+    { L"pDialogParams", L"Patterns.MVS", L"DialogParams", L"string", OVS::Patterns::DialogParams },
+    { L"pDialogCallback", L"Patterns.MVS", L"DialogCallback", L"string", OVS::Patterns::DialogCallback },
+    { L"pQuitGameCallback", L"Patterns.MVS", L"QuitGameCallback", L"string", OVS::Patterns::QuitGameCallback },
+    { L"pFighterInstance", L"Patterns.MVS", L"FighterInstance", L"string", OVS::Patterns::FighterInstance },
+    { L"pNotifs", L"Patterns.MVS", L"Notifications", L"string", OVS::Patterns::Notifications },
+    { L"szServerUrl", L"Server.Game", L"ServerUrl", L"string", OVS::ServerUrl },
+    { L"szProdServerUrl", L"Server.Prod", L"ServerUrl", L"string", OVS::ProdServerUrl },
+    { L"bEnableServerProxy", L"Server.Game", L"Enabled", L"bool", true },
+    { L"bEnableProdServerProxy", L"Server.Prod", L"Enabled", L"bool", true }
+};
+
+const size_t OVS::OVSDefaultSettingsArrayCount = sizeof(OVS::OVSDefaultSettingsArray) / sizeof(OVS::OVSDefaultSettingsArray[0]);
 
 namespace OVS
 {
@@ -32,6 +78,20 @@ namespace OVS
         { LOG_ERROR, &std::wcerr },
         { LOG_CRITICAL, &std::wcerr }
     };
+
+    OVSSetting GetOVSSettingByName(const wchar_t* Name)
+    {
+        for (size_t i = 0; i < OVSDefaultSettingsArrayCount; i++)
+        {
+            if (!wcscmp(OVSDefaultSettingsArray[i].Name, Name))
+            {
+                return OVSDefaultSettingsArray[i];
+            }
+        }
+
+        OVSSetting notFoundSetting = { L"", L"", L"", L"", L"" };
+        return notFoundSetting;
+    }
 }
 
 namespace OVS::Proxies {
@@ -51,13 +111,13 @@ namespace OVS::Proxies {
         //		{
         //			wprintf(L"Loading %s from %s\n", wcFileName, wsSwapFolder.c_str());
         //			MVSGame::vSwappedFiles.push_back(wcFileName);
-        //			return CreateFileW(newFileName.c_str(), dwDesiredAccess, dwShareMode, lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
+        //			return ::CreateFileW(newFileName.c_str(), dwDesiredAccess, dwShareMode, lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
         //		}
         //	}
 
         //}
 
-        return CreateFileW(lpFileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
+        return ::CreateFileW(lpFileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
     }
 
     void __cdecl DummyPrint(uint64_t* a) {
@@ -82,7 +142,7 @@ namespace OVS::Proxies {
 
     void OfflineModeWarning()
     {
-        ShowNotification("Update Required", "Offline mode activated", 10.f);
+        ShowNotification(L"Update Required", L"Offline mode activated", 10.f);
     }
 
     bool OVSOfflineModeChecker(int32_t* _TSS0_395)
@@ -167,36 +227,44 @@ namespace OVS::Proxies {
 
     }
 
-    const char** OverrideGameEndpoint(int64_t* TargetStringDest, const char * EndpointAddress)
+    const char** OverrideGameEndpoint(int64_t* TargetStringDest, const wchar_t * EndpointAddress)
     {
         std::wstring ServerUrl = SettingsMgr->szServerUrl;
 
         if (HookMetadata::sActiveMods.bGameEndpointSwap && !ServerUrl.empty())
         {
             // Convert wide string to narrow for endpoint processing
-            int narrowLen = WideCharToMultiByte(CP_UTF8, 0, ServerUrl.c_str(), -1, nullptr, 0, nullptr, nullptr);
-            std::string narrowServerUrl;
-            if (narrowLen > 0) {
-                narrowServerUrl.resize(narrowLen - 1);
-                WideCharToMultiByte(CP_UTF8, 0, ServerUrl.c_str(), -1, &narrowServerUrl[0], narrowLen, nullptr, nullptr);
-            }
+            //int narrowLen = WideCharToMultiByte(CP_UTF8, 0, ServerUrl.c_str(), -1, nullptr, 0, nullptr, nullptr);
+            //std::string narrowServerUrl;
+            //if (narrowLen > 0) {
+            //    narrowServerUrl.resize(narrowLen - 1);
+            //    WideCharToMultiByte(CP_UTF8, 0, ServerUrl.c_str(), -1, &narrowServerUrl[0], narrowLen, nullptr, nullptr);
+            //}
 
             // Strip trailing slash
-            if (!narrowServerUrl.empty() && narrowServerUrl.back() == '/') {
-                narrowServerUrl.pop_back();
+            //if (!narrowServerUrl.empty() && narrowServerUrl.back() == '/') {
+            //    narrowServerUrl.pop_back();
+            //}
+
+            if (ServerUrl.empty() && ServerUrl.back() == '/')
+            {
+                ServerUrl.pop_back();
             }
 
             SetColorCyan();
             wprintf(L"Rerouting traffic from vanilla HTTP/WS server \"%llx\" to \"%ls\"!\n", (int64_t)EndpointAddress, ServerUrl.c_str());
             ResetColors();
 
-            const char* end = narrowServerUrl.c_str();
+            const char* end = OVS::Utils::ToNarrowStr(ServerUrl.c_str()).c_str();
+            //const char* end =  ServerUrl.c_str();
 
             MVSGame::GetEndpointKeyValue(TargetStringDest, end);
             return (const char**)TargetStringDest;
         }
 
-        return MVSGame::GetEndpointKeyValue(TargetStringDest, EndpointAddress);
+        const char* end2 = OVS::Utils::ToNarrowStr(EndpointAddress).c_str();
+        return MVSGame::GetEndpointKeyValue(TargetStringDest, end2);
+        //return MVSGame::GetEndpointKeyValue(TargetStringDest, EndpointAddress);
 
     }
 };
@@ -337,7 +405,7 @@ namespace OVS::Hooks {
     bool PatchSunsetSetterIntoOVSChecker(Trampoline* GameTramp)
     {
         wprintf(L"\n==Override Sunset Function==\n");
-        std::string pattern = SettingsMgr->pSunsetDate;
+        std::wstring pattern = SettingsMgr->pSunsetDate;
         if (pattern.empty())
         {
             printfError(L"pSunsetDate Not Specified. Please Add Pattern to ini file!");
@@ -404,7 +472,7 @@ namespace OVS::Hooks {
     bool OverrideProdEndpointsData(Trampoline* GameTramp)
     {
         wprintf(L"\n==OverrideGameEndpointsData==\n");
-        std::string pattern = SettingsMgr->pProdEndpointLoader;
+        std::wstring pattern = SettingsMgr->pProdEndpointLoader;
         if (pattern.empty())
         {
             printfError(L"pProdEndpointLoader Not Specified. Please Add Pattern to ini file!");
@@ -437,7 +505,7 @@ namespace OVS::Hooks {
     bool OverrideGameEndpointsData(Trampoline* GameTramp)
     {
         wprintf(L"\n==OverrideGameEndpointsData==\n");
-        std::string pattern = SettingsMgr->pEndpointLoader;
+        std::wstring pattern = SettingsMgr->pEndpointLoader;
         if (pattern.empty())
         {
             printfError(L"pEndpointLoader Not Specified. Please Add Pattern to ini file!");
