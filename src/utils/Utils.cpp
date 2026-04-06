@@ -206,7 +206,7 @@ namespace OVS::Utils
         }
 
         int totalRead = 0;
-        char* tmpBuf = new char[outBufSize];
+        char* tmpBuf = new char[outBufSize] {};
         while (totalRead < outBufSize - 1)
         {
             int n = recv(sock, tmpBuf + totalRead, outBufSize - 1 - totalRead, 0);
