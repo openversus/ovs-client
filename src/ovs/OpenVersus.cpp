@@ -367,14 +367,14 @@ namespace OVS::Hooks {
         wprintf(L"\n==DisableSignatureCheck==\n");
         if (SettingsMgr->pSigCheck.empty())
         {
-            printfError(L"pSigCheck Not Specified. Please Add Pattern to ini file!\n");
+            printfError(L"pSigCheck Not Specified. Please Add Pattern to ini file!");
             return false;
         }
 
         PatternFinder lpSigCheckPattern = SettingsMgr->pSigCheck;
         if (!lpSigCheckPattern)
         {
-            printfError(L"Couldn't find SigCheck Pattern\n");
+            printfError(L"Couldn't find SigCheck Pattern");
             return false;
         }
 

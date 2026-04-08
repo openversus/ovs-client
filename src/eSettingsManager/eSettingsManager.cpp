@@ -428,7 +428,7 @@ bool SaveSettings(CIniReader* ini, OVS::OVSSetting values[])
     {
         if (!saveResults[values[i].Name])
         {
-            printfWarning(L"Failed to save setting: %ls (%ls)\n", values[i].Setting, values[i].Name);
+            printfWarning(L"Failed to save setting: %ls (%ls)", values[i].Setting, values[i].Name);
             shouldReturnFalse = true;
         }
     }
