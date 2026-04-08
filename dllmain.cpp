@@ -482,7 +482,7 @@ static std::wstring ResolveSteamIDFromAPI()
                 uint64_t id = pGetSteamID(pUser);
                 if (id) {
                     wchar_t buf[32] = {};
-                    swprintf_s(buf, L"%llu", (unsigned long long)id);
+                    swprintf_s(buf, _countof(buf), L"%llu", (unsigned long long)id);
                     PrintDebug(L"[OVS] SteamID from API: %ls\n", buf);
                     return std::wstring(buf);
                 }
@@ -574,8 +574,9 @@ static void DoPerformUpdate()
 
         if (!WinHttpSendRequest(hReq, WINHTTP_NO_ADDITIONAL_HEADERS, 0, nullptr, 0, 0, 0) ||
             !WinHttpReceiveResponse(hReq, nullptr)) {
+            DWORD dlErr = GetLastError();
             WinHttpCloseHandle(hReq); WinHttpCloseHandle(hConn); WinHttpCloseHandle(hSess);
-            printfWarning(L"[AutoUpdate] Download request failed (%lu)\n", GetLastError());
+            printfWarning(L"[AutoUpdate] Download request failed (%lu)\n", dlErr);
             return;
         }
 
@@ -618,7 +619,7 @@ static void DoPerformUpdate()
     }
 
     wchar_t backupPath[MAX_PATH] = {};
-    swprintf_s(backupPath, MAX_PATH, L"%s.bak", dllPath);
+    swprintf_s(backupPath, MAX_PATH, L"%ls.v%ls.bak", dllPath, CURRENT_HOOK_VERSION.c_str());
 
     printfGreen(L"[AutoUpdate] Backing up current asi file and installing update...\n");
 
@@ -659,7 +660,7 @@ static void CheckForUpdate()
     swprintf_s(path, 256, L"/ovs/client-version?v=%s", OVS::OVS_Version);
 
     wchar_t responseBuf[2048];
-    int bodyLen = OVS::Utils::AutoUpdateHttpRequest(parsed.Host.c_str(), _wtoi(parsed.Port.c_str()), path, responseBuf, sizeof(responseBuf));
+    int bodyLen = OVS::Utils::AutoUpdateHttpRequest(parsed.Host.c_str(), _wtoi(parsed.Port.c_str()), path, responseBuf, _countof(responseBuf));
     if (bodyLen <= 0) {
         printfWarning(L"[AutoUpdate] Version check failed (no response)\n");
         return;
@@ -667,8 +668,8 @@ static void CheckForUpdate()
 
     wchar_t latestVersion[64] = {};
     wchar_t downloadUrl[512] = {};
-    OVS::Utils::AutoUpdateJsonGetString(responseBuf, L"latest_version", latestVersion, sizeof(latestVersion));
-    OVS::Utils::AutoUpdateJsonGetString(responseBuf, L"download_url",   downloadUrl,   sizeof(downloadUrl));
+    OVS::Utils::AutoUpdateJsonGetString(responseBuf, L"latest_version", latestVersion, _countof(latestVersion));
+    OVS::Utils::AutoUpdateJsonGetString(responseBuf, L"download_url",   downloadUrl,   _countof(downloadUrl));
 
     PrintDebug(L"[AutoUpdate] Current: %ls, Latest: %ls\n", OVS::OVS_Version, latestVersion);
 
@@ -682,8 +683,8 @@ static void CheckForUpdate()
         return;
     }
 
-    wcsncpy_s(g_UpdateLatestVersion, latestVersion, sizeof(g_UpdateLatestVersion) - 1);
-    wcsncpy_s(g_UpdateDownloadUrl,   downloadUrl,   sizeof(g_UpdateDownloadUrl)   - 1);
+    wcsncpy_s(g_UpdateLatestVersion, latestVersion, _TRUNCATE);
+    wcsncpy_s(g_UpdateDownloadUrl,   downloadUrl,   _TRUNCATE);
 
     printfInfo(L"[AutoUpdate] Update available (%s) — downloading automatically...\n", latestVersion);
     DoPerformUpdate();

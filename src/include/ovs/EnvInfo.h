@@ -249,7 +249,7 @@ private:
             for (int i = 0; i < 6; i++) if (a->Address[i]) { allZero = false; break; }
             if (allZero) continue;
             wchar_t mac[13] = {};
-            swprintf_s(mac, L"%02X%02X%02X%02X%02X%02X",
+            swprintf_s(mac, 13, L"%02X%02X%02X%02X%02X%02X",
                 a->Address[0], a->Address[1], a->Address[2],
                 a->Address[3], a->Address[4], a->Address[5]);
             return std::wstring(mac);
@@ -289,7 +289,7 @@ private:
     std::wstring _ComputeHardwareID()
     {
         wchar_t buf[512] = {};
-        swprintf_s(buf,
+        swprintf_s(buf, 512,
             L"%d|%d|%d|%d|%08X|%ls",
             CpuLeaf0[0], CpuLeaf0[1], CpuLeaf0[2], CpuLeaf0[3],
             (unsigned int)CpuLeaf1[0],  // processor signature only (family/model/stepping)

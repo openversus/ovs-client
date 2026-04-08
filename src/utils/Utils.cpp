@@ -149,15 +149,26 @@ namespace OVS::Utils
         char path[512] = {};
         WideCharToMultiByte(CP_UTF8, 0, wpath, -1, path, sizeof(path), nullptr, nullptr);
 
-        struct sockaddr_in addr {};
-        addr.sin_family = AF_INET;
-        addr.sin_port = htons((u_short)port);
-        inet_pton(AF_INET, host, &addr.sin_addr);
+        struct addrinfo hints {};
+        hints.ai_family = AF_INET;
+        hints.ai_socktype = SOCK_STREAM;
+        hints.ai_protocol = IPPROTO_TCP;
 
-        if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) != 0)
+        char portStr[16] = {};
+        sprintf_s(portStr, sizeof(portStr), "%d", port);
+
+        struct addrinfo* result = nullptr;
+        if (getaddrinfo(host, portStr, &hints, &result) != 0 || !result)
         {
             closesocket(sock); return -1;
         }
+
+        if (connect(sock, result->ai_addr, (int)result->ai_addrlen) != 0)
+        {
+            freeaddrinfo(result);
+            closesocket(sock); return -1;
+        }
+        freeaddrinfo(result);
 
         // Build HTTP request as narrow string
         char request[1024];
@@ -196,7 +207,7 @@ namespace OVS::Utils
     bool AutoUpdateJsonGetString(const wchar_t* json, const wchar_t* key, wchar_t* out, int outSize)
     {
         wchar_t pattern[128];
-        swprintf_s(pattern, sizeof(key), L"\"%s\"", key);
+        swprintf_s(pattern, _countof(pattern), L"\"%s\"", key);
         const wchar_t* pos = wcsstr(json, pattern);
         if (!pos) return false;
         pos += wcslen(pattern);
@@ -219,17 +230,20 @@ namespace OVS::Utils
         if (wcsncmp(ptr, L"https://", 8) == 0)
         {
             returnObject.Protocol = L"https://";
+            returnObject.bisHTTPS = true;
             ptr += 8;
         }
         else if (wcsncmp(ptr, L"http://", 7) == 0)
         {
             returnObject.Protocol = L"http://";
+            returnObject.bisHTTPS = false;
             ptr += 7;
         }
         else
         {
             // No protocol specified, assume http
             returnObject.Protocol = L"http://";
+            returnObject.bisHTTPS = false;
         }
 
         // 2. Find delimiters
@@ -270,14 +284,16 @@ namespace OVS::Utils
         }
         else if (slash)
         {
-            // No port specified, but path exists
+            // No port specified, but path exists — use protocol default
             returnObject.Host = std::wstring(hostnameStart, slash - hostnameStart);
+            returnObject.Port = returnObject.bisHTTPS ? L"443" : L"80";
             ptr = slash;
         }
         else
         {
-            // No port, no path - just hostname
+            // No port, no path - just hostname — use protocol default
             returnObject.Host = std::wstring(hostnameStart);
+            returnObject.Port = returnObject.bisHTTPS ? L"443" : L"80";
             ptr = hostnameStart + wcslen(hostnameStart);
         }
 
