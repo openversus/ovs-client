@@ -4,6 +4,7 @@
 #include "eSettingsManager/eSettingsManager.h"
 #include "ovs/OpenVersus.h"
 #include "ovs/OVSUtils.h"
+#include <cstdarg>
 #include <cstdio>
 #include <cstdint>
 #include <string>
@@ -19,16 +20,16 @@ namespace OVS::Utils
     {
     public:
         StringBuilder();
-        StringBuilder(std::string str);
-        StringBuilder(std::wstring str);
-        StringBuilder& Append(const char* str);
-        StringBuilder& Append(const wchar_t* str);
-        StringBuilder& Append(const std::string& str);
-        StringBuilder& Append(const std::wstring& str);
-        StringBuilder& AppendLine(const char* str);
-        StringBuilder& AppendLine(const wchar_t* str);
-        StringBuilder& AppendLine(const std::string& str);
-        StringBuilder& AppendLine(const std::wstring& str);
+        StringBuilder(std::string str, ...);
+        StringBuilder(std::wstring str, ...);
+        StringBuilder& Append(const char* str, ...);
+        StringBuilder& Append(const wchar_t* str, ...);
+        StringBuilder& Append(const std::string& str, ...);
+        StringBuilder& Append(const std::wstring& str, ...);
+        StringBuilder& AppendLine(const char* str, ...);
+        StringBuilder& AppendLine(const wchar_t* str, ...);
+        StringBuilder& AppendLine(const std::string& str, ...);
+        StringBuilder& AppendLine(const std::wstring& str, ...);
         std::wstring ToString();
         std::string ToStringA();
 
@@ -168,14 +169,13 @@ namespace OVS::Utils
     template <typename T>
     void DebugPrintWrapper(T message, T color) = delete;
 
-    void DebugPrintWrapper(const wchar_t* message, const wchar_t* color);
-    void DebugPrintWrapper(std::wstring message, std::wstring color);
-    void DebugPrintWrapper(const char* message, const char* color);
-    void DebugPrintWrapper(std::string message, std::string color);
-    void DebugPrintWrapper(const wchar_t* message, ConsoleColors color);
-    void DebugPrintWrapper(std::wstring message, ConsoleColors color);
-    void DebugPrintWrapper(const char* message, ConsoleColors color);
-    void DebugPrintWrapper(std::string message, ConsoleColors color);
+    void DebugPrintWrapper(ConsoleColors color = ConsoleColors::CLRDEBUG, const wchar_t* message = L"", ...);
+    void DebugPrintWrapper(ConsoleColors color = ConsoleColors::CLRDEBUG, std::wstring message = L"", ...);
+    void DebugPrintWrapper(ConsoleColors color = ConsoleColors::CLRDEBUG, const char* message = "", ...);
+    void DebugPrintWrapper(ConsoleColors color = ConsoleColors::CLRDEBUG, std::string message = "", ...);
+    #ifndef PRINTDEBUGWRAPPER
+    #define PrintDebug(Format, ...) DebugPrintWrapper(ConsoleColors::CLRDEBUG, Format, ## __VA_ARGS__)
+    #endif // !PRINTDEBUGWRAPPER
     int AutoUpdateHttpRequest(const wchar_t* whost, int port, const wchar_t* wpath, wchar_t* outBuf, int outBufSize);
     bool AutoUpdateJsonGetString(const wchar_t* json, const wchar_t* key, wchar_t* out, int outSize);
     ParsedURL AutoUpdateParseUrl(const std::wstring& url);

@@ -276,14 +276,13 @@ HMODULE AwaitHModule(const wchar_t* name, uint64_t timeout)
             std::chrono::duration<double> now = std::chrono::system_clock::now() - start;
             if (now.count()*1000 > timeout)
             {
-                wprintf(L"No Handle %s\n", std::wstring(name, name + wcslen(name)).c_str());
+                printfError(L"No Handle %s\n", std::wstring(name, name + wcslen(name)).c_str());
                 return NULL;
             }
         }
         toAwait = GetModuleHandle(name);	
     }
-    if (SettingsMgr->iLogLevel)
-        wprintf(L"Obtained Handle for %s\n", std::wstring(name, name + wcslen(name)).c_str());
+    PrintDebug(L"Obtained Handle for %s\n", std::wstring(name, name + wcslen(name)).c_str());
     return toAwait;
 }
 
@@ -344,13 +343,11 @@ uint64_t HookPattern(std::wstring Pattern, const wchar_t* PatternName, void* Hoo
     {
         uint64_t FuncEntry = GetDestinationFromOpCode(lpPattern + PatternOffset); // Already relative to game address so GetGameAddr is unnecessary
         *Entry = FuncEntry;
-        if (SettingsMgr->iLogLevel)
-            wprintf(L"%s Function Entry found at %llx", wPatternName.c_str(), FuncEntry);
+        PrintDebug(L"%s Function Entry found at %llx", wPatternName.c_str(), FuncEntry);
     }
     
     uint64_t hook_address = lpPattern + PatternOffset;
-    if (SettingsMgr->iLogLevel)
-        wprintf(L"Injecting at %llx", hook_address);
+    PrintDebug(L"Injecting at %llx", hook_address);
     InjectHook(hook_address, HookProc, PatchType);
     
     ResetColors();
@@ -417,21 +414,13 @@ void SetCheatPattern(std::wstring pattern, std::wstring name, uint64_t** lpPatte
 {
     if (!pattern.empty())
     {
-        if (SettingsMgr->iLogLevel)
-        {
-            std::wstring wName(name.begin(), name.end());
-            std::wstring wPattern(pattern.begin(), pattern.end());
-            printfInfo(L"Searching for %s: %s", wName.c_str(), wPattern.c_str());
-        }
+        PrintDebug(L"Searching for %s: %s", name, pattern);
         *lpPattern = FindPattern(GetModuleHandleW(NULL), pattern);
 
         std::wstring wName(name.begin(), name.end());
         if (*lpPattern != nullptr)
         {
-            if (SettingsMgr->iLogLevel)
-            {
-                printfSuccess(L"%s Found at: %p", wName, *lpPattern);
-            }
+            PrintDebug(L"%s Found at: %p", wName, *lpPattern);
         }
         else
         {
@@ -445,7 +434,9 @@ LibMap ParsePEHeader()
     PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)GetModuleHandleW(NULL);
     PIMAGE_NT_HEADERS pNTHeader = (PIMAGE_NT_HEADERS)RVAtoLP((PBYTE)pDosHeader, pDosHeader->e_lfanew);
     if (pNTHeader->Signature != IMAGE_NT_SIGNATURE)
+    {
         RaiseException(L"NT Signature Failed!", -1); // Not an EXE
+    }
 
     LibMap IAT{};
 
@@ -666,8 +657,11 @@ namespace RegisterHacks {
     void RegisterHacks::EnableRegisterHacks()
     {
         if (bIsEnabled)
+        {
             return;
-        wprintf(L"Enabling Register Hack Functions\n");
+        }
+
+        PrintDebug(L"Enabling Register Hack Functions\n");
         uint8_t* CallSpace = new uint8_t[4*12 + 1]; // 12 is registers count, 1 is ret
         DWORD oldProtect;
         VirtualProtect(CallSpace, 4*12 + 1, PAGE_EXECUTE_READWRITE, &oldProtect);
@@ -741,13 +735,13 @@ uint64_t HashTextSectionOfHost()
             QueryPerformanceCounter(&end);
             double elapsedMs = (end.QuadPart - start.QuadPart) * 1000.0 / freq.QuadPart;
 
-            wprintf(L".text hash: 0x%016llX | Time: %.3f ms\n", hash, elapsedMs);
+            PrintDebug(L".text hash: 0x%016llX | Time: %.3f ms\n", hash, elapsedMs);
             return hash;
         }
     }
 
     QueryPerformanceCounter(&end);
     double elapsedMs = (end.QuadPart - start.QuadPart) * 1000.0 / freq.QuadPart;
-    wprintf(L"Failed to find .text | Time: %.3f ms\n", elapsedMs);
+    printfError(L"Failed to find .text | Time: %.3f ms\n", elapsedMs);
     return 0;
 }

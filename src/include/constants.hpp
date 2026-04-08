@@ -30,7 +30,7 @@ namespace OVS
     inline constexpr const wchar_t* OVS_Name = L"OpenVersus";
     inline constexpr const wchar_t* OVS_Config_Ext = L".ini";
     inline const std::wstring OVS_Config_File = std::wstring(OVS_Name) + std::wstring(OVS_Config_Ext);
-    inline constexpr const wchar_t* OVS_Version = L"2026.04.06.01";
+    inline constexpr const wchar_t* OVS_Version = L"2026.04.08.05";
     inline constexpr const wchar_t* ServerUrl = L"http://testing.openversus.org:8000/";
     inline constexpr const wchar_t* ProdServerUrl = ServerUrl;
 

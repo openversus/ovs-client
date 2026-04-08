@@ -22,19 +22,17 @@ std::map<ConsoleColors, std::wstring> ColorMap = {
 	{ LIGHTPURPLE, L"\x1b[95m" },
 	{ LIGHTYELLOW, L"\x1b[93m" },
 	{ BRIGHTWHITE, L"\x1b[97m" },
-	{ CLRTRACE, L"\x1b[90m" },
-	{ CLRDEBUG, L"\x1b[36m" },
-	{ CLRINFO, L"\x1b[32m" },
-	{ CLRWARNING, L"\x1b[33m" },
-	{ CLRERROR, L"\x1b[41m" },
+	{ CLRTRACE, L"\x1b[33m" },
+	{ CLRDEBUG, L"\x1b[33m" },
+	{ CLRINFO, L"\x1b[90m" },
+	{ CLRWARNING, L"\x1b[93m" },
+	{ CLRERROR, L"\x1b[31m" },
 	{ CLRCRITICAL, L"\x1b[41m" },
     { CLRSUCCESS, L"\x1b[42m\x1b[30m" },
 };
 
 void SetColorW(ConsoleColors color)
 {
-	//wprintf(ColorMap[color].c_str());
-
 	// Convert wide color string to UTF-8
 	const std::wstring& wColor = ColorMap[color];
 	int utf8Len = WideCharToMultiByte(CP_UTF8, 0, wColor.c_str(), -1, nullptr, 0, nullptr, nullptr);

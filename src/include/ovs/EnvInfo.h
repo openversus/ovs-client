@@ -1,4 +1,5 @@
 #pragma once
+#include "utils/Utils.hpp"
 #include <string>
 #include <vector>
 #include <windows.h>
@@ -10,6 +11,9 @@
 
 #pragma comment(lib, "IPHLPAPI.lib")
 #pragma comment(lib, "Bcrypt.lib")
+
+using OVS::Utils::StringBuilder;
+using OVS::Utils::DebugPrintWrapper;
 
 // Collects platform identity (Steam/Epic) and a hardware fingerprint.
 // Hardware fingerprint = SHA256( CPU leaf0 + CPU leaf1 + MoboSerial )
@@ -58,18 +62,26 @@ struct EnvInfo
         return L"Unknown";
     }
 
-    void Print() const
+    std::wstring Print(bool dumpString = false)
     {
-        wprintf(L"[OVS] SteamID    : %ls\n", SteamID.c_str());
-        wprintf(L"[OVS] GameID     : %ls\n", GameID.c_str());
-        wprintf(L"[OVS] AppID      : %ls\n", AppID.c_str());
-        wprintf(L"[OVS] EpicID     : %ls\n", EpicID.c_str());
-        wprintf(L"[OVS] CpuLeaf0   : %d\n", CpuLeaf0[0]);
-        wprintf(L"[OVS] CpuLeaf1   : 0x%08X  (family/model/stepping)\n", (unsigned int)CpuLeaf1[0]);
-        wprintf(L"[OVS] MoboSerial : %ls\n", MoboSerial.c_str());
-        wprintf(L"[OVS] HardwareID : %.16ls...\n", HardwareID.c_str());
-        wprintf(L"[OVS] IsSteam    : %ls  |  IsEpic : %ls\n",
-               IsSteam ? L"true" : L"false", IsEpic ? L"true" : L"false");
+        StringBuilder sb;
+        sb.Append(L"[OVS] SteamID    : %ls\n", SteamID.c_str())
+          .Append(L"[OVS] GameID     : %ls\n", GameID.c_str())
+          .Append(L"[OVS] AppID      : %ls\n", AppID.c_str())
+          .Append(L"[OVS] EpicID     : %ls\n", EpicID.c_str())
+          .Append(L"[OVS] CpuLeaf0   : %d\n", CpuLeaf0[0])
+          .Append(L"[OVS] CpuLeaf1   : 0x%08X  (family/model/stepping)\n", (unsigned int)CpuLeaf1[0])
+          .Append(L"[OVS] MoboSerial : %ls\n", MoboSerial.c_str())
+          .Append(L"[OVS] HardwareID : %.16ls...\n", HardwareID.c_str())
+          .Append(L"[OVS] IsSteam    : %ls  |  IsEpic : %ls\n",
+              IsSteam ? L"true" : L"false", IsEpic ? L"true" : L"false");
+
+        if (dumpString)
+        {
+            PrintDebug(sb.ToString());
+        }
+
+        return sb.ToString();
     }
 
 private:

@@ -13,6 +13,8 @@ using namespace std;
 #pragma warning(disable:4996)
 EXTERN_C IMAGE_DOS_HEADER __ImageBase;
 
+using OVS::Utils::DebugPrintWrapper;
+
 CIniReader::CIniReader(const wchar_t* szFileName)
 {
     std::wstring dirName = GetDirName((HMODULE)&__ImageBase);
@@ -31,7 +33,7 @@ CIniReader::CIniReader(const wchar_t* szFileName)
 
 void CIniReader::GetConfigFilename()
 {
-    printfYellow(L"[OVS] INI File: %s\n", m_szFileName.c_str());
+    PrintDebug(L"[OVS] INI File: %s\n", m_szFileName.c_str());
 }
 
 size_t CIniReader::ReadInteger(const wchar_t* szSection, const wchar_t* szKey, size_t iDefaultValue)

@@ -89,82 +89,47 @@ namespace OVS::Utils
     }
 
     // Overload for wide string pointers
-    void DebugPrintWrapper(const wchar_t* message, const wchar_t* color)
-    {
-        std::wstring wMessage = message ? message : L"" ;
-        std::wstring wColor = color ? color : L"" ;
-        if (SettingsMgr->bDebug)
-        {
-            printfColor(wColor, wMessage);
-        }
-    }
 
-    // Overload for wide string objects
-    void DebugPrintWrapper(std::wstring message, std::wstring color)
+    void DebugPrintWrapper(ConsoleColors color, const wchar_t* message, ...)
     {
-        DebugPrintWrapper(message.c_str(), color.c_str());
-    }
+        const wchar_t* safeMessage = message ? message : L"";
+        const wchar_t* colorCode = ColorMap[color].c_str();
 
-    // Overload for narrow string pointers
-    void DebugPrintWrapper(const char* message, const char* color)
-    {
-        // Handle null message
-        const char* safeMessage = message ? message : "";
-        const char* safeColor = color ? color : "";
+        va_list args;
+        va_start(args, message);
         
-        size_t wMessageSize = strlen(safeMessage) + 1;
-        wchar_t* wMessageBuffer = new wchar_t[wMessageSize];
-        size_t convertedChars = 0;
-        mbstowcs_s(&convertedChars, wMessageBuffer, wMessageSize, safeMessage, wMessageSize - 1);
-        std::wstring wMessage(wMessageBuffer);
-
-        size_t wColorSize = strlen(safeColor) + 1;
-        wchar_t* wColorBuffer = new wchar_t[wColorSize];
-        convertedChars = 0;
-        mbstowcs_s(&convertedChars, wColorBuffer, wColorSize, safeColor, wColorSize - 1);
-        std::wstring wColor(wColorBuffer);
-
-        delete[] wMessageBuffer;
-        delete[] wColorBuffer;
+        // Calculate required buffer size
+        va_list args_copy;
+        va_copy(args_copy, args);
+        int len = _vscwprintf(safeMessage, args_copy) + 1;
+        va_end(args_copy);
+        
+        wchar_t* formatBuff = new wchar_t[len];
+        _vsnwprintf_s(formatBuff, len, _TRUNCATE, safeMessage, args);
+        va_end(args);
+        const wchar_t* formattedMessage = formatBuff;
 
         if (SettingsMgr->bDebug)
         {
-            printfColor(wColor, wMessage);
+            printfColor(colorCode, L"%ls", formattedMessage);
         }
+
+        delete[] formatBuff;
     }
 
-    // Overload for narrow string objects
-    void DebugPrintWrapper(std::string message, std::string color)
+    void DebugPrintWrapper(ConsoleColors color, std::wstring message, ...)
     {
-        DebugPrintWrapper(message.c_str(), color.c_str());
+        DebugPrintWrapper(color, message.c_str());
     }
 
-    void DebugPrintWrapper(const wchar_t* message, ConsoleColors color)
+    void DebugPrintWrapper(ConsoleColors color, const char* message, ...)
     {
-        DebugPrintWrapper(message, ColorMap[color].c_str());
+        DebugPrintWrapper(color, ToWideStr(message));
     }
-
-    void DebugPrintWrapper(std::wstring message, ConsoleColors color)
+    
+    void DebugPrintWrapper(ConsoleColors color, std::string message, ...)
     {
-        DebugPrintWrapper(message.c_str(), ColorMap[color].c_str());
-    }
-
-    void DebugPrintWrapper(const char* message, ConsoleColors color)
-    {
-        std::wstring wideColor = ColorMap[color];
-        std::string narrowColor;
-        narrowColor.reserve(wideColor.size());
-        
-        for (wchar_t wc : wideColor) {
-            narrowColor.push_back(static_cast<char>(wc)); // Safe for ASCII
-        }
-        
-        DebugPrintWrapper(message, narrowColor.c_str());
-    }
-
-    void DebugPrintWrapper(std::string message, ConsoleColors color)
-    {
-        DebugPrintWrapper(message.c_str(), color);
+        DebugPrintWrapper(color, ToWideStr(message.c_str()));
     }
 
     int AutoUpdateHttpRequest(const wchar_t* whost, int port, const wchar_t* wpath,
@@ -333,8 +298,9 @@ namespace OVS::Utils
             << L"  Port: " << returnObject.Port << L"\n"
             << L"  Path: " << returnObject.Path << L"\n";
 
-        DebugPrintWrapper(debugStream.str(), ConsoleColors::YELLOW);
+        PrintDebug(debugStream.str());
 
+        returnObject.bParseSuccess = true;
         return returnObject;
     }
 
@@ -419,7 +385,7 @@ namespace OVS::Utils
         }
         catch (const std::exception& e)
         {
-            WriteError(L"Failed to set locale: " + ToWideStr(e.what()));
+            printfError(L"Failed to set locale: " + ToWideStr(e.what()));
             return false;
         }
     }

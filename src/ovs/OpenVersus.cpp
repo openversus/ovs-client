@@ -9,6 +9,8 @@
 
 HookMetadata::ActiveMods			HookMetadata::sActiveMods;
 HookMetadata::LibMapsStruct			HookMetadata::sLFS;
+using OVS::Utils::DebugPrintWrapper;
+
 bool OVS::IsOVSUpdateRequired = false;
 
 OVS::OVSSetting OVS::OVSDefaultSettingsArray[] = {
@@ -147,6 +149,8 @@ namespace OVS::Proxies {
 
     bool OVSOfflineModeChecker(int32_t* _TSS0_395)
     {
+        // Not really necessary now since we're checking for updates at launch in dllmain
+
         static bool isUpdateWarned = !SettingsMgr->bDebug; // Only for debug now
         static bool isPaidWarnShown = FirstRunMgr->bPaidModWarned;
         static bool isVersionShown = false;
@@ -208,15 +212,10 @@ namespace OVS::Proxies {
                 ServerUrl.pop_back();
             }
             ServerUrl += L"/";
-
-            SetColorCyan();
-            wprintf(L"Rerouting traffic from vanilla Prod HTTP/WS server \"%ls\" to \"%ls\"!\n", EndpointUrl, ServerUrl.c_str());
-            ResetColors();
-
             const wchar_t* end = ServerUrl.c_str();
+            printfCyan(L"Rerouting traffic from vanilla Prod HTTP/WS server \"%ls\" to \"%ls\"!\n", EndpointUrl, ServerUrl.c_str());
 
             MVSGame::SetFStringValue(FStringPtr, end);
-
         }
         else
         {
@@ -368,7 +367,7 @@ namespace OVS::Hooks {
         wprintf(L"\n==DisableSignatureCheck==\n");
         if (SettingsMgr->pSigCheck.empty())
         {
-            printfRed(L"pSigCheck Not Specified. Please Add Pattern to ini file!\n");
+            printfError(L"pSigCheck Not Specified. Please Add Pattern to ini file!\n");
             return false;
         }
 
@@ -380,8 +379,7 @@ namespace OVS::Hooks {
         }
 
         lpSigCheckPattern += 0x30;
-        if (SettingsMgr->iLogLevel)
-            wprintf(L"SigCheck Pattern found at: %p\n", (uint64_t*)lpSigCheckPattern);
+        PrintDebug(L"SigCheck Pattern found at: %p\n", (uint64_t*)lpSigCheckPattern);
 
         // Old method
         //uint64_t CalledFuncAddr = GetDestinationFromOpCode(hook_address+7, 1, 5, 4);
@@ -419,10 +417,7 @@ namespace OVS::Hooks {
             return false;
         }
 
-        if (SettingsMgr->iLogLevel)
-        {
-            wprintf(L"SunsetDate Pattern Found at: %p\n", (uint64_t*)lpPattern);
-        }
+        PrintDebug(L"SunsetDate Pattern Found at: %p\n", (uint64_t*)lpPattern);
 
         MakeProxyFromOpCode(GameTramp, lpPattern + 7, (uint8_t)4, OVS::Proxies::OVSOfflineModeChecker, &MVSGame::Init_thread_header, PATCH_CALL);
         GetProcFromOpCode(lpPattern + 0x47, 4, &MVSGame::Init_thread_footer);
@@ -433,13 +428,10 @@ namespace OVS::Hooks {
         Memory::VP::InjectHook(final_bool_offset, GameTramp->Jump(OVS::Proxies::OVSOfflineModeChecker), PATCH_CALL);
         Patch<uint16_t>(final_bool_offset + 0x5, 0x10EB);
 
-        if (SettingsMgr->iLogLevel)
-        {
-            wprintf(L"Init_thread_header Function Found at: %p\n", MVSGame::Init_thread_header);
-            wprintf(L"Init_thread_footer Function Found at: %p\n", MVSGame::Init_thread_footer);
-            wprintf(L"FDateTime Function Found at: %p\n", MVSGame::FDateTime);
-            wprintf(L"SunsetDate Object Found at: %p\n", MVSGame::kSunsetDate);
-        }
+        PrintDebug(L"Init_thread_header Function Found at: %p\n", MVSGame::Init_thread_header);
+        PrintDebug(L"Init_thread_footer Function Found at: %p\n", MVSGame::Init_thread_footer);
+        PrintDebug(L"FDateTime Function Found at: %p\n", MVSGame::FDateTime);
+        PrintDebug(L"SunsetDate Object Found at: %p\n", MVSGame::kSunsetDate);
                 
         // Jump to the cleanup function
         Patch<uint16_t>((uint64_t)lpPattern + 0xC, 0xDAEB);
@@ -493,8 +485,7 @@ namespace OVS::Hooks {
         }
 
         lpPattern += 0x0A;
-        if (SettingsMgr->iLogLevel)
-            wprintf(L"ProdEndpointLoader Pattern Found at: %p\n", (uint64_t*)lpPattern);
+        PrintDebug(L"ProdEndpointLoader Pattern Found at: %p\n", (uint64_t*)lpPattern);
 
         MakeProxyFromOpCode(GameTramp, lpPattern, 4, OVS::Proxies::OverrideProdEndpoint, &MVSGame::SetFStringValue, PATCH_CALL);
 
@@ -526,8 +517,7 @@ namespace OVS::Hooks {
         }
 
         lpPattern += 0x0A;
-        if (SettingsMgr->iLogLevel)
-            wprintf(L"EndpointLoader Pattern Found at: %p\n", (uint64_t*)lpPattern);
+        PrintDebug(L"EndpointLoader Pattern Found at: %p\n", (uint64_t*)lpPattern);
 
         MakeProxyFromOpCode(GameTramp, lpPattern, 4, OVS::Proxies::OverrideGameEndpoint, &MVSGame::GetEndpointKeyValue, PATCH_CALL);
 
@@ -561,12 +551,9 @@ namespace OVS::Hooks {
         MVSGame::UMvsFrontendManager::AddDialogPtr = (MVSGame::UMvsFrontendManager::AddDialogType)(uint64_t*)(lpPattern + 30); // 0x142766C50
         GetProcFromOpCode(lpPattern + 38, 4, &MVSGame::GetFrontendManager); // 0x142722980
 
-        if (SettingsMgr->iLogLevel)
-        {
-            wprintf(L"Dialog Pattern Found at: %p\n", (uint64_t*)lpPattern);
-            wprintf(L"AddDialog at %p\n", MVSGame::UMvsFrontendManager::AddDialogPtr);
-            wprintf(L"FrontendManager at %p\n", MVSGame::GetFrontendManager);
-        }
+        PrintDebug(L"Dialog Pattern Found at: %p\n", (uint64_t*)lpPattern);
+        PrintDebug(L"AddDialog at %p\n", MVSGame::UMvsFrontendManager::AddDialogPtr);
+        PrintDebug(L"FrontendManager at %p\n", MVSGame::GetFrontendManager);
 
         if (!SettingsMgr->pDialogParams.empty())
         {
@@ -576,10 +563,7 @@ namespace OVS::Hooks {
                 MVSGame::FMvsDialogParametersConst = (MVSGame::DialogParamsType*)(uint64_t*)lpPattern; // 0x14276C2F0
                 //MVSGame::GLeave_Lobby_Prompt_Text = (MVSGame::FText*)GetGameAddr(0x1480ADDB0);
 
-                if (SettingsMgr->iLogLevel)
-                {
-                    wprintf(L"DialogParams Pattern Found at: %p\n", (uint64_t*)lpPattern);
-                }
+                PrintDebug(L"DialogParams Pattern Found at: %p\n", (uint64_t*)lpPattern);
 
             }
         }
@@ -598,11 +582,8 @@ namespace OVS::Hooks {
 
         GetProcFromOpCode(lpPattern, 4, &MVSGame::SingleParamDialogCallbackSetter); // 0x1428AD240
 
-        if (SettingsMgr->iLogLevel)
-        {
-            wprintf(L"DialogCallback Pattern Found at: %p\n", (uint64_t*)lpPattern);
-            wprintf(L"DialogCallback at %p\n", MVSGame::SingleParamDialogCallbackSetter);
-        }
+        PrintDebug(L"DialogCallback Pattern Found at: %p\n", (uint64_t*)lpPattern);
+        PrintDebug(L"DialogCallback at %p\n", MVSGame::SingleParamDialogCallbackSetter);
 
 
         if (SettingsMgr->pQuitGameCallback.empty())
@@ -621,11 +602,8 @@ namespace OVS::Hooks {
             {
                 MVSGame::QuitGame = (MVSGame::QuitGameParamsType*)(uint64_t*)lpPattern; // 0x1428AFCC0
 
-                if (SettingsMgr->iLogLevel)
-                {
-                    wprintf(L"QuitGameCallback Pattern Found at: %p\n", (uint64_t*)lpPattern);
-                    wprintf(L"QuitGameCallback at %p\n", MVSGame::QuitGame);
-                }
+                PrintDebug(L"QuitGameCallback Pattern Found at: %p\n", (uint64_t*)lpPattern);
+                PrintDebug(L"QuitGameCallback at %p\n", MVSGame::QuitGame);
             }
         }
 
@@ -663,13 +641,9 @@ namespace OVS::Hooks {
         //MVSGame::UMvsNotificationManager::GetNotifManagerPtr = (MVSGame::UMvsNotificationManager::GetNotifManagerType)GetGameAddr(0x1428B1D60); // 0x1428B1D60 // 19
         GetProcFromOpCode(lpPattern + 19, 4, &MVSGame::UMvsNotificationManager::GetNotifManagerPtr); // 0x1428B1D60
 
-        if (SettingsMgr->iLogLevel)
-        {
-            wprintf(L"Notifications Pattern Found at: %p\n", (uint64_t*)lpPattern);
-            wprintf(L"ShowNotification at %p\n", MVSGame::UMvsNotificationManager::RequestShowNotificationPtr);
-            wprintf(L"NotificationManager at %p\n", MVSGame::UMvsNotificationManager::GetNotifManagerPtr);
-        }
-
+        PrintDebug(L"Notifications Pattern Found at: %p\n", (uint64_t*)lpPattern);
+        PrintDebug(L"ShowNotification at %p\n", MVSGame::UMvsNotificationManager::RequestShowNotificationPtr);
+        PrintDebug(L"NotificationManager at %p\n", MVSGame::UMvsNotificationManager::GetNotifManagerPtr);
 
         printfSuccess(L"Notifications Usable!");
         return true;
@@ -697,13 +671,10 @@ namespace OVS::Hooks {
         GetProcFromOpCode(lpPattern + 3, 4, &FText::FromName); // 0x142AFE350
         GetProcFromOpCode((uint64_t)FText::FromString + 32, 4, &FText::GetEmpty); // 0x142AFE6D0
 
-        if (SettingsMgr->iLogLevel)
-        {
-            wprintf(L"FText Pattern Found at: %p\n", (uint64_t*)lpPattern);
-            wprintf(L"FText::FromString at: %p\n", FText::FromString);
-            wprintf(L"FText::FromName at: %p\n", FText::FromName);
-            wprintf(L"FText::GetEmpty at: %p\n", FText::GetEmpty);
-        }
+        PrintDebug(L"FText Pattern Found at: %p\n", (uint64_t*)lpPattern);
+        PrintDebug(L"FText::FromString at: %p\n", FText::FromString);
+        PrintDebug(L"FText::FromName at: %p\n", FText::FromName);
+        PrintDebug(L"FText::GetEmpty at: %p\n", FText::GetEmpty);
 
         // FName
         GetProcFromOpCode(first_address, 4, &FName::ToStringPtr);
@@ -719,11 +690,8 @@ namespace OVS::Hooks {
             printfError(L"Couldn't find CFName Pattern");
             return false;
         }
-
-        if (SettingsMgr->iLogLevel)
-        {
-            wprintf(L"CFName Pattern Found at: %p\n", (uint64_t*)lpPattern);
-        }
+        
+        PrintDebug(L"CFName Pattern Found at: %p\n", (uint64_t*)lpPattern);
 
         GetProcFromOpCode(lpPattern + 79, 4, &FName::FNameCharConstructor); // 0x142BB5FC0
 
@@ -738,18 +706,14 @@ namespace OVS::Hooks {
             printfError(L"Couldn't find WCFname Pattern");
             return false;
         }
-        if (SettingsMgr->iLogLevel)
-        {
-            wprintf(L"WCFname Pattern Found at: %p\n", (uint64_t*)lpPattern);
-        }
+
+        PrintDebug(L"WCFname Pattern Found at: %p\n", (uint64_t*)lpPattern);
+
         FName::FNameWCharConstructor = (FName::FNameConstructorWCharType)GetGameAddr(lpPattern - 32); // 0x142BB6120
 
-        if (SettingsMgr->iLogLevel)
-        {
-            wprintf(L"FName::ToString at: %p\n", FName::ToStringPtr);
-            wprintf(L"FName::FName(char*) at: %p\n", FName::FNameCharConstructor);
-            wprintf(L"FName::FName(wchar_t*) at: %p\n", FName::FNameWCharConstructor);
-        }
+        PrintDebug(L"FName::ToString at: %p\n", FName::ToStringPtr);
+        PrintDebug(L"FName::FName(char*) at: %p\n", FName::FNameCharConstructor);
+        PrintDebug(L"FName::FName(wchar_t*) at: %p\n", FName::FNameWCharConstructor);
 
         if (SettingsMgr->pFighterInstance.empty())
         {
@@ -766,11 +730,8 @@ namespace OVS::Hooks {
         uint64_t address = GetDestinationFromOpCode(lpPattern, 3, 7, 4); // Couldn't get inside cuz too small, so get outside's lea, go inside, offset.
         MakeProxyFromOpCode(GameTramp, address + 14, 4, OVS::Proxies::CopyFighterInstance, &MVSGame::UFigherGameInstanceConst, PATCH_JUMP); // 0x1422943BE
 
-        if (SettingsMgr->iLogLevel)
-        {
-            wprintf(L"FighterInstance Pattern Found at: %p\n", (uint64_t*)lpPattern);
-            wprintf(L"FighterInstance Proxied from %p to %p\n", MVSGame::UFigherGameInstanceConst, OVS::Proxies::CopyFighterInstance);
-        }
+        PrintDebug(L"FighterInstance Pattern Found at: %p\n", (uint64_t*)lpPattern);
+        PrintDebug(L"FighterInstance Proxied from %p to %p\n", MVSGame::UFigherGameInstanceConst, OVS::Proxies::CopyFighterInstance);
 
         printfSuccess(L"All Required UE Funcs Found!");
 
