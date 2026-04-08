@@ -276,7 +276,7 @@ HMODULE AwaitHModule(const wchar_t* name, uint64_t timeout)
             std::chrono::duration<double> now = std::chrono::system_clock::now() - start;
             if (now.count()*1000 > timeout)
             {
-                printfError(L"No Handle %s\n", std::wstring(name, name + wcslen(name)).c_str());
+                printfError(L"No Handle %s", std::wstring(name, name + wcslen(name)).c_str());
                 return NULL;
             }
         }
@@ -605,13 +605,13 @@ void PrintErrorProcNT(const LibFuncStruct& LFS, uint8_t bMode)
     switch (bMode)
     {
     case 0:
-        printfError(L"Couldn't patch %s!\n", LFS.ProcNameW); break;
+        printfError(L"Couldn't patch %s!", LFS.ProcNameW); break;
     case 1:
-        printfError(L"Couldn't find %s in %s!\n", LFS.ProcNameW, LFS.LibNameW); break;
+        printfError(L"Couldn't find %s in %s!", LFS.ProcNameW, LFS.LibNameW); break;
     case 2:
-        printfError(L"Couldn't patch %s!\n", LFS.LibNameW); break;
+        printfError(L"Couldn't patch %s!", LFS.LibNameW); break;
     default:
-        printfError(L"Couldn't patch %s::%s!\n", LFS.LibNameW, LFS.ProcNameW);
+        printfError(L"Couldn't patch %s::%s!", LFS.LibNameW, LFS.ProcNameW);
     }
 }
 
@@ -742,6 +742,6 @@ uint64_t HashTextSectionOfHost()
 
     QueryPerformanceCounter(&end);
     double elapsedMs = (end.QuadPart - start.QuadPart) * 1000.0 / freq.QuadPart;
-    printfError(L"Failed to find .text | Time: %.3f ms\n", elapsedMs);
+    printfError(L"Failed to find .text | Time: %.3f ms", elapsedMs);
     return 0;
 }

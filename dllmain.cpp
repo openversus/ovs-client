@@ -77,7 +77,7 @@ void CreateConsole()
 
     printfRed(L"OpenVersus");
     printfCyan(L" - It's better than Parsec\n");
-    printfYellow(L"v%ls\n\n", CURRENT_HOOK_VERSION.c_str());
+    printfYellow(L"v%ls", CURRENT_HOOK_VERSION.c_str());
     printfCyan(L"Maintained by ");
     wprintf(L"\x1b[38;2;205;46;58mRosettaSt0ned\033[0m");
     printfCyan(L", ");
@@ -86,14 +86,14 @@ void CreateConsole()
     wprintf(L"\x1b[38;2;0;255;255mMVS community.\n");
 
     printfCyan(L"Binary releases available at: https://github.com/christopher-conley/OpenVersus\n");
-    printfCyan(L"Source code and binary releases available at: https://github.com/openversus\n\n");
+    printfCyan(L"Source code and binary releases available at: https://github.com/openversus");
 
     printfCyan(L"OpenVersus is originally based on the publicly-available code developed by ");
     wprintf(L"\x1b[38;2;30;117;238mthe\033[0m");
     wprintf(L"\x1b[38;2;214;25;25mthiny\033[0m");
     printfCyan(L" and \n");
     wprintf(L"\x1b[38;2;255;179;25mMultiversusKOTH\033[0m");
-    printfCyan(L", located at: \n\n");
+    printfCyan(L", located at: ");
     printfCyan(L"https://github.com/thethiny/MVSIASI\n");
     printfCyan(L"https://github.com/multiversuskoth/mvs-http-server\n");
     printfCyan(L"https://github.com/multiversuskoth/mvs-udp-server\n");
@@ -232,20 +232,20 @@ static bool PostViaWinHTTP(const std::wstring& url, const std::wstring& body)
 
     HINTERNET hSession = WinHttpOpen(L"OVS/1.0", WINHTTP_ACCESS_TYPE_NO_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!hSession) {
-        printfError(L"[OVS] WinHTTP: WinHttpOpen failed (%lu)\n", GetLastError());
+        printfError(L"[OVS] WinHTTP: WinHttpOpen failed (%lu)", GetLastError());
         return false;
     }
 
     HINTERNET hConnect = WinHttpConnect(hSession, hostStr.c_str(), (INTERNET_PORT)port, 0);
     if (!hConnect) {
-        printfError(L"[OVS] WinHTTP: WinHttpConnect failed (%lu)\n", GetLastError()); WinHttpCloseHandle(hSession);
+        printfError(L"[OVS] WinHTTP: WinHttpConnect failed (%lu)", GetLastError()); WinHttpCloseHandle(hSession);
         return false;
     }
 
     DWORD flags = https ? WINHTTP_FLAG_SECURE : 0;
     HINTERNET hRequest = WinHttpOpenRequest(hConnect, L"POST", path.c_str(), NULL, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, flags);
     if (!hRequest) {
-        printfError(L"[OVS] WinHTTP: WinHttpOpenRequest failed (%lu)\n", GetLastError()); WinHttpCloseHandle(hConnect); WinHttpCloseHandle(hSession);
+        printfError(L"[OVS] WinHTTP: WinHttpOpenRequest failed (%lu)", GetLastError()); WinHttpCloseHandle(hConnect); WinHttpCloseHandle(hSession);
         return false;
     }
 
@@ -264,7 +264,7 @@ static bool PostViaWinHTTP(const std::wstring& url, const std::wstring& body)
 
     if (!ok)
     {
-        printfError(L"[OVS] WinHTTP: send failed (%lu)\n", GetLastError());
+        printfError(L"[OVS] WinHTTP: send failed (%lu)", GetLastError());
     }
 
     else {
@@ -305,7 +305,7 @@ static bool PostViaWinInet(const std::wstring& url, const std::wstring& body)
 
     HINTERNET hInet = InternetOpenW(L"OVS/1.0", INTERNET_OPEN_TYPE_DIRECT, NULL, NULL, 0);
     if (!hInet) {
-        printfError(L"[OVS] WinInet: InternetOpen failed (%lu)\n", GetLastError());
+        printfError(L"[OVS] WinInet: InternetOpen failed (%lu)", GetLastError());
         return false;
     }
 
@@ -316,13 +316,13 @@ static bool PostViaWinInet(const std::wstring& url, const std::wstring& body)
 
     HINTERNET hConn = InternetConnectW(hInet, hostStr.c_str(), (INTERNET_PORT)port, NULL, NULL, INTERNET_SERVICE_HTTP, 0, 0);
     if (!hConn) {
-        printfError(L"[OVS] WinInet: InternetConnect failed (%lu)\n", GetLastError()); InternetCloseHandle(hInet);
+        printfError(L"[OVS] WinInet: InternetConnect failed (%lu)", GetLastError()); InternetCloseHandle(hInet);
         return false;
     }
 
     HINTERNET hReq = HttpOpenRequestW(hConn, L"POST", path.c_str(), NULL, NULL, NULL, INTERNET_FLAG_NO_CACHE_WRITE | INTERNET_FLAG_RELOAD, 0);
     if (!hReq) {
-        printfError(L"[OVS] WinInet: HttpOpenRequest failed (%lu)\n", GetLastError()); InternetCloseHandle(hConn); InternetCloseHandle(hInet);
+        printfError(L"[OVS] WinInet: HttpOpenRequest failed (%lu)", GetLastError()); InternetCloseHandle(hConn); InternetCloseHandle(hInet);
         return false;
     }
 
@@ -335,7 +335,7 @@ static bool PostViaWinInet(const std::wstring& url, const std::wstring& body)
     BOOL ok = HttpSendRequestA(hReq, headers, (DWORD)strlen(headers), (LPVOID)utf8Body.c_str(), (DWORD)utf8Body.size());
     if (!ok)
     {
-        printfWarning(L"[OVS] WinInet: send failed (%lu)\n", GetLastError());
+        printfWarning(L"[OVS] WinInet: send failed (%lu)", GetLastError());
     }
     else
     {
@@ -551,14 +551,14 @@ static void DoPerformUpdate()
         HINTERNET hSess = WinHttpOpen(L"OVS/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
             WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
         if (!hSess) {
-            printfWarning(L"[AutoUpdate] WinHttpOpen failed (%lu)\n", GetLastError());
+            printfWarning(L"[AutoUpdate] WinHttpOpen failed (%lu)", GetLastError());
             return;
         }
 
         HINTERNET hConn = WinHttpConnect(hSess, dlHost.c_str(), dlPort, 0);
         if (!hConn) {
             WinHttpCloseHandle(hSess);
-            printfWarning(L"[AutoUpdate] WinHttpConnect failed\n");
+            printfWarning(L"[AutoUpdate] WinHttpConnect failed");
             return;
         }
 
@@ -568,7 +568,7 @@ static void DoPerformUpdate()
         if (!hReq) {
             WinHttpCloseHandle(hConn);
             WinHttpCloseHandle(hSess);
-            printfWarning(L"[AutoUpdate] WinHttpOpenRequest failed\n");
+            printfWarning(L"[AutoUpdate] WinHttpOpenRequest failed");
             return;
         }
 
@@ -576,14 +576,14 @@ static void DoPerformUpdate()
             !WinHttpReceiveResponse(hReq, nullptr)) {
             DWORD dlErr = GetLastError();
             WinHttpCloseHandle(hReq); WinHttpCloseHandle(hConn); WinHttpCloseHandle(hSess);
-            printfWarning(L"[AutoUpdate] Download request failed (%lu)\n", dlErr);
+            printfWarning(L"[AutoUpdate] Download request failed (%lu)", dlErr);
             return;
         }
 
         HANDLE hFile = CreateFileW(tempFile, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, nullptr);
         if (hFile == INVALID_HANDLE_VALUE) {
             WinHttpCloseHandle(hReq); WinHttpCloseHandle(hConn); WinHttpCloseHandle(hSess);
-            printfWarning(L"[AutoUpdate] Failed to create temp file\n");
+            printfWarning(L"[AutoUpdate] Failed to create temp file");
             return;
         }
 
@@ -605,7 +605,7 @@ static void DoPerformUpdate()
 
     HANDLE hFile = CreateFileW(tempFile, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
     if (hFile == INVALID_HANDLE_VALUE) {
-        printfWarning(L"[AutoUpdate] Downloaded file not found\n");
+        printfWarning(L"[AutoUpdate] Downloaded file not found");
         return;
     }
     DWORD fileSize = GetFileSize(hFile, nullptr);
@@ -613,7 +613,7 @@ static void DoPerformUpdate()
     printfGreen(L"[AutoUpdate] Downloaded %lu bytes\n", fileSize);
 
     if (fileSize < 10000) {
-        printfWarning(L"[AutoUpdate] Download update file too small (%lu bytes), aborting\n", fileSize);
+        printfWarning(L"[AutoUpdate] Download update file too small (%lu bytes), aborting", fileSize);
         DeleteFileW(tempFile);
         return;
     }
@@ -624,14 +624,14 @@ static void DoPerformUpdate()
     printfGreen(L"[AutoUpdate] Backing up current asi file and installing update...\n");
 
     if (!MoveFileW(dllPath, backupPath)) {
-        printfWarning(L"[AutoUpdate] Failed to rename current DLL to .bak (error %lu)\n", GetLastError());
+        printfWarning(L"[AutoUpdate] Failed to rename current DLL to .bak (error %lu)", GetLastError());
         DeleteFileW(tempFile);
         return;
     }
     wprintf(L"[AutoUpdate] Renamed current DLL to .bak\n");
 
     if (!MoveFileW(tempFile, dllPath)) {
-        printfWarning(L"[AutoUpdate] Failed to move new DLL into place (error %lu), restoring original asi file\n", GetLastError());
+        printfWarning(L"[AutoUpdate] Failed to move new DLL into place (error %lu), restoring original asi file", GetLastError());
         MoveFileW(backupPath, dllPath); // restore
         return;
     }
@@ -652,7 +652,7 @@ static void CheckForUpdate()
     std::wstring wUrl(SettingsMgr->szServerUrl.begin(), SettingsMgr->szServerUrl.end());
     ParsedURL parsed = OVS::Utils::AutoUpdateParseUrl(wUrl);
     if (!parsed.bParseSuccess) {
-        printfWarning(L"[AutoUpdate] Failed to parse server URL\n");
+        printfWarning(L"[AutoUpdate] Failed to parse server URL");
         return;
     }
 
@@ -662,7 +662,7 @@ static void CheckForUpdate()
     wchar_t responseBuf[2048];
     int bodyLen = OVS::Utils::AutoUpdateHttpRequest(parsed.Host.c_str(), _wtoi(parsed.Port.c_str()), path, responseBuf, _countof(responseBuf));
     if (bodyLen <= 0) {
-        printfWarning(L"[AutoUpdate] Version check failed (no response)\n");
+        printfWarning(L"[AutoUpdate] Version check failed (no response)");
         return;
     }
 
@@ -674,19 +674,19 @@ static void CheckForUpdate()
     PrintDebug(L"[AutoUpdate] Current: %ls, Latest: %ls\n", OVS::OVS_Version, latestVersion);
 
     if (wcsstr(responseBuf, L"\"is_latest\":true") || wcsstr(responseBuf, L"\"is_latest\": true")) {
-        printfInfo(L"[AutoUpdate] Already up to date\n");
+        printfInfo(L"[AutoUpdate] Already up to date");
         return;
     }
 
     if (latestVersion[0] == '\0' || downloadUrl[0] == '\0') {
-        printfWarning(L"[AutoUpdate] Missing version/URL in response, skipping\n");
+        printfWarning(L"[AutoUpdate] Missing version/URL in response, skipping");
         return;
     }
 
     wcsncpy_s(g_UpdateLatestVersion, latestVersion, _TRUNCATE);
     wcsncpy_s(g_UpdateDownloadUrl,   downloadUrl,   _TRUNCATE);
 
-    printfInfo(L"[AutoUpdate] Update available (%s) — downloading automatically...\n", latestVersion);
+    printfInfo(L"[AutoUpdate] Update available (%s) — downloading automatically...", latestVersion);
     DoPerformUpdate();
 }
 
