@@ -33,93 +33,105 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="source\dllmain.cpp">
+    <ClCompile Include="dllmain.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="source\utils\CPPython\pystring.cpp">
+    <ClCompile Include="src\utils\pystring.cpp">
       <Filter>Source Files\Utils</Filter>
     </ClCompile>
-    <ClCompile Include="source\IniReader.cpp">
+    <ClCompile Include="src\IniReader\IniReader.cpp">
       <Filter>Resource Files\IniReader</Filter>
     </ClCompile>
-    <ClCompile Include="source\utils\Patterns.cpp">
+    <ClCompile Include="src\Patterns\Patterns.cpp">
       <Filter>Resource Files\Utils</Filter>
     </ClCompile>
-    <ClCompile Include="source\src\eSettingsManager.cpp">
+    <ClCompile Include="src\eSettingsManager\eSettingsManager.cpp">
       <Filter>Source Files\Utils</Filter>
     </ClCompile>
-    <ClCompile Include="source\utils\prettyprint.cpp">
+    <ClCompile Include="src\utils\prettyprint.cpp">
       <Filter>Source Files\Utils</Filter>
     </ClCompile>
-    <ClCompile Include="pch.cpp">
+    <ClCompile Include="src\pch\pch.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="source\src\mvsutils.cpp">
+    <ClCompile Include="src\mvs\mvsutils.cpp">
       <Filter>Source Files\MVS</Filter>
     </ClCompile>
-    <ClCompile Include="source\src\OpenVersus.cpp">
+    <ClCompile Include="src\ovs\OpenVersus.cpp">
       <Filter>Source Files\MVS</Filter>
     </ClCompile>
-    <ClCompile Include="source\src\mvs.cpp">
+    <ClCompile Include="src\mvs\mvs.cpp">
       <Filter>Source Files\MVS</Filter>
+    </ClCompile>
+    <ClCompile Include="src\utils\Utils.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\utils\Stringbuilder.cpp">
+      <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="source\utils\CPPython\cppython.h">
+    <ClInclude Include="src\include\utils\cppython.h">
       <Filter>Header Files\Utils</Filter>
     </ClInclude>
-    <ClInclude Include="source\utils\CPPython\pystring.h">
+    <ClInclude Include="src\include\utils\pystring.h">
       <Filter>Header Files\Utils</Filter>
     </ClInclude>
-    <ClInclude Include="source\includes.h">
+    <ClInclude Include="src\include\includes.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="source\IniReader.h">
+    <ClInclude Include="src\include\InIReader\IniReader.h">
       <Filter>Resource Files\IniReader</Filter>
     </ClInclude>
-    <ClInclude Include="source\utils\MemoryMgr.h">
+    <ClInclude Include="src\include\misc\MemoryMgr.h">
       <Filter>Resource Files\Utils</Filter>
     </ClInclude>
-    <ClInclude Include="source\utils\Patterns.h">
+    <ClInclude Include="src\include\Patterns\Patterns.h">
       <Filter>Resource Files\Utils</Filter>
     </ClInclude>
-    <ClInclude Include="source\utils\Trampoline.h">
+    <ClInclude Include="src\include\Trampoline\Trampoline.h">
       <Filter>Resource Files\Utils</Filter>
     </ClInclude>
-    <ClInclude Include="source\src\eSettingsManager.h">
+    <ClInclude Include="src\include\eSettingsManager\eSettingsManager.h">
       <Filter>Header Files\Utils</Filter>
     </ClInclude>
-    <ClInclude Include="source\utils\prettyprint.h">
+    <ClInclude Include="src\include\utils\prettyprint.h">
       <Filter>Header Files\Utils</Filter>
     </ClInclude>
-    <ClInclude Include="pch.h">
+    <ClInclude Include="src\include\pch\pch.h">
       <Filter>Source Files</Filter>
     </ClInclude>
-    <ClInclude Include="framework.h">
+    <ClInclude Include="src\include\misc\framework.h">
       <Filter>Source Files</Filter>
     </ClInclude>
-    <ClInclude Include="source\src\OVSUtils.h">
+    <ClInclude Include="src\include\ovs\OVSUtils.h">
       <Filter>Header Files\MVS</Filter>
     </ClInclude>
-    <ClInclude Include="source\src\OpenVersus.h">
+    <ClInclude Include="src\include\ovs\OpenVersus.h">
       <Filter>Header Files\MVS</Filter>
     </ClInclude>
-    <ClInclude Include="source\src\mvs.h">
+    <ClInclude Include="src\include\mvs\mvs.h">
       <Filter>Header Files\MVS</Filter>
     </ClInclude>
-    <ClInclude Include="mk12_enums.h">
+    <ClInclude Include="src\include\detours\detours.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="source\detours.h">
+    <ClInclude Include="src\include\ovs\EnvInfo.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\include\utils\Utils.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\include\constants.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="README.md" />
     <None Include=".gitignore" />
-    <None Include="source\sample.ini" />
+    <None Include="sample.ini" />
   </ItemGroup>
   <ItemGroup>
-    <Library Include="source\detours.lib" />
+    <Library Include="libs\detours.lib" />
   </ItemGroup>
 </Project>

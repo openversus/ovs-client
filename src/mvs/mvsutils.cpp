@@ -1,0 +1,747 @@
+#include "ovs/OpenVersus.h"
+#include "ovs/OVSUtils.h"
+#include "utils/prettyprint.h"
+#include "utils/Utils.hpp"
+#include <map>
+#include <cstdio>
+
+using namespace HookMetadata;
+using namespace Memory::VP;
+using namespace hook;
+using namespace OVS::Utils;
+
+LibMap IATable;
+
+// Address Utilities
+
+int64 GetGameEntryPoint()
+{
+    static __int64 addr = reinterpret_cast<__int64>(GetModuleHandle(nullptr));
+    return addr;
+}
+
+int64 GetUser32EntryPoint()
+{
+    static __int64 addr = reinterpret_cast<__int64>(GetModuleHandle(L"user32.dll"));
+    return addr;
+}
+
+int64 GetModuleEntryPoint(const wchar_t* name)
+{
+    static __int64 addr = reinterpret_cast<__int64>(GetModuleHandle(name));
+    return addr;
+}
+
+int64 GetGameAddr(__int64 addr)
+{
+    int64_t base = GetGameEntryPoint();
+    if (addr >= 0x140000000 && addr < base)
+        return addr - 0x140000000 + base;
+
+    if (addr >= base)
+        return addr;
+
+    return base + addr;
+}
+
+int64 GetUser32Addr(__int64 addr)
+{
+    return GetUser32EntryPoint() + addr;
+}
+
+int64 GetModuleAddr(__int64 addr, const wchar_t* name)
+{
+    return GetModuleEntryPoint(name) + addr;
+}
+
+
+// Functional Utilities
+
+std::string toLower(std::string s)
+{
+    std::string new_string("");
+    for (int i = 0; i < s.length(); i++)
+    {
+        new_string += std::tolower(s[i]);
+    }
+    return new_string;
+}
+
+std::wstring toLower(std::wstring s)
+{
+    std::wstring new_string(L"");
+    for (int i = 0; i < s.length(); i++)
+    {
+        new_string += std::tolower(s[i]);
+    }
+    return new_string;
+}
+
+std::string toUpper(std::string s)
+{
+    std::string new_string("");
+    for (int i = 0; i < s.length(); i++)
+    {
+        new_string += std::toupper(s[i]);
+    }
+    return new_string;
+}
+
+std::wstring toUpper(std::wstring s)
+{
+    std::wstring new_string(L"");
+    for (int i = 0; i < s.length(); i++)
+    {
+        new_string += std::toupper(s[i]);
+    }
+    return new_string;
+}
+
+std::wstring GetFileName(std::wstring filename)
+{
+    std::wstring basename;
+    size_t pos = filename.find_last_of(L"/\\"); // Or
+    if (pos != -1)
+    {
+        basename = filename.substr(pos + 1);
+        return basename;
+    }
+    return filename;
+}
+
+std::wstring GetFileName(std::string filename)
+{
+    return GetFileName(ToWideStr(filename.c_str()));
+}
+
+std::wstring GetFileNameW(std::wstring filename)
+{
+    return GetFileName(filename);
+}
+
+std::wstring GetFileNameW(std::string filename)
+{
+    return GetFileName(ToWideStr(filename.c_str()));
+}
+
+std::string GetFileNameA(std::wstring filename)
+{
+    return ToNarrowStr(GetFileName(filename).c_str());
+}
+
+std::string GetFileNameA(std::string filename)
+{
+    return GetFileNameA(ToWideStr(filename.c_str()));
+}
+
+std::wstring GetFileNameWithoutExt(std::wstring filename)
+{
+    std::wstring basename = GetFileName(filename);
+    size_t pos = basename.find_last_of(L'.');
+    if (pos != -1)
+    {
+        return basename.substr(0, pos);
+    }
+    return basename;
+}
+
+std::wstring GetFileNameWithoutExtW(std::string filename)
+{
+    return GetFileNameWithoutExt(ToWideStr(filename.c_str()));
+}
+
+std::wstring GetFileNameWithoutExtW(std::wstring filename)
+{
+    return GetFileNameWithoutExt(filename);
+}
+
+std::string GetFileNameWithoutExtA(std::string filename)
+{
+    return ToNarrowStr(GetFileNameWithoutExt(ToWideStr(filename.c_str())).c_str());
+}
+
+std::string GetFileNameWithoutExtA(std::wstring filename)
+{
+    return ToNarrowStr(GetFileNameWithoutExt(filename).c_str());
+}
+
+std::wstring GetFileBaseName(std::wstring filename)
+{
+    return GetFileNameWithoutExt(GetFileName(filename));
+}
+
+std::wstring GetFileBaseNameW(std::wstring filename)
+{
+    return GetFileBaseName(filename);
+}
+
+std::wstring GetFileBaseNameW(std::string filename)
+{
+    return GetFileBaseName(ToWideStr(filename.c_str()));
+}
+
+std::string GetFileBaseNameA(std::wstring filename)
+{
+    return ToNarrowStr(GetFileBaseName(filename).c_str());
+}
+
+std::string GetFileBaseNameA(std::string filename)
+{
+    return GetFileBaseNameA(ToWideStr(filename.c_str()));
+}
+
+std::wstring GetProcessName()
+{
+    WCHAR fileName[MAX_PATH + 1];
+    DWORD chars = GetModuleFileNameW(NULL, fileName, MAX_PATH + 1);
+    if (chars)
+    {
+        return GetFileName(fileName);
+    }
+    return L"";
+}
+
+std::string GetProcessNameA()
+{
+    return ToNarrowStr(GetProcessName().c_str());
+}
+
+std::wstring GetProcessNameW()
+{
+    return GetProcessName();
+}
+
+std::wstring GetDirName()
+{
+    WCHAR fileName[MAX_PATH + 1];
+    DWORD chars = GetModuleFileNameW(NULL, fileName, MAX_PATH + 1);
+    if (chars)
+    {
+        std::wstring basename;
+        std::wstring filename = std::wstring(fileName);
+        size_t pos = filename.find_last_of('\\');
+        if (pos != -1)
+        {
+            basename = filename.substr(0, pos);
+            return basename;
+        }
+        return filename;
+    }
+    return L"";
+}
+
+std::wstring GetDirName(HMODULE hModule)
+{
+    WCHAR fileName[MAX_PATH + 1];
+    DWORD chars = GetModuleFileNameW(hModule, fileName, MAX_PATH + 1);
+    if (chars)
+    {
+        std::wstring filename = std::wstring(fileName);
+        size_t pos = filename.find_last_of('\\');
+        if (pos != std::wstring::npos)
+            return filename.substr(0, pos);
+        return filename;
+    }
+    return L"";
+}
+
+std::wstring GetDirNameW()
+{
+    return GetDirName();
+}
+
+std::wstring GetDirNameW(HMODULE hModule)
+{
+    return GetDirName(hModule);
+}
+
+std::string GetDirNameA()
+{
+    return ToNarrowStr(GetDirName().c_str());
+}
+
+std::string GetDirNameA(HMODULE hModule)
+{
+    return ToNarrowStr(GetDirName(hModule).c_str());
+}
+
+HMODULE AwaitHModule(const wchar_t* name, uint64_t timeout)
+{
+    HMODULE toAwait = NULL;
+    auto start = std::chrono::system_clock::now();
+    while (!toAwait)
+    {
+        if (timeout > 0)
+        {
+            std::chrono::duration<double> now = std::chrono::system_clock::now() - start;
+            if (now.count()*1000 > timeout)
+            {
+                printfError(L"No Handle %s\n", std::wstring(name, name + wcslen(name)).c_str());
+                return NULL;
+            }
+        }
+        toAwait = GetModuleHandle(name);	
+    }
+    PrintDebug(L"Obtained Handle for %s\n", std::wstring(name, name + wcslen(name)).c_str());
+    return toAwait;
+}
+
+uint64_t stoui64h(std::string szString)
+{
+    return strtoull(szString.c_str(), nullptr, 16);
+}
+
+
+uint64_t* FindPattern(void* handle, std::wstring_view bytes)
+{
+    hook::pattern pCamPattern = hook::make_module_pattern(handle, bytes); // Make pattern external
+    if (!pCamPattern.count_hint(1).empty())
+    {
+        return pCamPattern.get(0).get<uint64_t>(0);
+    }
+    return nullptr;
+}
+
+uint64_t* FindPattern(std::wstring pattern)
+{
+    return FindPattern(GetModuleHandleW(NULL), pattern);
+}
+
+uint64_t* FindPattern(const wchar_t* pattern)
+{
+    return FindPattern(std::wstring(pattern));
+}
+
+uint64_t HookPattern(std::wstring Pattern, const wchar_t* PatternName, void* HookProc, int64_t PatternOffset, PatchTypeEnum PatchType, uint64_t PrePat, uint64_t* Entry)
+{
+    uint64_t lpPattern;
+    std::wstring wPatternName(PatternName, PatternName + wcslen(PatternName));
+    if (PrePat)
+    {
+        lpPattern = PrePat;
+    }
+    else
+    {
+        lpPattern = (uint64_t)FindPattern(GetModuleHandleW(NULL), Pattern);
+
+        if (lpPattern != NULL)
+        {
+            std::wstring wPattern(Pattern.begin(), Pattern.end());
+            printfInfo(L"Searching for %s: %s", wPatternName.c_str(), wPattern.c_str());
+            if (SettingsMgr->iLogLevel)
+                printfSuccess(L"%s Pattern found at %llx", wPatternName.c_str(), lpPattern);
+        }
+        else
+        {
+            printfError(L"Couldn't find pattern. %s Disabled", wPatternName);
+            return lpPattern;
+        }
+    }
+
+    SetColorGreen();
+    if (Entry != NULL)
+    {
+        uint64_t FuncEntry = GetDestinationFromOpCode(lpPattern + PatternOffset); // Already relative to game address so GetGameAddr is unnecessary
+        *Entry = FuncEntry;
+        PrintDebug(L"%s Function Entry found at %llx", wPatternName.c_str(), FuncEntry);
+    }
+    
+    uint64_t hook_address = lpPattern + PatternOffset;
+    PrintDebug(L"Injecting at %llx", hook_address);
+    InjectHook(hook_address, HookProc, PatchType);
+    
+    ResetColors();
+    return lpPattern;
+}
+
+void ConditionalJumpToJump(uint64_t HookAddress)
+{
+    uint64_t GameAddr = GetGameAddr(HookAddress);
+    uint32_t JumpAddress = GetOffsetFromOpCode(GameAddr, 2, 4);
+    Patch(GameAddr, (uint8_t)0xE9); // jmp
+    Patch(GameAddr + 1, JumpAddress + 1); // jmp address+1 cuz we reduced function size by 1
+    Patch(GameAddr + 5, (uint8_t)0x90); // nop
+}
+
+void ConditionalJumpToJump(uint64_t HookAddress, uint32_t Offset)
+{
+    HookAddress += Offset;
+    uint64_t GameAddr = GetGameAddr(HookAddress);
+    uint32_t JumpAddress = GetOffsetFromOpCode(GameAddr, 2, 4);
+    Patch<uint8_t>(GameAddr, 0xE9); // jmp
+    Patch<uint32_t>(GameAddr + 1, JumpAddress + 1); // jmp address+1 cuz we reduced function size by 1
+    Patch<uint8_t>(GameAddr + 5, 0x90); // nop
+}
+
+/**
+    Get Relative Offset From OpCode. Caller is the address to call / jmp / jne ...etc, Offset is the size of the opcode to the address, size is the size of the address.
+    Example, call MK12.exe+21CDA30 from MK12.exe+3855356 becomes Function(143855356, 1, 4) since Call is E8 * * * * where * are the relative jump address.
+
+     * Get the relative offset from an opcode.
+     *
+     * @param Caller The address of the jump / call.
+     * @param Offset The offset to add to the caller to reach the address. It is 1 for jmp / call, 2 for je, jne, jg... etc since jmp is E9 Address.
+     * @param Size The size of the address, usually 4 for near jumps, 8 for long jumps.
+     * @return The calculated offset.
+*/
+int32_t GetOffsetFromOpCode(uint64_t Caller, uint64_t Offset, uint16_t Size)
+{
+    int32_t offset = 0;
+    memcpy(&offset, (uint64_t*)(Caller + Offset), Size);
+    return offset;
+}
+
+
+/**
+ * Calculate the destination address from an opcode call.
+ * Get relative offset and then adds it to address to get the entry of the called function, or destination jump address.
+ *
+ * @param Caller The address of the opcode call.
+ * @param Offset The offset to add to the caller to reach the address in the opcode. Example, 1 for jmp, 2 for je.
+ * @param FuncLen The length of the function to be added to the RIP register.
+ * @param Size The size of the address.
+ * @return The calculated destination address.
+ * 
+ * @todo offset should allow int64_t in cases where Size is > 4 so negatives are handled correctly.
+ */
+uint64_t GetDestinationFromOpCode(uint64_t Caller, uint64_t Offset, uint64_t FuncLen, uint16_t Size)
+{
+    int32_t offset = GetOffsetFromOpCode(Caller, Offset, Size);
+    return uint64_t(Caller + offset) + FuncLen;
+}
+
+void SetCheatPattern(std::wstring pattern, std::wstring name, uint64_t** lpPattern)
+{
+    if (!pattern.empty())
+    {
+        PrintDebug(L"Searching for %s: %s", name, pattern);
+        *lpPattern = FindPattern(GetModuleHandleW(NULL), pattern);
+
+        std::wstring wName(name.begin(), name.end());
+        if (*lpPattern != nullptr)
+        {
+            PrintDebug(L"%s Found at: %p", wName, *lpPattern);
+        }
+        else
+        {
+            printfError(L"%s Not Found >> Disabled.", wName);
+        }
+    }
+}
+
+LibMap ParsePEHeader()
+{
+    PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)GetModuleHandleW(NULL);
+    PIMAGE_NT_HEADERS pNTHeader = (PIMAGE_NT_HEADERS)RVAtoLP((PBYTE)pDosHeader, pDosHeader->e_lfanew);
+    if (pNTHeader->Signature != IMAGE_NT_SIGNATURE)
+    {
+        RaiseException(L"NT Signature Failed!", -1); // Not an EXE
+    }
+
+    LibMap IAT{};
+
+    PIMAGE_IMPORT_DESCRIPTOR pImportDesc = (PIMAGE_IMPORT_DESCRIPTOR)RVAtoLP(pDosHeader, pNTHeader->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
+
+    for (int i = 0; pImportDesc[i].Characteristics != 0; i++)
+    {
+        std::wstring szLibrary = (wchar_t*)RVAtoLP(pDosHeader, pImportDesc[i].Name);
+        if (!pImportDesc[i].FirstThunk || !pImportDesc[i].OriginalFirstThunk)
+            continue;
+
+        PIMAGE_THUNK_DATA pThunk = (PIMAGE_THUNK_DATA)RVAtoLP(pDosHeader, pImportDesc[i].FirstThunk);
+        PIMAGE_THUNK_DATA pOrigThunk = (PIMAGE_THUNK_DATA)RVAtoLP(pDosHeader, pImportDesc[i].OriginalFirstThunk);
+
+        FuncMap FunctionsMap{};
+
+        for (; pOrigThunk->u1.Function != NULL; pOrigThunk++, pThunk++)
+        {
+            if (pOrigThunk->u1.Ordinal & IMAGE_ORDINAL_FLAG)
+                continue;
+
+            PIMAGE_IMPORT_BY_NAME import = (PIMAGE_IMPORT_BY_NAME)RVAtoLP(pDosHeader, pOrigThunk->u1.AddressOfData);
+
+            std::wstring FuncName = (wchar_t*)import->Name;
+            FunctionsMap[FuncName] = pThunk->u1.Function;
+        }
+        std::wstring szLibraryStoreName = toLower(szLibrary);
+        IAT[szLibraryStoreName] = FunctionsMap;
+    }
+
+    return IAT;
+
+}
+
+int StringToVK(std::wstring sKey)
+{
+    for (auto& c : sKey) c = toupper(c); // To Upper sKey
+
+    if (sKey == L"SHIFT")
+    {
+        return VK_SHIFT;
+    }
+
+    if (sKey == L"TAB")
+    {
+        return VK_TAB;
+    }
+
+    if (sKey == L"SPACE")
+    {
+        return VK_SPACE;
+    }
+
+    if (sKey == L"ALT")
+    {
+        return VK_MENU;
+    }
+
+    if (sKey.substr(0, 6) == L"NUMPAD") // Numpad
+    {
+        wchar_t cLast = sKey[6];
+        switch (cLast)
+        {
+        case L'+':
+            return VK_ADD;
+        case L'-':
+            return VK_SUBTRACT;
+        case L'E': //NUMPAD Enter
+            return VK_RETURN;
+        case L'*':
+            return VK_MULTIPLY;
+        case L'/':
+            return VK_DIVIDE;
+        default:
+            return cLast + 0x30; // NUMPAD Number
+        }
+
+    }
+    if (sKey.length() == 1)
+    {
+        if (sKey[0] >= L'0' && sKey[0] <= L'Z' && sKey[0] != 0x40) // Letter or Number. 0x40 is not available which is @
+            return sKey[0]; // Letters and Numbers' VK are their ASCII Repr
+        if (sKey[0] == L'/' || sKey[0] == L'?')
+            return VK_OEM_2;
+        if (sKey[0] == L'-')
+            return VK_OEM_MINUS;
+        if (sKey[0] == L'+')
+            return VK_OEM_PLUS;
+        if (sKey[0] == L'`' || sKey[0] == L'~')
+            return VK_OEM_3;
+    }
+
+    if (sKey[0] == L'F' && sKey.length() > 1 && sKey.length() <= 3) // F1-F12 buttons
+    {
+        std::wstring digits = sKey.substr(1, sKey.length() - 1).c_str();
+        return std::stoi(digits.c_str()) + 0x70 - 1;
+    }
+
+    // Arrows
+    if (sKey == L"DOWN")
+        return VK_DOWN;
+    if (sKey == L"UP")
+        return VK_UP;
+    if (sKey == L"LEFT")
+        return VK_LEFT;
+    if (sKey == L"RIGHT")
+        return VK_RIGHT;
+
+    RaiseException(L"Button Binding Unsupported!");
+}
+
+void RaiseException(const wchar_t* Message, int64_t ErrorCode)
+{
+    std::wstring ErrorMessage = L"Error: " + std::wstring(Message);
+    MessageBoxW(0, ErrorMessage.c_str(), L"Error", MB_ICONERROR);
+    throw(ErrorCode);
+}
+
+bool IsHex(char c)
+{
+    return IsBase(c, 16);
+}
+
+bool IsBase(char c, int base)
+{
+    std::wstring alpha = L"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz+/";
+    return alpha.substr(0, base).find(c) != -1;
+}
+
+
+LibFuncStruct ParseLibFunc(CPPython::string path)
+{
+    LibFuncStruct LFS;
+    auto vars = path.rsplit(L".", 1);
+
+    if (vars.size() != 2)
+        //RaiseException("Incorrect Argument", -1);
+        return LFS;
+
+    LFS.FullName = path;
+    LFS.FullNameW = std::wstring(LFS.FullName.begin(), LFS.FullName.end());
+    LFS.LibName = vars[0].lower();
+    LFS.ProcName = vars[1];
+    LFS.ProcNameW = std::wstring(LFS.ProcName.begin(), LFS.ProcName.end());
+
+    LFS.LibName = CPPython::string(LFS.LibName).endswith(L".dll") || CPPython::string(LFS.LibName).endswith(L".exe") ? LFS.LibName : LFS.LibName + L".dll";
+    LFS.LibNameW = std::wstring(LFS.LibName.begin(), LFS.LibName.end());
+
+    LFS.bIsValid = true;
+
+    return LFS;
+}
+
+void ParseLibFunc(LibFuncStruct& LFS)
+{
+    LFS = ParseLibFunc(LFS.FullName);
+}
+
+uint64_t* GetLibProcFromNT(const LibFuncStruct& LFS)
+{
+    return LFS.bIsValid ? (uint64_t*)IATable[LFS.LibName][LFS.ProcName] : nullptr;
+}
+
+void PrintErrorProcNT(const LibFuncStruct& LFS, uint8_t bMode)
+{
+    switch (bMode)
+    {
+    case 0:
+        printfError(L"Couldn't patch %s!\n", LFS.ProcNameW); break;
+    case 1:
+        printfError(L"Couldn't find %s in %s!\n", LFS.ProcNameW, LFS.LibNameW); break;
+    case 2:
+        printfError(L"Couldn't patch %s!\n", LFS.LibNameW); break;
+    default:
+        printfError(L"Couldn't patch %s::%s!\n", LFS.LibNameW, LFS.ProcNameW);
+    }
+}
+
+/**
+ * Patch a function from its `call` opcode to point to a proxy to the called function
+ *
+ * @param GameTramp A Trampoline that lives in the game's code space
+ * @param CallAddr The address to the `call` opcode
+ * @param JumpAddrSize The Size of the Address in the opcode
+ * @param ProxyFunctionAddr The address of the Proxy Function
+ * @param PatchType CALL or JUMP, defaults to CALL
+ *
+ * @return The address of the Game Function that was proxied as a `uint64_t*`
+ */
+uint64_t* MakeProxyFromOpCode(Trampoline* GameTramp, uint64_t CallAddr, uint8_t JumpAddrSize, void* ProxyFunctionAddr, PatchTypeEnum PatchType) // Jump size is either 4 or 8
+{
+    CallAddr = GetGameAddr(CallAddr);
+    uint8_t callOpcSize = JumpAddrSize >> 2;
+    uint8_t funcLen = callOpcSize + JumpAddrSize;
+    uint64_t CalledFuncAddr = GetDestinationFromOpCode(CallAddr, callOpcSize, funcLen, JumpAddrSize);
+
+    Memory::VP::InjectHook(CallAddr, GameTramp->Jump(ProxyFunctionAddr), PatchType);
+    return (uint64_t*)CalledFuncAddr;
+}
+
+namespace RegisterHacks {
+
+    MoveToRegister* MoveToRAX;
+    MoveToRegister* MoveToRBX;
+    MoveToRegister* MoveToRCX;
+    MoveToRegister* MoveToRDX;
+    MoveToRegister* MoveToR8;
+    MoveToRegister* MoveToR9;
+    MoveToRegister* MoveToR10;
+    MoveToRegister* MoveToR11;
+    MoveToRegister* MoveToR12;
+    MoveToRegister* MoveToR13;
+    MoveToRegister* MoveToR14;
+    MoveToRegister* MoveToR15;
+
+    bool			bIsEnabled = false;
+
+    void RegisterHacks::EnableRegisterHacks()
+    {
+        if (bIsEnabled)
+        {
+            return;
+        }
+
+        PrintDebug(L"Enabling Register Hack Functions\n");
+        uint8_t* CallSpace = new uint8_t[4*12 + 1]; // 12 is registers count, 1 is ret
+        DWORD oldProtect;
+        VirtualProtect(CallSpace, 4*12 + 1, PAGE_EXECUTE_READWRITE, &oldProtect);
+
+        uint32_t ASMs[] = {
+            0xC3C88948, // RAX
+            0xC3CB8948,
+            0xC3C98948,
+            0xC3CA8948,
+            0xC3C88949, // R8
+            0xC3C98949,
+            0xC3CA8949,
+            0xC3CB8949,
+            0xC3CC8949,
+            0xC3CD8949,
+            0xC3CE8949,
+            0xC3CF8949,
+        };
+
+        MoveToRegister** Funcs[] = {
+            &MoveToRAX,
+            &MoveToRBX,
+            &MoveToRCX,
+            &MoveToRDX,
+            &MoveToR8,
+            &MoveToR9,
+            &MoveToR10,
+            &MoveToR11,
+            &MoveToR12,
+            &MoveToR13,
+            &MoveToR14,
+            &MoveToR15,
+        };
+
+        for (uint64_t i = 0; i < 12; i++)
+        {
+            uint8_t* addr = CallSpace + (i * 4);
+            memcpy(CallSpace + (i * 4), ASMs + i, 4);
+            *Funcs[i] = (MoveToRegister*)addr;
+        }
+
+        bIsEnabled = true;
+    }
+}
+
+uint64_t HashTextSectionOfHost()
+{
+    LARGE_INTEGER start, end, freq;
+    QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&start);
+
+    HMODULE base = GetModuleHandleW(nullptr);
+    if (!base) return 0;
+
+    auto dos = (PIMAGE_DOS_HEADER)base;
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE) return 0;
+
+    auto nt = (PIMAGE_NT_HEADERS)((BYTE*)base + dos->e_lfanew);
+    if (nt->Signature != IMAGE_NT_SIGNATURE) return 0;
+
+    auto section = IMAGE_FIRST_SECTION(nt);
+    for (int i = 0; i < nt->FileHeader.NumberOfSections; ++i, ++section) {
+        if (memcmp(section->Name, ".text", 5) == 0) {
+            uint8_t* data = (uint8_t*)base + section->VirtualAddress;
+            DWORD size = section->Misc.VirtualSize;
+
+            uint64_t hash = 14695981039346656037ULL;
+            for (DWORD j = 0; j < size; ++j)
+                hash = (hash ^ data[j]) * 1099511628211ULL;
+
+            QueryPerformanceCounter(&end);
+            double elapsedMs = (end.QuadPart - start.QuadPart) * 1000.0 / freq.QuadPart;
+
+            PrintDebug(L".text hash: 0x%016llX | Time: %.3f ms\n", hash, elapsedMs);
+            return hash;
+        }
+    }
+
+    QueryPerformanceCounter(&end);
+    double elapsedMs = (end.QuadPart - start.QuadPart) * 1000.0 / freq.QuadPart;
+    printfError(L"Failed to find .text | Time: %.3f ms\n", elapsedMs);
+    return 0;
+}
