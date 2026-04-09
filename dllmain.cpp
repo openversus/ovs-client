@@ -29,6 +29,7 @@ static const std::wstring CURRENT_HOOK_VERSION = OVS::GetCurrentVersion();
 EnvInfo* GEnvInfo = nullptr;
 Trampoline* GameTramp, * User32Tramp;
 ConsoleColors debugColor = ConsoleColors::YELLOW;
+bool ConsoleAlreadyCreated = false;
 
 void CreateConsole();
 void SpawnError(const wchar_t* msg);
@@ -58,6 +59,11 @@ LRESULT CALLBACK KeyboardProc(int code, WPARAM wParam, LPARAM lParam)
 
 void CreateConsole()
 {
+    if (ConsoleAlreadyCreated)
+    {
+        return;
+    }
+
     FreeConsole();
     AllocConsole();
 
@@ -97,6 +103,8 @@ void CreateConsole()
     printfCyan(L"https://github.com/thethiny/MVSIASI\n");
     printfCyan(L"https://github.com/multiversuskoth/mvs-http-server\n");
     printfCyan(L"https://github.com/multiversuskoth/mvs-udp-server\n");
+
+    ConsoleAlreadyCreated = true;
 }
 
 void PreGameHooks()

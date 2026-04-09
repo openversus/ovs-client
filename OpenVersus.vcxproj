@@ -75,6 +75,7 @@
     <PlatformToolset>v145</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
     <VCToolsVersion>14.44.35207</VCToolsVersion>
+    <PreferredToolArchitecture>x64</PreferredToolArchitecture>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='BuildLib|x64'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>

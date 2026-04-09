@@ -1,6 +1,7 @@
 #ifndef INIREADER_H
 #define INIREADER_H
 
+#include <string>
 #include <cstdint>
 
 class CIniReader
