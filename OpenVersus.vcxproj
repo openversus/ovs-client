@@ -23,6 +23,7 @@
     <ClCompile Include="src\eSettingsManager\eSettingsManager.cpp" />
     <ClCompile Include="src\mvs\mvs.cpp" />
     <ClCompile Include="src\ovs\OpenVersus.cpp" />
+    <ClCompile Include="src\ovs\NotificationPoller.cpp" />
     <ClCompile Include="src\mvs\mvsutils.cpp" />
     <ClCompile Include="src\utils\pystring.cpp" />
     <ClCompile Include="src\Patterns\Patterns.cpp" />
@@ -43,6 +44,7 @@
     <ClInclude Include="src\include\eSettingsManager\eSettingsManager.h" />
     <ClInclude Include="src\include\mvs\mvs.h" />
     <ClInclude Include="src\include\ovs\OpenVersus.h" />
+    <ClInclude Include="src\include\ovs\NotificationPoller.h" />
     <ClInclude Include="src\include\ovs\OVSUtils.h" />
     <ClInclude Include="src\include\utils\cppython.h" />
     <ClInclude Include="src\include\utils\pystring.h" />
@@ -184,7 +186,7 @@
       <ConformanceMode>false</ConformanceMode>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <LanguageStandard>stdcpp23</LanguageStandard>
-      <AdditionalIncludeDirectories>%LocalAppData%\Programs\Python\Python38\Include;$(ProjectDir)source\utils;$(ProjectDir)source\utils\CPPython;C:\source\repos\ovs-client\src\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>%LocalAppData%\Programs\Python\Python38\Include;$(ProjectDir)source\utils;$(ProjectDir)source\utils\CPPython;$(ProjectDir)src\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard_C>stdclatest</LanguageStandard_C>
       <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
       <MinimalRebuild>false</MinimalRebuild>
