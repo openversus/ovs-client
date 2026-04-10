@@ -58,6 +58,9 @@ public:
     std::wstring szCurlSetOpt;
     std::wstring szCurlPerform;
 
+    //OVS
+    bool bAutoUpdate = true;
+
     //Private Server
     std::wstring szServerUrl;
     bool bEnableServerProxy;
@@ -70,6 +73,7 @@ public:
     {
         // Set default values for settings
         bEnableKeyboardHotkeys = true;
+        bAutoUpdate = true;
         bEnableConsoleWindow = true;
         bPauseOnStart = false;
         iLogLevel = 0;
@@ -154,7 +158,7 @@ class eCachedPatternsManager
 {
 private:
     wchar_t* Hash = nullptr;
-    CIniReader* ini;
+    CIniReader* ini = nullptr;
     static __int64 GameAddr;
 
 public:

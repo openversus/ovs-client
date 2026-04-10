@@ -27,6 +27,7 @@ OVS::OVSSetting OVS::OVSDefaultSettingsArray[] = {
     { L"szCurlSetOpt", L"Settings", L"CurlSetOpt", L"string", L"libcurl.curl_easy_setopt" },
     { L"szCurlPerform", L"Settings", L"CurlPerform", L"string", L"libcurl.curl_easy_perform" },
     { L"bEnableKeyboardHotkeys", L"Settings", L"EnableKeyboardHotkeys", L"booL", true },
+    { L"bAutoUpdate", L"Settings", L"AutoUpdate", L"booL", true },
     // Keybinds
     { L"hkMenu", L"Settings.Keybinds", L"ToggleMenu", L"string", L"F1" },
     // Patches
@@ -93,6 +94,33 @@ namespace OVS
 
         OVSSetting notFoundSetting = { L"", L"", L"", L"", L"" };
         return notFoundSetting;
+    }
+
+    void ShowCredits()
+    {
+        printfRed(L"OpenVersus");
+        printfCyan(L" - It's better than Parsec\n");
+        printfYellow(L"v%ls", GetCurrentVersion().c_str());
+        wprintf(L"\n\n");
+        printfCyan(L"Maintained by ");
+        wprintf(L"\x1b[38;2;205;46;58mRosettaSt0ned\033[0m");
+        printfCyan(L", ");
+        wprintf(L"\x1b[38;2;236;227;53mTuggernuts\033[0m");
+        printfCyan(L", and the ");
+        wprintf(L"\x1b[38;2;0;255;255mMVS community.\n\n");
+
+        printfCyan(L"Binary releases available at: https://github.com/christopher-conley/OpenVersus\n");
+        printfCyan(L"Source code and binary releases available at: https://github.com/openversus\n\n");
+
+        printfCyan(L"OpenVersus is originally based on the publicly-available code developed by ");
+        wprintf(L"\x1b[38;2;30;117;238mthe\033[0m");
+        wprintf(L"\x1b[38;2;214;25;25mthiny\033[0m");
+        printfCyan(L" and ");
+        wprintf(L"\x1b[38;2;255;179;25mMultiversusKOTH\033[0m");
+        printfCyan(L", located at: \n");
+        printfCyan(L"https://github.com/thethiny/MVSIASI\n");
+        printfCyan(L"https://github.com/multiversuskoth/mvs-http-server\n");
+        printfCyan(L"https://github.com/multiversuskoth/mvs-udp-server\n");
     }
 }
 

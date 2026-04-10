@@ -21,6 +21,7 @@ namespace OVS {
     extern OVSSetting OVSDefaultSettingsArray[];
     extern const size_t OVSDefaultSettingsArrayCount;
     OVSSetting GetOVSSettingByName(const wchar_t* name);
+    void ShowCredits();
 
     namespace Proxies {
         //__int64									__fastcall	ReadFString(__int64, __int64);

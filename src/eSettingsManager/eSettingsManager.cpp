@@ -158,6 +158,15 @@ void eSettingsManager::Init()
         bEnableKeyboardHotkeys
     });
 
+    bAutoUpdate = ini.ReadBoolean(defaults.bAutoUpdate.Section, defaults.bAutoUpdate.Setting, defaults.bAutoUpdate.Value<bool>());
+    Save(&ini, OVS::OVSSetting{
+        L"bAutoUpdate",
+        defaults.bAutoUpdate.Section,
+        defaults.bAutoUpdate.Setting,
+        defaults.bAutoUpdate.Type,
+        bAutoUpdate
+        });
+
     hkMenu = ini.ReadString(defaults.hkMenu.Section, defaults.hkMenu.Setting, defaults.hkMenu.Value<const wchar_t*>());
     Save(&ini, OVS::OVSSetting{
         L"hkMenu",

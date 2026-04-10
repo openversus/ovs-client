@@ -27,6 +27,7 @@ namespace OVS
     extern std::map<LogLevel, std::wostream*> LogStreams;
 
     extern uint64_t EXEHash;
+    inline constexpr const wchar_t* consoleName = L"OpenVersus Debug Console";
     inline constexpr const wchar_t* OVS_Name = L"OpenVersus";
     inline constexpr const wchar_t* OVS_Config_Ext = L".ini";
     inline const std::wstring OVS_Config_File = std::wstring(OVS_Name) + std::wstring(OVS_Config_Ext);
@@ -156,6 +157,7 @@ namespace OVS
         static inline OVSSetting pQuitGameCallback = GetOVSSettingByName(L"pQuitGameCallback");
         static inline OVSSetting pFighterInstance = GetOVSSettingByName(L"pFighterInstance");
         static inline OVSSetting pNotifs = GetOVSSettingByName(L"pNotifs");
+        static inline OVSSetting bAutoUpdate = GetOVSSettingByName(L"bAutoUpdate");
         static inline OVSSetting szServerUrl = GetOVSSettingByName(L"szServerUrl");
         static inline OVSSetting szProdServerUrl = GetOVSSettingByName(L"szProdServerUrl");
         static inline OVSSetting bEnableServerProxy = GetOVSSettingByName(L"bEnableServerProxy");

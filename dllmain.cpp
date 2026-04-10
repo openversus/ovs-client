@@ -71,40 +71,19 @@ void CreateConsole()
     freopen_s(&fNull, "CONOUT$", "w", stdout);
     freopen_s(&fNull, "CONOUT$", "w", stderr);
 
-    bool isUTF8 = SetLocaleConfig();
+    // Not doing anything with this result jus yet, but if it fails we might want to fall back to a codepage that supports the current locale instead of UTF-8
+    //bool isUTF8 = SetLocaleConfig();
+    SetLocaleConfig();
 
-    std::wstring consoleName = L"OpenVersus Debug Console";
-    SetConsoleTitleW(consoleName.c_str());
+    SetConsoleTitleW(OVS::consoleName);
     HookMetadata::Console = GetStdHandle(STD_OUTPUT_HANDLE);
     DWORD dwMode = 0;
     GetConsoleMode(HookMetadata::Console, &dwMode);
     dwMode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
     SetConsoleMode(HookMetadata::Console, dwMode);
-
-    printfRed(L"OpenVersus");
-    printfCyan(L" - It's better than Parsec\n");
-    printfYellow(L"v%ls", CURRENT_HOOK_VERSION.c_str());
-    printfCyan(L"Maintained by ");
-    wprintf(L"\x1b[38;2;205;46;58mRosettaSt0ned\033[0m");
-    printfCyan(L", ");
-    wprintf(L"\x1b[38;2;236;227;53mTuggernuts\033[0m");
-    printfCyan(L", and the ");
-    wprintf(L"\x1b[38;2;0;255;255mMVS community.\n");
-
-    printfCyan(L"Binary releases available at: https://github.com/christopher-conley/OpenVersus\n");
-    printfCyan(L"Source code and binary releases available at: https://github.com/openversus");
-
-    printfCyan(L"OpenVersus is originally based on the publicly-available code developed by ");
-    wprintf(L"\x1b[38;2;30;117;238mthe\033[0m");
-    wprintf(L"\x1b[38;2;214;25;25mthiny\033[0m");
-    printfCyan(L" and \n");
-    wprintf(L"\x1b[38;2;255;179;25mMultiversusKOTH\033[0m");
-    printfCyan(L", located at: ");
-    printfCyan(L"https://github.com/thethiny/MVSIASI\n");
-    printfCyan(L"https://github.com/multiversuskoth/mvs-http-server\n");
-    printfCyan(L"https://github.com/multiversuskoth/mvs-udp-server\n");
-
     ConsoleAlreadyCreated = true;
+
+    OVS::ShowCredits();
 }
 
 void PreGameHooks()
@@ -216,22 +195,6 @@ static bool IsProton()
 static bool PostViaWinHTTP(const std::wstring& url, const std::wstring& body)
 {
     ParsedURL parsed = AutoUpdateParseUrl(url);
-    // Parse host, port, path from url
-    // std::wstring hostStr = url;
-    // std::wstring path = L"/";
-    // int port = 80;
-    // bool https = false;
-
-    //if (hostStr.substr(0, 8) == L"https://") { hostStr = hostStr.substr(8); https = true; port = 443; }
-    //else if (hostStr.substr(0, 7) == L"http://") hostStr = hostStr.substr(7);
-
-    //size_t slash = hostStr.find(L'/');
-    //if (slash != std::wstring::npos) { path = hostStr.substr(slash); hostStr = hostStr.substr(0, slash); }
-    //size_t colon = hostStr.rfind(L':');
-    //if (colon != std::wstring::npos) {
-    //    try { port = std::stoi(hostStr.substr(colon + 1)); } catch (...) {}
-    //    hostStr = hostStr.substr(0, colon);
-    //}
 
     std::wstring hostStr = parsed.Host;
     std::wstring path = parsed.Path;
@@ -289,21 +252,6 @@ static bool PostViaWinHTTP(const std::wstring& url, const std::wstring& body)
 // WinInet POST — works on Windows (native)
 static bool PostViaWinInet(const std::wstring& url, const std::wstring& body)
 {
-    //std::wstring hostStr = url;
-    //std::wstring path = L"/";
-    //int port = 80;
-
-    //if (hostStr.substr(0, 8) == L"https://") hostStr = hostStr.substr(8);
-    //else if (hostStr.substr(0, 7) == L"http://") hostStr = hostStr.substr(7);
-
-    //size_t slash = hostStr.find(L'/');
-    //if (slash != std::wstring::npos) { path = hostStr.substr(slash); hostStr = hostStr.substr(0, slash); }
-    //size_t colon = hostStr.rfind(L':');
-    //if (colon != std::wstring::npos) {
-    //    try { port = std::stoi(hostStr.substr(colon + 1)); } catch (...) {}
-    //    hostStr = hostStr.substr(0, colon);
-    //}
-
     ParsedURL parsed = AutoUpdateParseUrl(url);
 
     std::wstring hostStr = parsed.Host;
@@ -510,9 +458,6 @@ static std::wstring ResolveSteamIDFromAPI()
 static wchar_t g_UpdateDownloadUrl[512] = {};
 static wchar_t g_UpdateLatestVersion[64] = {};
 
-
-
-
 static void DoPerformUpdate()
 {
     printfYellow(L"[AutoUpdate] Starting download from: %ls\n", g_UpdateDownloadUrl);
@@ -528,27 +473,6 @@ static void DoPerformUpdate()
 
     // Download via WinHTTP — works on both Windows and Proton/Steam Deck
     {
-        //wchar_t wHost[256] = {};
-        //wchar_t wPath[512] = {};
-        //INTERNET_PORT dlPort = 443;
-        //bool dlHttps = false;
-
-        // Parse download URL into host/path/port
-        //std::wstring dlUrl = g_UpdateDownloadUrl;
-
-        //if (dlUrl.substr(0, 8) == L"https://") { dlHttps = true; dlUrl = dlUrl.substr(8); }
-        //else if (dlUrl.substr(0, 7) == L"http://") { dlUrl = dlUrl.substr(7); }
-        //size_t slash = dlUrl.find('/');
-        //std::wstring dlHost = (slash != std::wstring::npos) ? dlUrl.substr(0, slash) : dlUrl;
-        //std::wstring dlPathStr = (slash != std::wstring::npos) ? dlUrl.substr(slash) : L"/";
-        //size_t colon = dlHost.rfind(':');
-        //if (colon != std::wstring::npos) {
-        //    try { dlPort = (INTERNET_PORT)std::stoi(dlHost.substr(colon + 1)); } catch (...) {}
-        //    dlHost = dlHost.substr(0, colon);
-        //}
-        //MultiByteToWideChar(CP_UTF8, 0, dlHost.c_str(), -1, wHost, 256);
-        //MultiByteToWideChar(CP_UTF8, 0, dlPathStr.c_str(), -1, wPath, 512);
-
         ParsedURL dlUrl = AutoUpdateParseUrl(g_UpdateDownloadUrl);
 
         std::wstring dlHost = dlUrl.Host;
@@ -702,6 +626,7 @@ static DWORD WINAPI CheckForUpdateThread(LPVOID)
 {
     Sleep(5000); // wait for game to settle before checking
     CheckForUpdate();
+
     return 0;
 }
 
@@ -813,8 +738,20 @@ bool OnInitializeHook()
     // Register identity with OVS server — runs on a separate thread so it never blocks game launch
     CreateThread(nullptr, 0, RegisterIdentityThread, nullptr, 0, nullptr);
 
-    // Check for DLL updates from the OVS server
-    CreateThread(nullptr, 0, CheckForUpdateThread, nullptr, 0, nullptr);
+    if (SettingsMgr->bAutoUpdate)
+    {
+        printfInfo(L"[AutoUpdate] Auto-update is enabled. OVS will check for updates automatically and download/apply them when available.");
+        // Check for DLL updates from the OVS server
+        CreateThread(nullptr, 0, CheckForUpdateThread, nullptr, 0, nullptr);
+    }
+    else
+    {
+        printfWarning(L"[AutoUpdate] AutoUpdate is disabled in your config file. Don't be suprised if the game doesn't work correctly, or if it doesn't even work at all.");
+        printfWarning(L"[AutoUpdate] The latest version of OpenVersus can always be obtained from: https://github.com/christopher-conley/OpenVersus");
+        wprintf(L"\n");
+        printfWarning(L"[AutoUpdate] If you want to enable auto-updates, set AutoUpdate=true in the [Settings] section of your config file.");
+        printfWarning(L"[AutoUpdate] Good luck, hopefully the game still works for you.");
+    }
 
     return true;
 }
