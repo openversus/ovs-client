@@ -14,6 +14,11 @@
 //                     gracefully returned to the lobby just like the native
 //                     2-minute timeout would do, but instantly.
 //
+//   toast_received  — server pushes a banner to a specific player when
+//                     another player toasts (thumbs-ups) them on the
+//                     post-match results screen. Shows the toaster's
+//                     username in the bottom line. 4 second timeout.
+//
 //   admin_banner    — server pushes a banner notification to all (or one)
 //                     connected clients. Pops up the in-game native widget
 //                     with two lines of text. Used for admin announcements
@@ -23,6 +28,10 @@
 //
 //   [
 //     { "type": "match_cancel",  "title": "...",     "message": "...",
+//       "timestamp": 1775778608049 },
+//
+//     { "type": "toast_received", "title": "Toast received!",
+//       "message": "PlayerName toasted you!",
 //       "timestamp": 1775778608049 },
 //
 //     { "type": "admin_banner",  "title": "Top line",
@@ -756,6 +765,11 @@ namespace OVS::NotificationPoller {
             ShowBanner("Match Cancelled", "Opponent left the match", 5.0f);
             // Walk the state machine and dispatch to the appropriate UE handler.
             TriggerStateAwareCancelMatch();
+        }
+        else if (strcmp(type, "toast_received") == 0) {
+            printf("[NotifPoller] Toast received: %s\n", message);
+            // Server sends title="Toast received!" and message="PlayerName toasted you!"
+            ShowBanner(title, message, 4.0f);
         }
         else if (strcmp(type, "admin_banner") == 0) {
             double timeout = JsonGetFloat(objJson, "timeout", 8.0);
