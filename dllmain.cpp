@@ -3,6 +3,7 @@
 #include "ovs/OVSUtils.h"
 #include "mvs/mvs.h"
 #include "ovs/OpenVersus.h"
+#include "ovs/NotificationPoller.h"
 #include "ovs/EnvInfo.h"
 #include "utils/prettyprint.h"
 #include "Utils/Utils.hpp"
@@ -735,6 +736,19 @@ bool OnInitializeHook()
     PreGameHooks(); // Queue Blocker
     SpawnP2PServer();
 
+    // Start notification poller — background thread that polls the OVS server for
+    // match_cancel and admin_banner notifications. Only started when the server proxy is enabled.
+    if (SettingsMgr->bEnableServerProxy && !SettingsMgr->szServerUrl.empty())
+    {
+        const std::wstring& wurl = SettingsMgr->szServerUrl;
+        int needed = WideCharToMultiByte(CP_UTF8, 0, wurl.c_str(), (int)wurl.size(),
+                                          nullptr, 0, nullptr, nullptr);
+        std::string narrowUrl(needed, '\0');
+        WideCharToMultiByte(CP_UTF8, 0, wurl.c_str(), (int)wurl.size(),
+                            &narrowUrl[0], needed, nullptr, nullptr);
+        OVS::NotificationPoller::Start(narrowUrl);
+    }
+
     // Register identity with OVS server — runs on a separate thread so it never blocks game launch
     CreateThread(nullptr, 0, RegisterIdentityThread, nullptr, 0, nullptr);
 
@@ -764,6 +778,9 @@ static void OnShutdown()
         HookMetadata::KeyboardProcHook = nullptr;
     }
 
+    // Signal the notification poller to exit on its next cycle.
+    OVS::NotificationPoller::Stop();
+
     DespawnP2PServer();
 }
 
@@ -782,6 +799,7 @@ bool APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID lpRes)
         break;
     case DLL_THREAD_ATTACH:
     case DLL_THREAD_DETACH:
+        break; // Do NOT call OnShutdown on thread events — would kill the poller on every background thread exit
     case DLL_PROCESS_DETACH:
         OnShutdown();
         break;
