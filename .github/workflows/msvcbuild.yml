@@ -1,4 +1,4 @@
-name: Build and Release
+name: Build and conditionally release
 
 on:
   push:
@@ -11,7 +11,7 @@ on:
 
 jobs:
   build:
-    runs-on: windows-2019
+    runs-on: windows-2025-vs2026
     permissions:
       contents: write
 
@@ -20,65 +20,98 @@ jobs:
       uses: actions/checkout@v2
       with:
         submodules: 'true'
-        # token: ${{ secrets.GITHUB_TOKEN }} # Removed since the repos it checks out are public
 
     - name: Set up MSVC environment
+      id: setup_msbuild
       uses: microsoft/setup-msbuild@v1
 
-    - name: Build MVSI
-      run: msbuild MVSASI.sln /p:Configuration=Release /p:Platform=x64
+    - name: Build ovs-client
+      id: build
+      needs: setup_msbuild
+      run: msbuild OpenVersus.sln /p:Configuration=Release /p:Platform=x64
       working-directory: ${{ github.workspace }}
 
     - name: Get current version
       id: version
       run: |
-        $VERSION=Select-String -Path .\source\dllmain.cpp -Pattern "constexpr .* CURRENT_HOOK_VERSION ?="
-        $VERSION=[regex]::Match($VERSION, '\d+(\.\d+){1,}').Value
-        echo "current_version=$VERSION" >> $env:GITHUB_OUTPUT
-        echo "project_name=MVSI" >> $env:GITHUB_OUTPUT
-        echo "Project Version is $VERSION"
+        $VERSION=(Get-Content .\VERSION).Replace("\r\n", '').Replace("\n", '')
+        Write-Output -InputObject "current_version=$VERSION" >> $env:GITHUB_OUTPUT
+        Write-Output -InputObject "project_name=OpenVersus" >> $env:GITHUB_OUTPUT
+        Write-Output -InputObject "Project Version is: $VERSION"
 
-    # Download dsound from MK1ProxyDll
-    # - name: Download Latest dsound.dll # Can be changed later to retrieve from file
-    #   id: loader_downloader
-    #   run: |
-    #     Invoke-RestMethod -Uri "https://api.github.com/repos/thethiny/MK1ProxyDll/releases/latest" | 
-    #     Select-Object -ExpandProperty assets | 
-    #     ForEach-Object {Invoke-WebRequest -Uri $_.browser_download_url -OutFile $_.name}
-
-    - name: Download ASI Loader dsound.dll # Can be changed later to retrieve from file
+    - name: Download xinput1_3 version of Ultimate ASI Loader
       id: loader_downloader
       run: |
-        Invoke-RestMethod -Uri "https://api.github.com/repos/ermaccer/MK1Hook/releases/latest" | 
-        Select-Object -ExpandProperty assets | 
-        ForEach-Object { 
-          Invoke-WebRequest -Uri $_.browser_download_url -OutFile $_.name
-          Expand-Archive -Path $_.name -DestinationPath .
+        $VerbosePreference = 'Continue'
+        [string] $BaseFilename = 'xinput1_3-x64'
+        [string] $DownloadFilename = "${BaseFilename}.zip"
+        [string] $DownloadURL = "https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases/download/x64-latest/${DownloadFilename}"
+        try
+        {
+          # Downloads are slow as balls if you don't turn off the progress bar, and it doesn't provide any useful information for a single file download
+          $ProgressPreference = 'SilentlyContinue'
+          Invoke-WebRequest -Uri "${DownloadURL}" -OutFile "${DownloadFilename}" -Verbose
+        }
+        catch
+        {
+          $DownloadError = $_
+          Write-Error -Message "Failed to download ASI loader from: $($DownloadError.Exception.Message)"
+          Write-Error -Exception $DownloadError
+          throw $DownloadError
+        }
+        Expand-Archive -Path ".\${DownloadFilename}" -DestinationPath . -Verbose
+        $Matches = $null
+        $(Get-Content ".\${BaseFilename}.SHA512") | Where-Object { $_ -match '^Hash\W.+:\W+(?<FileHash>.*)$'} | Out-Null
+        if ($null -eq $Matches -or $null -eq $Matches.FileHash)
+        {
+          Write-Error -Message "Failed to parse hash from .SHA512 file. Expected format: 'Hash <filename>: <hash>'"
+          Write-Error -Message "SHA512 file content: $(Get-Content ".\${BaseFilename}.SHA512")"
+          throw "Hash parsing failed"
+        }
+        if ($Matches.FileHash -ne $((Get-FileHash ".\xinput1_3.dll" -Algorithm SHA512).Hash))
+        {
+          Write-Error -Message "Downloaded file hash does not match expected hash. Expected: $($Matches.FileHash), Actual: $((Get-FileHash ".\$($BaseFilename.Replace('-x64', '.dll'))" -Algorithm SHA512).Hash)"
+          throw "Hash mismatch"
         }
 
     - name: Create Release Zip
+      needs: build
       id: zip
-      run: |
-        $name = "${{ env.PROJECT_NAME }}"
-        $version = "${{ env.PROJECT_VERSION }}"
-        $versionedName = "${name}_v${version}"
-        echo "Packing $name files into `"$versionedName.zip`""
-        mv .\source\sample.ini .\${name}.ini
-        Compress-Archive -Path .\${name}.ini, .\out\Release\Binaries\${name}.asi, dsound.dll -DestinationPath "${versionedName}.zip"
-        echo "bundle_file=${versionedName}.zip" >> $env:GITHUB_OUTPUT
       env:
         PROJECT_NAME: ${{ steps.version.outputs.project_name }}
         PROJECT_VERSION: ${{ steps.version.outputs.current_version }}
+      run: |
+        $VerbosePreference = 'Continue'
+        [string] $ProjectName = "${{ env.PROJECT_NAME }}"
+        [string] $Version = "${{ env.PROJECT_VERSION }}"
+        [string] $VersionName = "${ProjectName}_v${Version}"
+        [string] $ASILoaderLicenseURL = 'https://raw.githubusercontent.com/ThirteenAG/Ultimate-ASI-Loader/refs/heads/master/license'
+        [string] $ASILoaderLicenseFilename = 'LICENSE_Ultimate_ASI_Loader.txt'
+
+        Invoke-WebRequest -Uri "$ASILoaderLicenseURL" -OutFile ".\${ASILoaderLicenseFilename}" -Verbose
+        New-Item -ItemType Directory -Path ".\plugins" -Verbose
+        Rename-Item -Path ".\sample.ini" -NewName "${ProjectName}.ini" -Verbose
+        Rename-Item -Path ".\LICENSE" -NewName ".\LICENSE.txt" -Verbose
+        Rename-Item -Path ".\VERSION" -NewName ".\VERSION.txt" -Verbose
+        Move-Item -Path @(".\${ProjectName}.ini", ".\out\Release\Binaries\${ProjectName}.asi", ".\LICENSE.txt", ".\VERSION.txt") -Destination ".\plugins" -Verbose
+
+        Write-Output -InputObject "Packing $ProjectName files into ${VersionName}.zip"
+        Compress-Archive -Path @(".\plugins ", ".\xinput1_3.dll", ".\${ASILoaderLicenseFilename}") -DestinationPath "${VersionName}.zip" -Verbose
+
+        Write-Output -InputObject "release_artifact=${VersionName}.zip" >> $env:GITHUB_OUTPUT
+        Write-Output -InputObject "asi_path=.\out\Release\Binaries\${ProjectName}.asi" >> $env:GITHUB_OUTPUT
 
     - name: Create GitHub Release
       id: create_release
-      uses: softprops/action-gh-release@v1
-      with:
-        files: ./${{ env.RELEASE_FILE }}
-        name: ${{env.PROJECT_NAME}} Version ${{ env.PROJECT_VERSION }}
-        tag_name: v${{ env.PROJECT_VERSION }}
+      if: github.ref_type == 'tag'
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         PROJECT_NAME: ${{ steps.version.outputs.project_name }}
         PROJECT_VERSION: ${{ steps.version.outputs.current_version }}
-        RELEASE_FILE: ${{ steps.zip.outputs.bundle_file }}
+        RELEASE_ARCHIVE: ${{ steps.zip.outputs.release_artifact }}
+        RELEASE_ASI: ${{ steps.zip.outputs.asi_path }}
+      uses: softprops/action-gh-release@v1
+      with:
+        files: ${{ env.RELEASE_ARCHIVE }}, ${{ env.RELEASE_ASI }}
+        name: ${{env.PROJECT_NAME}} v${{ env.PROJECT_VERSION }}
+        tag_name: ${{ env.PROJECT_VERSION }}
