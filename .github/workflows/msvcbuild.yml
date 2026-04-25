@@ -4,9 +4,9 @@ on:
   push:
     branches:
       - release
-    paths:
-    - "**.cpp" # Only when code changes
-    - "**.h"
+    #paths:
+    #- "**.cpp" # Only when code changes
+    #- "**.h"
   workflow_dispatch: # Allow manual runs
 
 jobs:
@@ -27,7 +27,6 @@ jobs:
 
     - name: Build ovs-client
       id: build
-      needs: setup_msbuild
       run: msbuild OpenVersus.sln /p:Configuration=Release /p:Platform=x64
       working-directory: ${{ github.workspace }}
 
@@ -75,7 +74,6 @@ jobs:
         }
 
     - name: Create Release Zip
-      needs: build
       id: zip
       env:
         PROJECT_NAME: ${{ steps.version.outputs.project_name }}
