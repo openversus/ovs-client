@@ -99,6 +99,17 @@ jobs:
         Write-Output -InputObject "release_artifact=${VersionName}.zip" >> $env:GITHUB_OUTPUT
         Write-Output -InputObject "asi_path=.\out\Release\Binaries\${ProjectName}.asi" >> $env:GITHUB_OUTPUT
 
+    - name: Upload Build Artifact
+      id: upload
+      uses: actions/upload-artifact@v7
+      with:
+        name: release-artifact
+        path: ${{ steps.zip.outputs.release_artifact }}
+        archive: false
+        if-no-files-found: warn
+        retention-days: 90
+        overwrite: true
+
     - name: Create GitHub Release
       id: create_release
       if: github.ref_type == 'tag'
