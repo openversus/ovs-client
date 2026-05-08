@@ -117,10 +117,9 @@ namespace OVS
         wprintf(L"\x1b[38;2;214;25;25mthiny\033[0m");
         printfCyan(L" and ");
         wprintf(L"\x1b[38;2;255;179;25mMultiversusKOTH\033[0m");
-        printfCyan(L", located at: \n");
-        printfCyan(L"https://github.com/thethiny/MVSIASI\n");
-        printfCyan(L"https://github.com/multiversuskoth/mvs-http-server\n");
-        printfCyan(L"https://github.com/multiversuskoth/mvs-udp-server\n");
+        printfCyan(L", located at: \n\n");
+        printfCyan(L"https://github.com/thethiny/\n");
+        printfCyan(L"https://github.com/multiversuskoth/mvs-udp-server\n\n");
     }
 }
 

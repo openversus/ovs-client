@@ -72,7 +72,7 @@ void CreateConsole()
     freopen_s(&fNull, "CONOUT$", "w", stdout);
     freopen_s(&fNull, "CONOUT$", "w", stderr);
 
-    // Not doing anything with this result jus yet, but if it fails we might want to fall back to a codepage that supports the current locale instead of UTF-8
+    // Not doing anything with this result just yet, but if it fails we might want to fall back to a codepage that supports the current locale instead of UTF-8
     //bool isUTF8 = SetLocaleConfig();
     SetLocaleConfig();
 
