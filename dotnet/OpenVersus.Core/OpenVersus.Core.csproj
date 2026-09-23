@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>OpenVersus</RootNamespace>
+    <!-- Everything the .asi does lives here so the tests and the Wine harness plugin can share
+         it. The .asi project itself only holds the InitializeASI export. -->
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="OpenVersus.Tests" />
+  </ItemGroup>
+
+</Project>

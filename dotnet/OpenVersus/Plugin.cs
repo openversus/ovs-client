@@ -1,0 +1,34 @@
+using System.Runtime.InteropServices;
+using OpenVersus.Hooking;
+using OpenVersus.Native;
+
+namespace OpenVersus;
+
+public static unsafe class Plugin
+{
+	private static Client? s_client;
+
+	/// <summary>
+	/// Called by Ultimate ASI Loader right after LoadLibrary. NativeAOT cannot run managed code
+	/// from DllMain, so this export is the only entry point. An exception escaping an
+	/// UnmanagedCallersOnly method takes the game down with it, so nothing may leave here.
+	/// </summary>
+	[UnmanagedCallersOnly(EntryPoint = "InitializeASI")]
+	public static void InitializeASI()
+	{
+		Log? log = null;
+		try
+		{
+			nint self = Kernel32.ModuleFromAddress((nint)(delegate* unmanaged<void>)&InitializeASI);
+			string pluginPath = Kernel32.GetModulePath(self);
+			log = new Log(Path.ChangeExtension(pluginPath, ".log"));
+			HookGuard.Attach(log);
+			s_client = new Client(log, pluginPath, self);
+			s_client.Initialize();
+		}
+		catch (Exception e)
+		{
+			try { log?.Critical($"FATAL: {e}"); } catch { }
+		}
+	}
+}
