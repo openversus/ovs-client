@@ -47,7 +47,8 @@ public sealed class Client
 		Log.Info($"On Attach Initialize ({OvsVersion.Name} {OvsVersion.Current})");
 		Settings = Settings.Load(Path.Combine(Directory, Settings.FileName));
 		State = new State(Path.Combine(Directory, State.FileName)).Load();
-		Log.DebugEnabled = Settings.Debug;
+		Log.MinimumLevel = Log.ResolveLevel(Settings.LogLevel, Settings.Debug);
+		Log.Info($"log level {Log.MinimumLevel} (LogLevel=\"{Settings.LogLevel}\", DebugLogging={Settings.Debug})");
 		Log.Debug($"[OVS] INI File: {Settings.Path}");
 
 		string process = Path.GetFileName(Environment.ProcessPath ?? "");
@@ -92,8 +93,10 @@ public sealed class Client
 	private void StartBackgroundWork()
 	{
 		// NativeAOT cannot run managed code at process detach any more than at attach, so
-		// there is no shutdown moment to summarise in; a heartbeat reports instead.
+		// there is no shutdown moment to summarise in; a heartbeat reports instead, and the
+		// game window going away is taken as the exit signal for closing the log.
 		Start("OVS heartbeat", Heartbeat);
+		Start("OVS exit watch", WatchForExit);
 
 		if (Settings.EnableServerProxy && !string.IsNullOrEmpty(Settings.ServerUrl))
 		{
@@ -184,7 +187,23 @@ public sealed class Client
 		}
 	}
 
-	/// <summary>Stops the background work. Nothing calls this at process exit (see Heartbeat); it is here for a host that can.</summary>
+	/// <summary>
+	/// Waits for the game window to exist, then for it to be destroyed, which the engine does
+	/// before the process ends; then closes the log so its launch-time copy is made. A crash
+	/// skips this, and the next launch makes the copy instead.
+	/// </summary>
+	private void WatchForExit()
+	{
+		while (GameThread.Window == 0)
+			Thread.Sleep(1000);
+		while (GameThread.Window != 0)
+			Thread.Sleep(500);
+		Log.Info("game window gone; closing the log");
+		Shutdown();
+		Log.Close();
+	}
+
+	/// <summary>Stops the background work. Called from the exit watch; a host that has a real exit moment may call it too.</summary>
 	public void Shutdown()
 	{
 		foreach (var action in _shutdown)

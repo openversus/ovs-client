@@ -19,6 +19,22 @@ public static unsafe class GameUi
 
 	/// <summary>The UFighterGameInstance the game constructed, captured by the FighterInstance hook; 0 until then.</summary>
 	public static nint FighterGameInstance;
+	/// <summary>When the instance was last (re)constructed; the game builds several in its first seconds.</summary>
+	public static long FighterGameInstanceTick;
+
+	/// <summary>
+	/// The frontend manager, and whether it has a current state widget: the condition the C++
+	/// client's ShowDialog required before touching the UI. Reads are guarded; nothing here
+	/// calls into the game beyond the getter.
+	/// </summary>
+	public static (nint Frontend, nint StateWidget) FrontendState()
+	{
+		var getFrontend = (delegate* unmanaged<nint, nint>)GameFunctions.Address(GetFrontendManagerName);
+		if (getFrontend == null || FighterGameInstance == 0) return (0, 0);
+		nint frontend = getFrontend(FighterGameInstance);
+		if (frontend == 0 || !Memory.CodeWriter.TryRead(frontend + Mvs.FrontendCurrentStateWidget, out nint widget)) return (frontend, 0);
+		return (frontend, widget);
+	}
 
 	public static nint NotificationManager()
 	{

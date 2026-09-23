@@ -33,7 +33,9 @@ public sealed class Settings
 		SettingDef.Bool("bCountSunsetCalls", "Settings.Debug", "CountSunsetCalls", false),
 		// Settings
 		SettingDef.Int("iLogSize", "Settings", "LogSize", 50),
-		SettingDef.Int("iLogLevel", "Settings", "LogLevel", 0),
+		// A level name (trace, debug, info, warn, error, critical, none) or number; "0", which
+		// existing files carry from the C++ client, means "decide from DebugLogging".
+		SettingDef.Str("iLogLevel", "Settings", "LogLevel", "0"),
 		SettingDef.Str("szModLoader", "Settings", "ModLoader", "Kernel32.CreateFileW"),
 		SettingDef.Str("szAntiCheatEngine", "Settings", "AntiCheatEngine", "User32.EnumChildWindows"),
 		SettingDef.Str("szCurlSetOpt", "Settings", "CurlSetOpt", "libcurl.curl_easy_setopt"),
@@ -116,6 +118,7 @@ public sealed class Settings
 	public bool EnableConsoleWindow => Bool("bEnableConsoleWindow");
 	public bool PauseOnStart => Bool("bPauseOnStart");
 	public bool Debug => Bool("bDebug");
+	public string LogLevel => String("iLogLevel");
 	public bool AllowNonMvs => Bool("bAllowNonMVS");
 	public bool CountSunsetCalls => Bool("bCountSunsetCalls");
 	// Settings

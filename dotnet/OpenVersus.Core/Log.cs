@@ -1,10 +1,9 @@
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text;
+using Microsoft.Extensions.Logging;
 
 namespace OpenVersus;
-
-public enum LogLevel { Debug, Info, Warn, Error, Critical }
 
 /// <summary>
 /// The client's log. Lines are queued and written by one background thread, so a hook never
@@ -18,8 +17,11 @@ public enum LogLevel { Debug, Info, Warn, Error, Critical }
 /// exit moment, the next launch makes that copy first if it is missing, from the launch time on
 /// the old file's first line. So the last run's log is always there under its launch time,
 /// whether the game is running or not.
+///
+/// It is an <see cref="ILogger"/>, so code can take the abstraction and use the standard
+/// extension methods; the level filter is <see cref="MinimumLevel"/>, set from the ini.
 /// </summary>
-public sealed class Log : IDisposable
+public sealed class Log : ILogger, IDisposable
 {
 	private const string StampFormat = "yyyy-MM-dd HH:mm:ss.fff";
 	private const string ArchiveStampFormat = "yyyy-MM-dd-HH.mm.ss";
@@ -35,8 +37,8 @@ public sealed class Log : IDisposable
 
 	/// <summary>Where console lines go once a console window exists; null means no console.</summary>
 	public Action<string>? ConsoleWriter { get; set; }
-	/// <summary>Whether Debug lines are written at all. The C++ DebugLogging setting.</summary>
-	public bool DebugEnabled { get; set; }
+	/// <summary>Lines below this level are dropped before they are queued.</summary>
+	public LogLevel MinimumLevel { get; set; } = LogLevel.Information;
 	/// <summary>Colour escapes in the console mirror; the file never has them.</summary>
 	public bool Colour { get; set; } = true;
 
@@ -66,23 +68,60 @@ public sealed class Log : IDisposable
 		return log;
 	}
 
-	public void Debug(string message) { if (DebugEnabled) Line(LogLevel.Debug, message); }
-	public void Info(string message) => Line(LogLevel.Info, message);
-	public void Warn(string message) => Line(LogLevel.Warn, message);
+	public void Trace(string message) => Line(LogLevel.Trace, message);
+	public void Debug(string message) => Line(LogLevel.Debug, message);
+	public void Info(string message) => Line(LogLevel.Information, message);
+	public void Warn(string message) => Line(LogLevel.Warning, message);
 	public void Error(string message) => Line(LogLevel.Error, message);
 	public void Critical(string message) => Line(LogLevel.Critical, message);
-	/// <summary>Info, shown green on the console: the C++ printfSuccess.</summary>
-	public void Success(string message) => Line(LogLevel.Info, message, "\x1b[32m");
+	/// <summary>Information, shown green on the console: the C++ printfSuccess.</summary>
+	public void Success(string message) => Line(LogLevel.Information, message, "\x1b[32m");
+
+	// ILogger: the standard extension methods (LogDebug, LogInformation, ...) land here.
+	public bool IsEnabled(LogLevel level) => level != LogLevel.None && level >= MinimumLevel && !_closed;
+	public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+	void ILogger.Log<TState>(LogLevel level, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+	{
+		if (!IsEnabled(level)) return;
+		string message = formatter(state, exception);
+		if (exception != null) message += Environment.NewLine + exception;
+		Line(level, message);
+	}
+
+	/// <summary>
+	/// The minimum level from the ini: the LogLevel key by name (trace, debug, info, warn,
+	/// error, critical, none) or number (1 debug .. 6 none; 0 means not set), else Debug when
+	/// DebugLogging is on and Information when it is off, which is what the two settings meant
+	/// before levels existed.
+	/// </summary>
+	public static LogLevel ResolveLevel(string? logLevel, bool debugLogging)
+	{
+		string text = (logLevel ?? "").Trim();
+		if (int.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out int n) && n != 0)
+			return (LogLevel)Math.Clamp(n, 1, 6);
+		return text.ToLowerInvariant() switch
+		{
+			"trace" => LogLevel.Trace,
+			"debug" => LogLevel.Debug,
+			"info" or "information" => LogLevel.Information,
+			"warn" or "warning" => LogLevel.Warning,
+			"error" => LogLevel.Error,
+			"critical" or "fatal" => LogLevel.Critical,
+			"none" or "off" => LogLevel.None,
+			_ => debugLogging ? LogLevel.Debug : LogLevel.Information,
+		};
+	}
 
 	public void Line(LogLevel level, string message, string? colour = null)
 	{
-		if (_closed) return;
+		if (!IsEnabled(level)) return;
 		string stamp = DateTime.Now.ToString(StampFormat, CultureInfo.InvariantCulture);
 		string tag = level switch
 		{
+			LogLevel.Trace => "TRC",
 			LogLevel.Debug => "DBG",
-			LogLevel.Info => "NFO",
-			LogLevel.Warn => "WRN",
+			LogLevel.Information => "NFO",
+			LogLevel.Warning => "WRN",
 			LogLevel.Error => "ERR",
 			_ => "CRT",
 		};
@@ -92,8 +131,9 @@ public sealed class Log : IDisposable
 			// Same shape as the C++ console: "[TAG] [timestamp]: message".
 			string tagColour = level switch
 			{
-				LogLevel.Debug or LogLevel.Warn => "\x1b[33m",
-				LogLevel.Info => "\x1b[32m",
+				LogLevel.Trace => "\x1b[90m",
+				LogLevel.Debug or LogLevel.Warning => "\x1b[33m",
+				LogLevel.Information => "\x1b[32m",
 				_ => "\x1b[31m",
 			};
 			console = Colour
@@ -122,7 +162,7 @@ public sealed class Log : IDisposable
 					writer.WriteLine(item.Text);
 					try { if (item.Console != null) ConsoleWriter?.Invoke(item.Console); } catch { }
 				}
-				if (item.Level >= LogLevel.Warn || item.Flushed != null || _queue.Count == 0 && _queue.IsAddingCompleted)
+				if (item.Level >= LogLevel.Warning || item.Flushed != null || _queue.Count == 0 && _queue.IsAddingCompleted)
 					writer.Flush();
 				item.Flushed?.Set();
 			}
@@ -135,7 +175,7 @@ public sealed class Log : IDisposable
 	public bool Flush(TimeSpan? timeout = null)
 	{
 		using var flushed = new ManualResetEventSlim(false);
-		try { _queue.Add((LogLevel.Debug, null, null, flushed)); } catch (InvalidOperationException) { return false; }
+		try { _queue.Add((LogLevel.Trace, null, null, flushed)); } catch (InvalidOperationException) { return false; }
 		return flushed.Wait(timeout ?? TimeSpan.FromSeconds(2));
 	}
 
@@ -145,7 +185,7 @@ public sealed class Log : IDisposable
 		lock (_queue)
 		{
 			if (_closed) return;
-			Line(LogLevel.Info, ClosedMarker);
+			Line(LogLevel.Information, ClosedMarker);
 			_closed = true;
 			_queue.CompleteAdding();
 		}

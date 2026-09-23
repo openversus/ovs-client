@@ -3,6 +3,7 @@ using OpenVersus;
 using OpenVersus.Hooking;
 using OpenVersus.Memory;
 using OpenVersus.Native;
+using Microsoft.Extensions.Logging;
 
 namespace OpenVersus.HookTest;
 
@@ -69,7 +70,7 @@ public static unsafe class Plugin
 		{
 			nint site = (nint)image + hits[0] + 1;
 			string? error = CodeWriter.WriteIf(site, [0xD2, 0x04, 0x00, 0x00], [0xE1, 0x10, 0x00, 0x00], code: true);
-			log.Line(error == null ? LogLevel.Info : LogLevel.Error, error ?? $"answer patched at 0x{site:X}");
+			log.Line(error == null ? LogLevel.Information : LogLevel.Error, error ?? $"answer patched at 0x{site:X}");
 		}
 
 		// The guarded read must refuse an unmapped address instead of taking the process down.

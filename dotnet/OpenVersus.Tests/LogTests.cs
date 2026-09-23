@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Logging;
+
 namespace OpenVersus.Tests;
 
 public class LogTests
@@ -30,6 +32,43 @@ public class LogTests
 			}
 		}
 		finally { try { Directory.Delete(dir, true); } catch { } }
+	}
+
+	[Fact]
+	public void LevelsResolveFromTheIniAndFallBackToDebugLogging()
+	{
+		Assert.Equal(LogLevel.Information, Log.ResolveLevel("0", false));
+		Assert.Equal(LogLevel.Debug, Log.ResolveLevel("0", true));
+		Assert.Equal(LogLevel.Debug, Log.ResolveLevel("", true));
+		Assert.Equal(LogLevel.Trace, Log.ResolveLevel("trace", false));
+		Assert.Equal(LogLevel.Warning, Log.ResolveLevel("Warn", true));
+		Assert.Equal(LogLevel.Error, Log.ResolveLevel("4", true));
+		Assert.Equal(LogLevel.None, Log.ResolveLevel("none", true));
+		Assert.Equal(LogLevel.None, Log.ResolveLevel("99", true));
+	}
+
+	[Fact]
+	public void MinimumLevelFiltersBothTheOwnMethodsAndILogger()
+	{
+		string path = Path.Combine(Path.GetTempPath(), "ovs-logtest-" + Guid.NewGuid().ToString("N") + ".log");
+		try
+		{
+			using var log = new Log(path) { MinimumLevel = LogLevel.Warning };
+			ILogger logger = log;
+			log.Debug("dropped");
+			log.Info("dropped too");
+			logger.LogInformation("dropped via ILogger {N}", 1);
+			log.Warn("kept");
+			logger.LogError("kept via ILogger {N}", 2);
+			Assert.True(log.Flush());
+			string text = File.ReadAllText(path);
+			Assert.DoesNotContain("dropped", text);
+			Assert.Contains("[WRN] kept", text);
+			Assert.Contains("[ERR] kept via ILogger 2", text);
+			Assert.False(logger.IsEnabled(LogLevel.Information));
+			Assert.True(logger.IsEnabled(LogLevel.Critical));
+		}
+		finally { try { File.Delete(path); } catch { } }
 	}
 
 	[Fact]

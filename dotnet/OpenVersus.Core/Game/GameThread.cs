@@ -39,6 +39,7 @@ public static unsafe class GameThread
 			return false;
 		}
 		s_queue.Enqueue((name, work, retryMs));
+		s_log?.Trace($"game thread: queued {name} (delay {delayMs} ms, {s_queue.Count} queued) from thread {Environment.CurrentManagedThreadId}");
 		if (User32.SetTimer(window, TimerId, (uint)Math.Max(delayMs, 1), (nint)(delegate* unmanaged<nint, uint, nuint, uint, void>)&TimerProc) == 0)
 		{
 			s_log?.Warn($"{name}: SetTimer failed ({Marshal.GetLastPInvokeError()})");
@@ -52,6 +53,7 @@ public static unsafe class GameThread
 	{
 		User32.KillTimer(window, id);
 		int pending = s_queue.Count;
+		s_log?.Trace($"game thread: timer fired on thread {Environment.CurrentManagedThreadId}, {pending} queued");
 		for (int i = 0; i < pending && s_queue.TryDequeue(out var item); i++)
 		{
 			bool done = HookGuard.Run("GameThread:" + item.Name, item.Work, static work => work(), true);

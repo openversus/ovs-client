@@ -44,6 +44,15 @@ sysroot (about 2.4 GB) into `~/.cache/xwin`; `AcceptVSBuildToolsLicense=true` ac
 | `__try`/`__except` reads | `CodeWriter.TryRead` (a guarded read; NativeAOT cannot catch access violations) |
 | WinInet / WinHTTP / raw socket | `IHttpTransport`, implemented on WinHTTP |
 
+## Log levels
+
+`Log` is a `Microsoft.Extensions.Logging.ILogger` with its own writer (file plus console). The
+minimum level comes from `[Settings] LogLevel`: a name (`trace`, `debug`, `info`, `warn`, `error`,
+`critical`, `none`) or a number (1 debug to 6 none). `0`, which existing files carry, means
+"decide from `[Settings.Debug] DebugLogging`": Debug when it is on, Information when it is off.
+Tags in the file are `TRC DBG NFO WRN ERR CRT`. Per-attempt and game-thread queue lines are
+Trace; pattern and function resolution is Debug; hooks, banners and netstats are Information.
+
 ## Sunset check switches
 
 The game's sunset-date check is called thousands of times a minute. `[Patches] SunsetDate`

@@ -68,6 +68,7 @@ public static unsafe class UeFunctionHooks
 		HookGuard.Run("CopyFighterInstance", self, static self =>
 		{
 			GameUi.FighterGameInstance = self;
+			GameUi.FighterGameInstanceTick = Environment.TickCount64;
 			s_log?.Debug($"UFighterGameInstance constructed at 0x{self:X}");
 		});
 		return s_fighterInstanceCtor(self, a2);
