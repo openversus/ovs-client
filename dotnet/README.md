@@ -38,7 +38,7 @@ sysroot (about 2.4 GB) into `~/.cache/xwin`; `AcceptVSBuildToolsLicense=true` ac
 | `DllMain` → `OnInitializeHook` | `Plugin.InitializeASI` → `Client.Initialize` (NativeAOT cannot run managed code in `DllMain`; the loader calls the export right after `LoadLibrary`) |
 | `PatternFinder`, `CachedPatternsMgr` | `PatternResolver`, `PatternCache`; the pattern parser has the C++ semantics (`?` is one byte) and a cached address is checked before use |
 | `MakeProxyFromOpCode`, `InjectHook`, `Trampoline` | `CallSite.Redirect`, `CallSite.Inject`, `Trampoline` |
-| `OVS::Hooks::*` | `Hooks/*`; the sig-check and post-match-freeze changes are byte patches, the rest are call redirects into `[UnmanagedCallersOnly]` methods guarded by `HookGuard` |
+| `OVS::Hooks::*` | `Hooks/*`; the sig-check, sunset-date and post-match-freeze changes are byte patches (the sunset check runs thousands of times a minute), the endpoint and game-instance hooks are call redirects into `[UnmanagedCallersOnly]` methods guarded by `HookGuard`; the startup dialog and toast are a game-thread job |
 | `MVSGame::*` function globals | `GameFunctions`: every resolved function by name, with where it came from and its signature; reflected functions through `Reflection.Find` |
 | `NotificationPoller` heap scans | `ObjectFinder` over the engine's object array, falling back to the heap scan |
 | `__try`/`__except` reads | `CodeWriter.TryRead` (a guarded read; NativeAOT cannot catch access violations) |

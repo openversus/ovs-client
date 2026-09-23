@@ -102,6 +102,12 @@ public sealed class Client
 			_shutdown.Add(poller.Stop);
 		}
 
+		if (Status.UeFuncs && Status.Dialog)
+		{
+			var state = State;
+			Start("OVS startup notices", () => StartupNotices.Run(state, Log));
+		}
+
 		var env = Env!;
 		Start("OVS identity", () => IdentityRegistration.Run(env, Settings.ServerUrl, Http, Log));
 
@@ -143,7 +149,7 @@ public sealed class Client
 		if (Settings.DisableSignatureCheck) Status.AntiSigCheck = SigCheckPatch.Apply(c);
 		if (Settings.EnableServerProxy) Status.GameEndpointSwap = EndpointHooks.ApplyGame(c);
 		if (Settings.EnableProdServerProxy) Status.ProdEndpointSwap = EndpointHooks.ApplyProd(c);
-		if (Settings.SunsetDate) Status.SunsetDate = SunsetHook.Apply(c);
+		if (Settings.SunsetDate) Status.SunsetDate = SunsetPatch.Apply(c);
 		if (Settings.HookUe) Status.UeFuncs = UeFunctionHooks.Apply(c);
 		if (Settings.Dialog) Status.Dialog = DialogHooks.Apply(c);
 		if (Settings.Notifications) Status.Notifications = NotificationHooks.Apply(c);
@@ -153,19 +159,16 @@ public sealed class Client
 			Log.Debug($"function {f}");
 	}
 
-	/// <summary>Once a minute: how often the game has called the sunset checker, and which hooks have failed.</summary>
+	/// <summary>Once a minute, when it changes: which hooks have failed and how often.</summary>
 	private void Heartbeat()
 	{
-		int lastCalls = -1;
 		string lastFailures = "";
 		while (true)
 		{
 			Thread.Sleep(60_000);
-			int calls = SunsetHook.Calls;
 			string failures = string.Join(", ", HookGuard.Failures.Select(kv => $"{kv.Key}={kv.Value}"));
-			if (calls != lastCalls || failures != lastFailures)
-				Log.Info($"heartbeat: sunset checker called {calls} times; hook failures: {(failures.Length == 0 ? "none" : failures)}");
-			lastCalls = calls;
+			if (failures != lastFailures)
+				Log.Info($"heartbeat: hook failures: {(failures.Length == 0 ? "none" : failures)}");
 			lastFailures = failures;
 		}
 	}
