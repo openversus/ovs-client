@@ -426,6 +426,11 @@ FodyWeavers.xsd
 # Built Visual Studio Code Extensions
 *.vsix
 
+# Local-only stuff
+/.codegraph/
+/graphify-out/
+/local/
+
 # Windows Installer files from build outputs
 *.cab
 *.msi
