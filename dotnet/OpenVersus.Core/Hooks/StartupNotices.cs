@@ -16,6 +16,9 @@ public static unsafe class StartupNotices
 	private static Log? s_log;
 	private static bool s_dialogDone;
 	private static bool s_toastDone;
+	private static int s_attempts;
+	/// <summary>Once a second for ten minutes, then the notices are given up on and the log says so.</summary>
+	private const int MaxAttempts = 600;
 
 	/// <summary>Waits off the game thread for the game instance and window, then runs the job on the game thread.</summary>
 	public static void Run(State state, Log log)
@@ -30,6 +33,11 @@ public static unsafe class StartupNotices
 
 	private static bool Attempt()
 	{
+		if (++s_attempts > MaxAttempts)
+		{
+			s_log?.Warn($"startup notices given up after {MaxAttempts} attempts (dialog {(s_dialogDone ? "shown" : "not shown")}, toast {(s_toastDone ? "shown" : "not shown")})");
+			return true;
+		}
 		if (!s_dialogDone)
 		{
 			nint dialog = GameUi.ShowDialog("OpenVersus is a FREE mod!", "If you have paid for this, please ask for a refund!", "I Agree", "I Disagree");
@@ -42,7 +50,10 @@ public static unsafe class StartupNotices
 		}
 		if (!s_toastDone && GameUi.ShowNotification("OpenVersus Loaded", OvsVersion.Current, 5.0f) != 0)
 			s_toastDone = true;
-		return s_dialogDone && s_toastDone;
+		bool done = s_dialogDone && s_toastDone;
+		if (done)
+			s_log?.Info($"startup notices shown after {s_attempts} attempt(s)");
+		return done;
 	}
 
 	[UnmanagedCallersOnly]

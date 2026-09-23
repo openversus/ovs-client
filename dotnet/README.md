@@ -44,6 +44,19 @@ sysroot (about 2.4 GB) into `~/.cache/xwin`; `AcceptVSBuildToolsLicense=true` ac
 | `__try`/`__except` reads | `CodeWriter.TryRead` (a guarded read; NativeAOT cannot catch access violations) |
 | WinInet / WinHTTP / raw socket | `IHttpTransport`, implemented on WinHTTP |
 
+## Sunset check switches
+
+The game's sunset-date check is called thousands of times a minute. `[Patches] SunsetDate`
+(default on) makes the function itself return false with two byte patches. Two more switches,
+both off by default:
+
+- `[Patches] SunsetCallers=true` finds every direct call and tail jump to the function through
+  `.pdata` and a `.text` scan, and turns each into "return false" in place, so the function is
+  never entered. The log reports the count found (146 in the final build).
+- `[Settings.Debug] CountSunsetCalls=true` routes the function's comparison path through a
+  counter, and the heartbeat line each minute reports how many calls the last minute saw. With
+  both switches on, that number must be zero.
+
 ## Testing against the game
 
 Copy `OpenVersus.asi` over the one in `plugins/` next to the game (keep the old one as a `.bak`).

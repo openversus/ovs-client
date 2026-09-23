@@ -149,7 +149,8 @@ public sealed class Client
 		if (Settings.DisableSignatureCheck) Status.AntiSigCheck = SigCheckPatch.Apply(c);
 		if (Settings.EnableServerProxy) Status.GameEndpointSwap = EndpointHooks.ApplyGame(c);
 		if (Settings.EnableProdServerProxy) Status.ProdEndpointSwap = EndpointHooks.ApplyProd(c);
-		if (Settings.SunsetDate) Status.SunsetDate = SunsetPatch.Apply(c);
+		if (Settings.SunsetDate) Status.SunsetDate = SunsetPatch.Apply(c, count: Settings.CountSunsetCalls);
+		if (Settings.SunsetCallers) Status.SunsetCallers = SunsetCallersPatch.Apply(c);
 		if (Settings.HookUe) Status.UeFuncs = UeFunctionHooks.Apply(c);
 		if (Settings.Dialog) Status.Dialog = DialogHooks.Apply(c);
 		if (Settings.Notifications) Status.Notifications = NotificationHooks.Apply(c);
@@ -159,10 +160,14 @@ public sealed class Client
 			Log.Debug($"function {f}");
 	}
 
-	/// <summary>Once a minute, when it changes: which hooks have failed and how often.</summary>
+	/// <summary>
+	/// Once a minute: which hooks have failed and how often, when that changes; and when the
+	/// sunset call counter is on, how many calls the last minute saw.
+	/// </summary>
 	private void Heartbeat()
 	{
 		string lastFailures = "";
+		long lastCalls = 0;
 		while (true)
 		{
 			Thread.Sleep(60_000);
@@ -170,6 +175,12 @@ public sealed class Client
 			if (failures != lastFailures)
 				Log.Info($"heartbeat: hook failures: {(failures.Length == 0 ? "none" : failures)}");
 			lastFailures = failures;
+			if (SunsetPatch.Counting)
+			{
+				long calls = SunsetPatch.Calls;
+				Log.Info($"heartbeat: sunset check called {calls - lastCalls} times in the last minute ({calls} total){(Status.SunsetCallers ? ", with callers patched" : "")}");
+				lastCalls = calls;
+			}
 		}
 	}
 

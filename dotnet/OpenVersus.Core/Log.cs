@@ -60,9 +60,10 @@ public sealed class Log
 						LogLevel.Info => "\x1b[32m",
 						_ => "\x1b[31m",
 					};
+					// Same shape as the C++ console: "[TAG] [timestamp]: message".
 					string text = Colour
-						? $"\x1b[0m[{tagColour}{tag}\x1b[0m] {colour}{message}\x1b[0m"
-						: $"[{tag}] {message}";
+						? $"\x1b[0m[{tagColour}{tag}\x1b[0m] [{stamp}]: {colour}{message}\x1b[0m"
+						: $"[{tag}] [{stamp}]: {message}";
 					ConsoleWriter(text + "\n");
 				}
 				catch { }

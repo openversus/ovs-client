@@ -11,9 +11,10 @@ public sealed class HookStatus
 	public bool Dialog;
 	public bool Notifications;
 	public bool PostMatchFreeze;
+	public bool SunsetCallers;
 
 	public override string ToString() =>
-		$"sigcheck={AntiSigCheck} gameEndpoint={GameEndpointSwap} prodEndpoint={ProdEndpointSwap} sunset={SunsetDate} ue={UeFuncs} dialog={Dialog} notifs={Notifications} postMatchFreeze={PostMatchFreeze}";
+		$"sigcheck={AntiSigCheck} gameEndpoint={GameEndpointSwap} prodEndpoint={ProdEndpointSwap} sunset={SunsetDate} ue={UeFuncs} dialog={Dialog} notifs={Notifications} postMatchFreeze={PostMatchFreeze} sunsetCallers={SunsetCallers}";
 }
 
 /// <summary>What every hook needs: the image, the pattern resolver, the settings and the log.</summary>

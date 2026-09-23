@@ -24,6 +24,19 @@ public class PeImageTests
 		Assert.True(PeImage.SizeOfImage(file) > 0);
 	}
 
+	private static string GameExe => Path.Combine(Environment.GetEnvironmentVariable("HOME") ?? "", ".local/share/Steam/steamapps/common/MultiVersus/MultiVersus/Binaries/Win64/MultiVersus-Win64-Shipping.exe");
+
+	[SkippableFact]
+	public void PdataFindsTheSunsetFunctionInTheFinalBuild()
+	{
+		Skip.If(!File.Exists(GameExe), "game exe not installed here");
+		byte[] mapped = PeImage.MapFile(File.ReadAllBytes(GameExe));
+		// The SunsetDate pattern sits inside the function the toolkit's function_at reports.
+		var fn = PeImage.FunctionContaining(mapped, 0x29D7535);
+		Assert.Equal(((uint)0x29D7480, (uint)0x29D7583), fn);
+		Assert.Null(PeImage.FunctionContaining(mapped, 0x10));
+	}
+
 	[Fact]
 	public void NotAPeIsAnError()
 	{

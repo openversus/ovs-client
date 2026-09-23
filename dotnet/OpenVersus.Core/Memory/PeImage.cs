@@ -61,6 +61,76 @@ public static unsafe class PeImage
 		return sections;
 	}
 
+	/// <summary>
+	/// The function containing <paramref name="rva"/> as (begin, end) RVAs from the exception
+	/// directory (.pdata), following chained unwind info from a split-off chunk to the function
+	/// it belongs to, as the reverse-engineering toolkit's Image.function_at does. Null when no
+	/// entry covers it. <paramref name="image"/> is the mapped image.
+	/// </summary>
+	public static (uint Begin, uint End)? FunctionContaining(ReadOnlySpan<byte> image, uint rva)
+	{
+		int lfanew = NtHeaders(image);
+		int dir = lfanew + 24 + 0x70 + 3 * 8; // exception directory
+		uint pdata = BitConverter.ToUInt32(image[dir..]);
+		uint size = BitConverter.ToUInt32(image[(dir + 4)..]);
+		if (pdata == 0 || size < 12 || pdata + size > (uint)image.Length)
+			return null;
+		int count = (int)(size / 12);
+		int lo = 0, hi = count - 1, found = -1;
+		while (lo <= hi)
+		{
+			int mid = (lo + hi) / 2;
+			uint begin = BitConverter.ToUInt32(image[(int)(pdata + mid * 12)..]);
+			uint end = BitConverter.ToUInt32(image[(int)(pdata + mid * 12 + 4)..]);
+			if (rva < begin) hi = mid - 1;
+			else if (rva >= end) lo = mid + 1;
+			else { found = mid; break; }
+		}
+		if (found < 0)
+			return null;
+		for (int guard = 0; guard < 16; guard++)
+		{
+			int entry = (int)(pdata + found * 12);
+			uint unwind = BitConverter.ToUInt32(image[(entry + 8)..]) & ~1u;
+			if (unwind == 0 || unwind + 4 > (uint)image.Length || ((image[(int)unwind] >> 3) & 0x4) == 0)
+				break;
+			int codes = image[(int)unwind + 2];
+			int chained = (int)unwind + 4 + 2 * (codes + (codes & 1));
+			uint parentBegin = BitConverter.ToUInt32(image[chained..]);
+			int parent = -1;
+			lo = 0; hi = count - 1;
+			while (lo <= hi)
+			{
+				int mid = (lo + hi) / 2;
+				uint begin = BitConverter.ToUInt32(image[(int)(pdata + mid * 12)..]);
+				if (begin < parentBegin) lo = mid + 1;
+				else if (begin > parentBegin) hi = mid - 1;
+				else { parent = mid; break; }
+			}
+			if (parent < 0) break;
+			found = parent;
+		}
+		int e = (int)(pdata + found * 12);
+		return (BitConverter.ToUInt32(image[e..]), BitConverter.ToUInt32(image[(e + 4)..]));
+	}
+
+	/// <summary>A PE file laid out as the loader would map it, for tests that need image-relative reads without the game running.</summary>
+	public static byte[] MapFile(byte[] file)
+	{
+		var headers = file.AsSpan();
+		var mapped = new byte[SizeOfImage(headers)];
+		int lfanew = NtHeaders(headers);
+		int headersSize = (int)BitConverter.ToUInt32(headers[(lfanew + 24 + 60)..]);
+		file.AsSpan(0, Math.Min(headersSize, file.Length)).CopyTo(mapped);
+		foreach (var s in Sections(headers))
+		{
+			int length = (int)Math.Min(s.RawSize, Math.Min(s.VirtualSize == 0 ? s.RawSize : s.VirtualSize, (uint)(mapped.Length - s.Rva)));
+			if (s.RawOffset + length <= file.Length && length > 0)
+				file.AsSpan((int)s.RawOffset, length).CopyTo(mapped.AsSpan((int)s.Rva));
+		}
+		return mapped;
+	}
+
 	public static bool IsExecutable(this PeSection s) => (s.Characteristics & IMAGE_SCN_MEM_EXECUTE) != 0;
 
 	public static bool IsReadOnlyData(this PeSection s) =>

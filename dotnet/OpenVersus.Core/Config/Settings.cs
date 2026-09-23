@@ -30,6 +30,7 @@ public sealed class Settings
 		SettingDef.Bool("bPauseOnStart", "Settings.Debug", "DebugPause", false),
 		SettingDef.Bool("bDebug", "Settings.Debug", "DebugLogging", false),
 		SettingDef.Bool("bAllowNonMVS", "Settings.Debug", "NonMVSPatching", false),
+		SettingDef.Bool("bCountSunsetCalls", "Settings.Debug", "CountSunsetCalls", false),
 		// Settings
 		SettingDef.Int("iLogSize", "Settings", "LogSize", 50),
 		SettingDef.Int("iLogLevel", "Settings", "LogLevel", 0),
@@ -45,6 +46,7 @@ public sealed class Settings
 		SettingDef.Bool("bSunsetDate", "Patches", "SunsetDate", true),
 		SettingDef.Bool("bDisableSignatureCheck", "Patches", "PakLoader", true),
 		SettingDef.Bool("bPostMatchFreeze", "Patches", "PostMatchFreeze", true),
+		SettingDef.Bool("bSunsetCallers", "Patches", "SunsetCallers", false),
 		// Features
 		SettingDef.Bool("bHookUE", "Features", "HookUE", true),
 		SettingDef.Bool("bDialog", "Features", "Dialog", true),
@@ -115,6 +117,7 @@ public sealed class Settings
 	public bool PauseOnStart => Bool("bPauseOnStart");
 	public bool Debug => Bool("bDebug");
 	public bool AllowNonMvs => Bool("bAllowNonMVS");
+	public bool CountSunsetCalls => Bool("bCountSunsetCalls");
 	// Settings
 	public bool EnableKeyboardHotkeys => Bool("bEnableKeyboardHotkeys");
 	public bool AutoUpdate => Bool("bAutoUpdate");
@@ -123,6 +126,7 @@ public sealed class Settings
 	public bool SunsetDate => Bool("bSunsetDate");
 	public bool DisableSignatureCheck => Bool("bDisableSignatureCheck");
 	public bool PostMatchFreeze => Bool("bPostMatchFreeze");
+	public bool SunsetCallers => Bool("bSunsetCallers");
 	// Features
 	public bool HookUe => Bool("bHookUE");
 	public bool Dialog => Bool("bDialog");

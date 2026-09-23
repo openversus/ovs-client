@@ -64,7 +64,7 @@ public static unsafe class GameUi
 		if (getFrontend == null || addDialog == null || FighterGameInstance == 0)
 			return 0;
 		nint frontend = getFrontend(FighterGameInstance);
-		if (frontend == 0 || *(nint*)(frontend + Mvs.FrontendCurrentStateWidget) == 0)
+		if (frontend == 0 || !Memory.CodeWriter.TryRead(frontend + Mvs.FrontendCurrentStateWidget, out nint stateWidget) || stateWidget == 0)
 			return 0;
 
 		var p = FMvsDialogParameters.Empty();
