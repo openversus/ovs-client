@@ -6,4 +6,11 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
+
+  <!-- Trampoline pages are read-execute at rest and only writable while a stub is placed.
+       `dotnet publish -p:RwxTrampolines=true` keeps them read-write-execute for their whole
+       life, as the C++ client did. -->
+  <PropertyGroup Condition="'$(RwxTrampolines)' == 'true'">
+    <DefineConstants>$(DefineConstants);OVS_RWX_TRAMPOLINES</DefineConstants>
+  </PropertyGroup>
 </Project>

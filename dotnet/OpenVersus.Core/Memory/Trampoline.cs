@@ -9,6 +9,11 @@ namespace OpenVersus.Memory;
 /// function anywhere in the address space. Pages are never freed; the game unmaps them on exit.
 /// A port of the C++ client's Trampoline class, which searched only above the address; this one
 /// also searches below, since the game image can sit near the top of the usable range.
+///
+/// By default the page is read-execute at rest and made writable only while a stub is placed
+/// (execute stays on during the write, so a game thread running an earlier stub never faults).
+/// Built with OVS_RWX_TRAMPOLINES (`-p:RwxTrampolines=true`) the page stays read-write-execute
+/// for its whole life, as the C++ client's did.
 /// </summary>
 public sealed unsafe class Trampoline
 {
@@ -17,6 +22,7 @@ public sealed unsafe class Trampoline
 	private static readonly object s_lock = new();
 
 	private readonly Trampoline? _next;
+	private readonly nuint _size;
 	private byte* _memory;
 	private nuint _left;
 
@@ -24,6 +30,7 @@ public sealed unsafe class Trampoline
 	{
 		_next = s_first;
 		_memory = memory;
+		_size = size;
 		_left = size;
 	}
 
@@ -59,25 +66,57 @@ public sealed unsafe class Trampoline
 		return diff >= int.MinValue && diff <= int.MaxValue;
 	}
 
+	/// <summary>The protection the page has when nothing is being written to it.</summary>
+	public static uint RestingProtection =>
+#if OVS_RWX_TRAMPOLINES
+		Kernel32.PAGE_EXECUTE_READWRITE;
+#else
+		Kernel32.PAGE_EXECUTE_READ;
+#endif
+
 	/// <summary>A stub that jumps to <paramref name="target"/>; returns the stub's address.</summary>
 	public nint Jump(nint target)
 	{
 		lock (s_lock)
 		{
 			byte* stub = Reserve(StubSize, 1);
+			Unseal();
 			stub[0] = 0x48; stub[1] = 0xB8;                 // mov rax, imm64
 			*(long*)(stub + 2) = target;
 			stub[10] = 0xFF; stub[11] = 0xE0;               // jmp rax
 			Kernel32.FlushInstructionCache(Kernel32.GetCurrentProcess(), (nint)stub, StubSize);
+			Seal();
 			return (nint)stub;
 		}
 	}
 
-	/// <summary>Raw space in the page, for data the game must reach with rel32 addressing (fake vtables and the like).</summary>
-	public nint Space(int size, int align)
+	/// <summary>Writes <paramref name="bytes"/> into reserved page space, for data the game must reach with rel32 addressing.</summary>
+	public nint Place(ReadOnlySpan<byte> bytes, int align)
 	{
 		lock (s_lock)
-			return (nint)Reserve(size, align);
+		{
+			byte* space = Reserve(bytes.Length, align);
+			Unseal();
+			bytes.CopyTo(new Span<byte>(space, bytes.Length));
+			Seal();
+			return (nint)space;
+		}
+	}
+
+	private void Unseal()
+	{
+#if !OVS_RWX_TRAMPOLINES
+		if (!Kernel32.VirtualProtect(Base, _size, Kernel32.PAGE_EXECUTE_READWRITE, out _))
+			throw new InvalidOperationException($"could not make trampoline page 0x{Base:X} writable (error {Marshal.GetLastPInvokeError()})");
+#endif
+	}
+
+	private void Seal()
+	{
+#if !OVS_RWX_TRAMPOLINES
+		if (!Kernel32.VirtualProtect(Base, _size, Kernel32.PAGE_EXECUTE_READ, out _))
+			throw new InvalidOperationException($"could not seal trampoline page 0x{Base:X} (error {Marshal.GetLastPInvokeError()})");
+#endif
 	}
 
 	private byte* Reserve(int size, int align)
@@ -118,7 +157,7 @@ public sealed unsafe class Trampoline
 				{
 					if (candidate < regionStart || candidate + (nint)size > regionEnd || !Reachable(candidate, near))
 						continue;
-					nint mem = Kernel32.VirtualAlloc(candidate, size, Kernel32.MEM_COMMIT | Kernel32.MEM_RESERVE, Kernel32.PAGE_EXECUTE_READWRITE);
+					nint mem = Kernel32.VirtualAlloc(candidate, size, Kernel32.MEM_COMMIT | Kernel32.MEM_RESERVE, RestingProtection);
 					if (mem != 0)
 						return mem;
 				}

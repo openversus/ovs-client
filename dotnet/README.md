@@ -24,6 +24,9 @@ dotnet publish dotnet/OpenVersus/OpenVersus.csproj -c Release -r win-x64 -p:Acce
 dotnet/wine-host/run.sh                      # the hooking layer, end to end under Wine
 ```
 
+Trampoline pages are read-execute except while a stub is being written. `-p:RwxTrampolines=true`
+on the publish keeps them read-write-execute for their whole life, as the C++ client did.
+
 The published plugin is `dotnet/OpenVersus/bin/Release/net10.0/win-x64/publish/OpenVersus.asi`.
 It imports only system DLLs and the UCRT api-sets. The first publish downloads the Windows SDK
 sysroot (about 2.4 GB) into `~/.cache/xwin`; `AcceptVSBuildToolsLicense=true` accepts its license.

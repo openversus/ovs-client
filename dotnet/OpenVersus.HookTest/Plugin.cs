@@ -76,6 +76,11 @@ public static unsafe class Plugin
 			? "guarded read: ok (unmapped refused, image header read)"
 			: $"guarded read: WRONG (unmapped={unmapped}, mapped={mapped}, mz=0x{mz:X})");
 
+		// The page that holds the stubs must be back at its resting protection.
+		nint page = Trampoline.Near((nint)image).Base;
+		Kernel32.VirtualQuery(page, out MEMORY_BASIC_INFORMATION mbi, (nuint)sizeof(MEMORY_BASIC_INFORMATION));
+		log.Info($"trampoline page 0x{page:X} protect 0x{mbi.Protect:X} ({(mbi.Protect == Trampoline.RestingProtection ? "as expected" : "WRONG")})");
+
 		log.Info("done");
 	}
 

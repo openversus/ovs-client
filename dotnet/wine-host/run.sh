@@ -30,7 +30,7 @@ status=0
 wine host.exe > host.out 2>wine.err || status=$?
 echo "--- host output (exit $status)"; cat host.out
 echo "--- OpenVersus.HookTest.log"; cat OpenVersus.HookTest.log 2>/dev/null || echo "(no log written)"
-if [ $status = 0 ] && tr -d '\r' < host.out | grep -q '^PASS$' && grep -q 'guarded read: ok' OpenVersus.HookTest.log; then
+if [ $status = 0 ] && tr -d '\r' < host.out | grep -q '^PASS$' && grep -q 'guarded read: ok' OpenVersus.HookTest.log && grep -q 'trampoline page .* (as expected)' OpenVersus.HookTest.log; then
 	echo "WINE TEST: passed"
 else
 	echo "WINE TEST: FAILED (see $work/wine.err)"; exit 1
