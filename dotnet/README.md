@@ -60,7 +60,8 @@ both off by default:
 ## Testing against the game
 
 Copy `OpenVersus.asi` over the one in `plugins/` next to the game (keep the old one as a `.bak`).
-With `DebugLogging=true`, `OpenVersus.log` next to the plugin lists every pattern, the address
+With `DebugLogging=true`, `logs/OpenVersus.log` next to the plugin (the running log, truncated
+each launch; the previous run is copied to `logs/OpenVersus_<launch time>.log`) lists every pattern, the address
 of every function it resolved, and the hooks that took; compare those addresses against the C++
 build's console output. Set `AutoUpdate=false` while testing: this build's version check works
 against https, which the C++ one did not.

@@ -80,6 +80,7 @@ public sealed class AutoUpdate(string serverUrl, string pluginPath, IHttpTranspo
 		}
 		log.Info("[AutoUpdate] New DLL installed! Restarting game...");
 		User32.MessageBox(0, "A new version of OpenVersus has been released and an update has been applied. The game will now close; please relaunch the game to play.", "Game restarting", User32.MB_ICONINFORMATION);
+		log.Close(); // TerminateProcess gives no exit moment, so the log is archived here
 		Firmware.TerminateProcess(Kernel32.GetCurrentProcess(), 0);
 	}
 }

@@ -21,7 +21,7 @@ public static unsafe class Plugin
 		{
 			nint self = Kernel32.ModuleFromAddress((nint)(delegate* unmanaged<void>)&InitializeASI);
 			string pluginPath = Kernel32.GetModulePath(self);
-			log = new Log(Path.ChangeExtension(pluginPath, ".log"));
+			log = Log.OpenSession(Path.Combine(Path.GetDirectoryName(pluginPath)!, "logs"), "OpenVersus");
 			HookGuard.Attach(log);
 			s_client = new Client(log, pluginPath, self);
 			s_client.Initialize();

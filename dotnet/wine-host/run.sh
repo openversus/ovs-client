@@ -30,6 +30,7 @@ status=0
 wine host.exe > host.out 2>wine.err || status=$?
 echo "--- host output (exit $status)"; cat host.out
 echo "--- OpenVersus.HookTest.log"; cat OpenVersus.HookTest.log 2>/dev/null || echo "(no log written)"
+grep -q 'process-exit hook fired' OpenVersus.HookTest.log 2>/dev/null && echo "EXIT HOOK: fires under NativeAOT in a DLL" || echo "EXIT HOOK: did not fire (the next-launch archive covers it)"
 if [ $status = 0 ] && tr -d '\r' < host.out | grep -q '^PASS$' && grep -q 'guarded read: ok' OpenVersus.HookTest.log && grep -q 'trampoline page .* (as expected)' OpenVersus.HookTest.log; then
 	echo "WINE TEST: passed"
 else

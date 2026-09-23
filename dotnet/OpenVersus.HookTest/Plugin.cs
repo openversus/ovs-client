@@ -26,7 +26,10 @@ public static unsafe class Plugin
 			string pluginPath = Kernel32.GetModulePath(Kernel32.ModuleFromAddress((nint)(delegate* unmanaged<void>)&InitializeASI));
 			log = new Log(Path.ChangeExtension(pluginPath, ".log"));
 			HookGuard.Attach(log);
+			Log captured = log;
+			AppDomain.CurrentDomain.ProcessExit += (_, _) => { captured.Info("process-exit hook fired"); captured.Close(); };
 			Run(log);
+			log.Flush();
 		}
 		catch (Exception e)
 		{
