@@ -15,7 +15,20 @@ port of the C++ client at the repository root, built from Linux without Visual S
 
 ## Build
 
-Requires the .NET 10 SDK, and for a Windows binary `lld-link` (package `lld`) and `xwin` on `PATH`.
+Requires the .NET 10 SDK. Two scripts wrap the commands below and check the prerequisites:
+
+```sh
+dotnet/build.sh                # Linux/macOS: build, test, publish OpenVersus.asi; --help for options
+dotnet\build.ps1               # Windows (PowerShell; build.cmd runs it from cmd or a double-click)
+```
+
+Both take `test`, `publish` or `clean` as the command, `-Rwx`/`--rwx` for RWX trampolines and
+`-Install DIR`/`--install DIR` to copy the plugin into the game's `plugins` folder. On Windows the
+publish needs the "Desktop development with C++" workload of Visual Studio or its Build Tools; on
+Linux it needs `lld-link` (package `lld`) and `xwin` on `PATH`, and `build.sh harness` runs the
+Wine test too.
+
+By hand:
 
 ```sh
 dotnet build dotnet/OpenVersus.slnx          # everything, for the host (tests, no AOT)
