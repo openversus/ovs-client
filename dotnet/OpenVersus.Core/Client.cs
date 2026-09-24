@@ -161,19 +161,25 @@ public sealed class Client
 
         if (Settings.NetStats)
         {
-            // Its own file beside the main log, with the same writer thread, archive and
-            // retention behavior; one line a second must not bury everything else.
-            var statsLog = Log.OpenSession(Path.GetDirectoryName(Log.Path)!, "NetStats", fallbackDirectory: Directory);
-            statsLog.MinimumLevel = LogLevel.Information;
-            if (statsLog.Notice != null)
+            // One file per match beside the main log, with the same writer thread, archive
+            // and retention behavior; a line a second must not bury everything else. Each match
+            // opens a fresh NetStats.log and closing it archives it under the match's start time.
+            string logDirectory = Path.GetDirectoryName(Log.Path)!;
+            string fallback = Directory;
+            var stats = new NetStatsLogger(Objects, Log, info =>
             {
-                Log.Warn(statsLog.Notice);
-            }
+                var matchLog = Log.OpenSession(logDirectory, "NetStats", fallbackDirectory: fallback);
+                matchLog.MinimumLevel = LogLevel.Information;
+                matchLog.ArchiveSuffix = info.FileSuffix;
+                if (matchLog.Notice != null)
+                {
+                    Log.Warn(matchLog.Notice);
+                }
 
-            var stats = new NetStatsLogger(Objects, Log, statsLog);
+                return matchLog;
+            });
             stats.Start();
             _shutdown.Add(stats.Stop);
-            _shutdown.Add(statsLog.Close);
         }
     }
 

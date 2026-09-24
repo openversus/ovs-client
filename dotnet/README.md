@@ -73,9 +73,11 @@ not a level is logged and falls back the same way. Tags in the file are `TRC DBG
 Per-attempt and game-thread queue lines are Trace; pattern and function resolution is Debug; hooks,
 banners and netstats are Information.
 
-With `[Features] NetStats=true` the per-second `NETSTATS` lines go to `logs/NetStats.log`, a
-second log with the same archiving; the main log gets only the session start and end and the
-`NETSTATS-SUMMARY` line. Anything that used to grep the main log for `NETSTATS` reads that file now.
+With `[Features] NetStats=true` the per-second `NETSTATS` lines go to `logs/NetStats.log`, one
+file per match: it opens when a session starts playing and closes at the summary, which archives
+it as `NetStats_<match start time>.log` with the same retention as the main log. The main log
+gets only the session start and end, the match log open and close, and the `NETSTATS-SUMMARY`
+line. Anything that used to grep the main log for `NETSTATS` reads that file now.
 
 Archives from the last week stay as plain text; older ones are compressed to `.zst` (zstd level
 11, through `ZstdSharp`) on a background thread at launch, keeping their timestamps.

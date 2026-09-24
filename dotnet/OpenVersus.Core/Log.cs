@@ -49,6 +49,9 @@ public sealed class Log : ILogger, IDisposable
     /// <summary>Set when the log is not where it was asked to be: which directory failed, why, and where it went instead.</summary>
     public string? Notice { get; private init; }
 
+    /// <summary>Appended to the archive name after the launch time ("&lt;name&gt;_&lt;time&gt;&lt;suffix&gt;.log"), for what the log was about.</summary>
+    public string ArchiveSuffix { get; set; } = "";
+
     /// <summary>Where console lines go once a console window exists; null means no console.</summary>
     public Action<string>? ConsoleWriter { get; set; }
     /// <summary>Lines below this level are dropped before they are queued.</summary>
@@ -356,7 +359,7 @@ public sealed class Log : ILogger, IDisposable
         {
             try
             {
-                Archive(Path, ArchivePath(Path, _name, LaunchTime));
+                Archive(Path, ArchivePath(Path, _name, LaunchTime, ArchiveSuffix));
             }
             catch { }
         }
@@ -417,7 +420,9 @@ public sealed class Log : ILogger, IDisposable
         {
             try
             {
-                string stamp = System.IO.Path.GetFileNameWithoutExtension(archive)[(name.Length + 1)..];
+                // The stamp follows the name; whatever follows the stamp (a match id, an opponent) is not its concern.
+                string rest = System.IO.Path.GetFileNameWithoutExtension(archive)[(name.Length + 1)..];
+                string stamp = rest.Length >= ArchiveStampFormat.Length ? rest[..ArchiveStampFormat.Length] : rest;
                 if (!DateTime.TryParseExact(stamp, ArchiveStampFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime launch))
                 {
                     launch = File.GetLastWriteTime(archive);
@@ -455,8 +460,8 @@ public sealed class Log : ILogger, IDisposable
         return compressed;
     }
 
-    private static string ArchivePath(string path, string name, DateTime launch) =>
-        System.IO.Path.Combine(System.IO.Path.GetDirectoryName(path)!, $"{name}_{launch.ToString(ArchiveStampFormat, CultureInfo.InvariantCulture)}.log");
+    private static string ArchivePath(string path, string name, DateTime launch, string suffix = "") =>
+        System.IO.Path.Combine(System.IO.Path.GetDirectoryName(path)!, $"{name}_{launch.ToString(ArchiveStampFormat, CultureInfo.InvariantCulture)}{suffix}.log");
 
     private static void Archive(string path, string target)
     {

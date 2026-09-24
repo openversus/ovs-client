@@ -33,67 +33,142 @@ public readonly record struct ObjectHeader(nint Address, nint VTable, uint Flags
 
 /// <summary>
 /// The engine's global object array (GUObjectArray), the authoritative list of live UObjects.
-/// Its RVA comes from the UE4SS session of 2026-04-24, rebased through FName::ToString, which
-/// the client also finds by pattern; the two agreeing at runtime is the check that it is right.
-/// The layout is Unreal 5.1's chunked array, validated before use; if anything disagrees, the
-/// finder falls back to scanning the heap as the C++ client did.
+/// Its RVA is agreed by the UE4SS session of 2026-04-24 and by patternsleuth on the final exe.
+/// The layout is not Unreal 5.1's: this build keeps the chunked array at +0xA0 of the global
+/// and stores the chunk-table pointer XOR-ed with a per-build key, which is why the two tools
+/// that assume the stock layout read nothing there. The offsets and the key were read from
+/// FUObjectArray::FreeUObjectIndex (rva 0x2D4A570) and confirmed on the live game on
+/// 2026-09-24: decoded chunk 0's first object has internal index 0, chunk 1's has 65536. The
+/// array is validated before use; if anything disagrees, the finder falls back to scanning the
+/// heap as the C++ client did.
 /// </summary>
 public sealed class ObjectArray
 {
     public const uint GUObjectArrayRva = 0x081C5090;
-    internal const int ObjObjectsOffset = 0x10;
+    /// <summary>int32 NumElements.</summary>
+    internal const int NumElementsOffset = 0xA0;
+    /// <summary>int32 MaxElements, then int32 MaxChunks.</summary>
+    internal const int MaxElementsOffset = 0xB0;
+    internal const int MaxChunksOffset = 0xB4;
+    /// <summary>FUObjectItem** Objects, stored XOR <see cref="ObjectsKey"/>.</summary>
+    internal const int ObjectsOffset = 0xB8;
+    internal const int NumChunksOffset = 0xC0;
+    /// <summary>The immediate the engine XORs the chunk-table pointer with, from FreeUObjectIndex.</summary>
+    internal const ulong ObjectsKey = 0x01B5DEAFD6B4068C;
     internal const int ItemSize = 24;
     internal const int ChunkItems = 65536;
 
     private readonly IMemory _memory;
+    private readonly nint _global;
     private readonly nint _chunkTable;
-    public int Count { get; }
-    public int Chunks { get; }
+    private int _count;
+    private int _chunks;
 
-    private ObjectArray(IMemory memory, nint chunkTable, int count, int chunks)
+    private ObjectArray(IMemory memory, nint global, nint chunkTable, int count, int chunks)
     {
         _memory = memory;
+        _global = global;
         _chunkTable = chunkTable;
-        Count = count;
-        Chunks = chunks;
+        _count = count;
+        _chunks = chunks;
+    }
+
+    /// <summary>Live object count: the game keeps creating objects after the array is opened, so it is re-read each time.</summary>
+    public int Count
+    {
+        get
+        {
+            if (_memory.TryRead(_global + NumElementsOffset, out int count) && count >= 0)
+            {
+                _count = count;
+            }
+
+            return _count;
+        }
+    }
+
+    public int Chunks
+    {
+        get
+        {
+            if (_memory.TryRead(_global + NumChunksOffset, out int chunks) && chunks >= 0)
+            {
+                _chunks = chunks;
+            }
+
+            return _chunks;
+        }
     }
 
     public static ObjectArray? Open(GameImage image, IMemory memory, IGameNames names, ILogger log)
     {
-        nint objObjects = image.Address(GUObjectArrayRva) + ObjObjectsOffset;
-        if (!memory.TryRead(objObjects, out nint chunkTable) ||
-            !memory.TryRead(objObjects + 0x10, out int maxElements) ||
-            !memory.TryRead(objObjects + 0x14, out int numElements) ||
-            !memory.TryRead(objObjects + 0x18, out int maxChunks) ||
-            !memory.TryRead(objObjects + 0x1C, out int numChunks))
+        nint global = image.Address(GUObjectArrayRva);
+        if (!memory.TryRead(global + ObjectsOffset, out ulong encodedTable) ||
+            !memory.TryRead(global + MaxElementsOffset, out int maxElements) ||
+            !memory.TryRead(global + NumElementsOffset, out int numElements) ||
+            !memory.TryRead(global + MaxChunksOffset, out int maxChunks) ||
+            !memory.TryRead(global + NumChunksOffset, out int numChunks))
         {
-            log.Warn("object array: header unreadable");
+            log.Warn($"object array: header unreadable at 0x{global:X}");
             return null;
         }
+
+        nint chunkTable = (nint)(encodedTable ^ ObjectsKey);
         int expectedChunks = (numElements + ChunkItems - 1) / ChunkItems;
         if (chunkTable == 0 || numElements < 1000 || numElements > 20_000_000 || numChunks != expectedChunks || maxChunks < numChunks || maxElements < numElements)
         {
-            log.Warn($"object array: header does not look like a chunked array (elements {numElements}/{maxElements}, chunks {numChunks}/{maxChunks})");
+            log.Warn($"object array: header at 0x{global:X} does not look like a chunked array (elements {numElements}/{maxElements}, chunks {numChunks}/{maxChunks}, table 0x{chunkTable:X})");
+            DumpBytes(memory, global, log);
             return null;
         }
-        var array = new ObjectArray(memory, chunkTable, numElements, numChunks);
-        // The first live object must look like one: a vtable inside the image, and a name the
-        // engine can print once FName::ToString is available.
+
+        var array = new ObjectArray(memory, global, chunkTable, numElements, numChunks);
+        if (!Validate(array, image, memory, names, log, global))
+        {
+            DumpBytes(memory, global, log);
+            return null;
+        }
+
+        return array;
+    }
+
+    /// <summary>What is actually there, so a failure can be read as "wrong address" or "wrong layout" from the log alone.</summary>
+    private static void DumpBytes(IMemory memory, nint global, ILogger log)
+    {
+        Span<byte> bytes = stackalloc byte[0xD0];
+        log.Warn(memory.TryRead(global, bytes)
+            ? $"object array: bytes at 0x{global:X} (rva 0x{GUObjectArrayRva:X}): {Convert.ToHexString(bytes)}"
+            : $"object array: 0x{global:X} (rva 0x{GUObjectArrayRva:X}) is not readable");
+    }
+
+    private static bool Validate(ObjectArray array, GameImage image, IMemory memory, IGameNames names, ILogger log, nint global)
+    {
+        // The first live objects must look like objects: a vtable inside the image, and a name
+        // the engine can print once FName::ToString is available. And there must be some: a
+        // table pointer that decodes to garbage yields no readable chunk, hence no objects.
+        int examined = 0;
         foreach (nint obj in array.Objects().Take(16))
         {
+            examined++;
             if (!ObjectHeader.TryRead(memory, obj, out var h) || !image.Contains(h.VTable))
             {
                 log.Warn($"object array: entry 0x{obj:X} has no vtable in the image; not using it");
-                return null;
+                return false;
             }
             if (names.Ready && names.ToString(h.Name) == null)
             {
                 log.Warn($"object array: entry 0x{obj:X} has a name that does not resolve; not using it");
-                return null;
+                return false;
             }
         }
-        log.Info($"object array at 0x{objObjects - ObjObjectsOffset:X}: {numElements} objects in {numChunks} chunks");
-        return array;
+        if (examined == 0)
+        {
+            log.Warn($"object array: no readable objects behind the table at 0x{array._chunkTable:X}; not using it");
+            return false;
+        }
+
+        log.Info($"object array at 0x{global:X}: {array.Count} objects in {array.Chunks} chunks");
+        return true;
     }
 
     public nint this[int index]
@@ -118,14 +193,15 @@ public sealed class ObjectArray
     public IEnumerable<nint> Objects()
     {
         var chunkBytes = new byte[ChunkItems * ItemSize];
-        for (int c = 0; c < Chunks; c++)
+        int count = Count, chunks = Chunks;
+        for (int c = 0; c < chunks; c++)
         {
             if (!_memory.TryRead(_chunkTable + (nint)c * sizeof(long), out nint chunk) || chunk == 0)
             {
                 continue;
             }
 
-            int items = Math.Min(ChunkItems, Count - c * ChunkItems);
+            int items = Math.Min(ChunkItems, count - c * ChunkItems);
             if (!_memory.TryRead(chunk, chunkBytes.AsSpan(0, items * ItemSize)))
             {
                 continue;
@@ -158,20 +234,28 @@ public sealed class ObjectFinder(GameImage image, IMemory memory, IGameNames nam
     private readonly object _arrayLock = new();
     private ObjectArray? _array;
     private long _nextArrayAttempt;
-    private int _classNameIndex = -1;
+    private int _arrayAttempts;
+    private HashSet<int>? _classClassNames;
+
+    /// <summary>Attempts to open the object array before giving up on it for the session.</summary>
+    public const int MaxArrayAttempts = 12;
+
+    /// <summary>What a class object's own class is called: native, editor-made, and editor-made widget.</summary>
+    private static readonly string[] ClassClassNames = ["Class", "BlueprintGeneratedClass", "WidgetBlueprintGeneratedClass"];
 
     public bool UsesObjectArray => _array != null;
 
     /// <summary>
     /// The object array, opened on first use rather than at plugin load: the plugin loads before
     /// the engine has created a single object, so validating then would always fail. A failed
-    /// attempt is retried a few seconds later; the heap scan covers the meantime.
+    /// attempt is retried a few seconds later, <see cref="MaxArrayAttempts"/> times; after that
+    /// the heap scan is the finder for the rest of the session, said once.
     /// </summary>
     private ObjectArray? Array
     {
         get
         {
-            if (_array != null || !tryObjectArray)
+            if (_array != null || !tryObjectArray || _arrayAttempts >= MaxArrayAttempts)
             {
                 return _array;
             }
@@ -179,13 +263,16 @@ public sealed class ObjectFinder(GameImage image, IMemory memory, IGameNames nam
             lock (_arrayLock)
             {
                 long now = Environment.TickCount64;
-                if (_array == null && now >= _nextArrayAttempt)
+                if (_array == null && _arrayAttempts < MaxArrayAttempts && now >= _nextArrayAttempt)
                 {
                     _nextArrayAttempt = now + 5000;
+                    _arrayAttempts++;
                     _array = ObjectArray.Open(image, memory, names, log);
                     if (_array == null)
                     {
-                        log.Warn("object array not usable yet; scanning the heap");
+                        log.Warn(_arrayAttempts < MaxArrayAttempts
+                            ? $"object array not usable yet; scanning the heap (attempt {_arrayAttempts} of {MaxArrayAttempts})"
+                            : $"object array never validated in {MaxArrayAttempts} attempts; scanning the heap for the rest of this session");
                     }
                 }
                 return _array;
@@ -210,16 +297,18 @@ public sealed class ObjectFinder(GameImage image, IMemory memory, IGameNames nam
             return 0;
         }
 
-        if (_classNameIndex < 0)
+        // A class object's own class is "Class" for a native class and "BlueprintGeneratedClass"
+        // for one made in the editor (the "_C" ones, such as MatchPlayerData_C); that is what
+        // separates the class from anything else that shares its name. Resolved once all exist.
+        if (_classClassNames == null || _classClassNames.Count < ClassClassNames.Length)
         {
-            _classNameIndex = names.Find("Class").Index;
+            _classClassNames = [.. ClassClassNames.Select(n => names.Find(n).Index).Where(i => i != 0)];
         }
 
         nint found = 0;
         foreach (var h in Candidates(name.Index))
         {
-            // A UClass's own class is "Class"; that separates the class from anything else that shares the name.
-            if (ObjectHeader.TryRead(memory, h.ClassPrivate, out var cls) && cls.Name.Index == _classNameIndex)
+            if (ObjectHeader.TryRead(memory, h.ClassPrivate, out var cls) && _classClassNames.Contains(cls.Name.Index))
             {
                 found = h.Address;
                 break;
@@ -237,11 +326,14 @@ public sealed class ObjectFinder(GameImage image, IMemory memory, IGameNames nam
     }
 
     /// <summary>Any live instance of <paramref name="uclass"/> or a subclass, skipping class default objects.</summary>
-    public nint FindInstanceOfClass(nint uclass)
+    public nint FindInstanceOfClass(nint uclass) => FindInstancesOfClass(uclass).FirstOrDefault();
+
+    /// <summary>Every live instance of <paramref name="uclass"/> or a subclass, skipping class default objects.</summary>
+    public IEnumerable<nint> FindInstancesOfClass(nint uclass)
     {
         if (uclass == 0)
         {
-            return 0;
+            yield break;
         }
 
         foreach (var h in AllObjects())
@@ -253,10 +345,9 @@ public sealed class ObjectFinder(GameImage image, IMemory memory, IGameNames nam
 
             if (h.ClassPrivate == uclass || Inherits(memory, h.ClassPrivate, uclass))
             {
-                return h.Address;
+                yield return h.Address;
             }
         }
-        return 0;
     }
 
     public static bool Inherits(IMemory memory, nint uclass, nint ancestor)

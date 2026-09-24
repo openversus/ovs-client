@@ -57,10 +57,11 @@ public class LogTests
             string old = Path.Combine(dir, "OpenVersus_2026-09-10-08.00.00.log");
             string edge = Path.Combine(dir, "OpenVersus_2026-09-17-11.59.59.log");
             string fresh = Path.Combine(dir, "OpenVersus_2026-09-20-08.00.00.log");
+            string suffixed = Path.Combine(dir, "OpenVersus_2026-09-01-08.00.00_match-1_vs_Rival.log");
             string unnamed = Path.Combine(dir, "OpenVersus_not-a-stamp.log");
             string running = Path.Combine(dir, "OpenVersus.log");
             string body = string.Concat(Enumerable.Repeat("2026-09-10 08:00:00.000 [NFO] a line that repeats so zstd has something to do\n", 200));
-            foreach (string f in new[] { old, edge, fresh, unnamed, running })
+            foreach (string f in new[] { old, edge, fresh, unnamed, running, suffixed })
             {
                 File.WriteAllText(f, body);
             }
@@ -70,7 +71,8 @@ public class LogTests
 
             var compressed = Log.CompressColdArchives(dir, "OpenVersus", now);
 
-            Assert.Equal(3, compressed.Count);
+            Assert.Equal(4, compressed.Count);
+            Assert.True(File.Exists(suffixed + ".zst"), "suffixed archive not compressed by its stamp");
             Assert.False(File.Exists(old));
             Assert.False(File.Exists(edge));
             Assert.False(File.Exists(unnamed));
@@ -87,6 +89,24 @@ public class LogTests
 
             // A second pass finds nothing left to do.
             Assert.Empty(Log.CompressColdArchives(dir, "OpenVersus", now));
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void AnArchiveSuffixNamesTheClosedLog()
+    {
+        string dir = Directory.CreateTempSubdirectory("ovs-logtest-").FullName;
+        try
+        {
+            var log = Log.OpenSession(dir, "NetStats");
+            log.ArchiveSuffix = "_match-9_vs_Someone";
+            log.Info("a line");
+            log.Close();
+            Assert.True(File.Exists(Path.Combine(dir, $"NetStats_{log.LaunchTime:yyyy-MM-dd-HH.mm.ss}_match-9_vs_Someone.log")));
         }
         finally
         {

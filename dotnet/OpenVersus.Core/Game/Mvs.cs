@@ -33,6 +33,17 @@ public static class Mvs
     // AMvsPreMatchGameState: its state machine, and the machine's current state.
     public const int PreMatchStateMachine = 0x320;
     public const int StateMachineCurrentState = 0x58;
+    // APfgFixedPawn and APawn: which player a pawn is, and its player state (CXXHeaderDump).
+    public const int PawnPlayerIndex = 0x354;
+    public const int PawnPlayerState = 0x2C0;
+    // APlayerState
+    public const int PlayerStateName = 0x398;          // FString PlayerNamePrivate
+    // UMatchPlayerData_C: one per player per match, from the matchmaking side.
+    public const int MatchPlayerDataUsername = 0x50;   // FString
+    public const int MatchPlayerDataMatchId = 0x60;    // FString
+    public const int MatchPlayerDataPlayerIndex = 0x94;
+    public const int MatchPlayerDataTeamIndex = 0x98;
+    public const int MatchPlayerDataPlayerState = 0xA0;
     // APfgFixedGameStateBase
     public const int GameStateNetcodeSession = 0x4A0;
     public const int GameStateResimFrames = 0x524;

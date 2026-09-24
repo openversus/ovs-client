@@ -54,6 +54,41 @@ public class ObjectFinderTests
     }
 
     [Fact]
+    public void TheChunkTablePointerIsDecodedWithTheBuildsKey()
+    {
+        // A table pointer stored without the key decodes to garbage, and the array must refuse it.
+        var game = new FakeGame();
+        nint global = game.Image.Address(ObjectArray.GUObjectArrayRva);
+        game.Memory.TryRead(global + ObjectArray.ObjectsOffset, out ulong encoded);
+        game.Memory.Write(global + ObjectArray.ObjectsOffset, encoded ^ ObjectArray.ObjectsKey);
+        Assert.Null(ObjectArray.Open(game.Image, game.Memory, game.Names, game.Log));
+        game.Memory.Write(global + ObjectArray.ObjectsOffset, encoded);
+        Assert.NotNull(ObjectArray.Open(game.Image, game.Memory, game.Names, game.Log));
+    }
+
+    [Fact]
+    public void AFailedOpenSaysWhatBytesItSaw()
+    {
+        // Through the opener alone: a finder whose array fails falls to the heap scanner, which needs Windows.
+        var game = new FakeGame();
+        game.CorruptChunkCount(2);
+        Assert.Null(ObjectArray.Open(game.Image, game.Memory, game.Names, game.Log));
+        Assert.Contains(game.Log.Lines, l => l.Contains("bytes at 0x"));
+    }
+
+    [Fact]
+    public void TheArraySeesObjectsCreatedAfterItWasOpened()
+    {
+        var game = new FakeGame();
+        var array = ObjectArray.Open(game.Image, game.Memory, game.Names, game.Log);
+        Assert.NotNull(array);
+        int before = array!.Count;
+        nint late = game.AddClass("LateArrival");
+        Assert.Equal(before + 1, array.Count);
+        Assert.Contains(late, array.Objects());
+    }
+
+    [Fact]
     public void FindClassPicksTheUClassAmongObjectsSharingItsName()
     {
         var game = new FakeGame();
@@ -68,6 +103,11 @@ public class ObjectFinderTests
         Assert.Equal(sessionClass, finder.FindClass("PfgNetcodeSession"));
         Assert.Equal(0, finder.FindClass("NoSuchClass"));
         Assert.True(finder.UsesObjectArray);
+
+        // A Blueprint-generated class (the "_C" ones) is a class too; an instance named like one is not.
+        nint blueprint = game.AddBlueprintClass("MatchPlayerData_C");
+        game.AddInstance(other, "MatchPlayerData_C");
+        Assert.Equal(blueprint, finder.FindClass("MatchPlayerData_C"));
     }
 
     [Fact]

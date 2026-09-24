@@ -110,17 +110,18 @@ public sealed class FakeGame
 
     public FakeGame()
     {
-        // GUObjectArray: chunk table pointer, then max/num elements and max/num chunks.
-        nint objObjects = Image.Address(ObjectArray.GUObjectArrayRva) + ObjectArray.ObjObjectsOffset;
-        Memory.Alloc(objObjects - ObjectArray.ObjObjectsOffset, 0x40);
+        // GUObjectArray as this build lays it out: counts at their offsets and the chunk-table
+        // pointer stored XOR the build's key, so a reader that forgets the key gets garbage.
+        nint global = Image.Address(ObjectArray.GUObjectArrayRva);
+        Memory.Alloc(global, 0x100);
         nint chunkTable = Heap - 0x1000;
         Memory.Alloc(chunkTable, 8);
         _chunk = Heap - 0x800000;
         Memory.Alloc(_chunk, ObjectArray.ChunkItems * ObjectArray.ItemSize);
-        Memory.Write(objObjects, (long)chunkTable);
+        Memory.Write(global + ObjectArray.ObjectsOffset, (ulong)chunkTable ^ ObjectArray.ObjectsKey);
         Memory.Write(chunkTable, (long)_chunk);
-        Memory.Write(objObjects + 0x18, ObjectArray.ChunkItems); // max chunks
-        Memory.Write(objObjects + 0x1C, 1);                       // num chunks
+        Memory.Write(global + ObjectArray.MaxChunksOffset, ObjectArray.ChunkItems); // max chunks
+        Memory.Write(global + ObjectArray.NumChunksOffset, 1);                      // num chunks
         Memory.Alloc(Heap, ObjectSize * 4096);
         ClassClass = AddObject("Class", GenericVTable, 0, 0);
         Memory.Write(ClassClass + Mvs.ObjectClassPrivate, (long)ClassClass);
@@ -159,6 +160,22 @@ public sealed class FakeGame
         return uclass;
     }
 
+    /// <summary>The UClass named "BlueprintGeneratedClass", made on first use.</summary>
+    private nint _blueprintClassClass;
+
+    /// <summary>A class made in the editor: its own class is BlueprintGeneratedClass, not Class.</summary>
+    public nint AddBlueprintClass(string name, nint super = 0)
+    {
+        if (_blueprintClassClass == 0)
+        {
+            _blueprintClassClass = AddObject("BlueprintGeneratedClass", GenericVTable, ClassClass, 0);
+        }
+
+        nint uclass = AddObject(name, GenericVTable, _blueprintClassClass, 0);
+        Memory.Write(uclass + Mvs.StructSuperStruct, (long)super);
+        return uclass;
+    }
+
     public nint AddInstance(nint uclass, string name = "Instance", bool defaultObject = false) =>
         AddObject(name, GenericVTable, uclass, 0, defaultObject ? ObjectHeader.RF_ClassDefaultObject : 0);
 
@@ -169,6 +186,23 @@ public sealed class FakeGame
         _nextObject += size; // leave room after it; the header block already covers the first 0x100 bytes
         Memory.Alloc(address + ObjectSize, size);
         return address;
+    }
+
+    /// <summary>An FString: a 16-byte header at the returned address pointing at UTF-16 text with a terminator.</summary>
+    public nint AddFString(string text)
+    {
+        nint header = AddBlock(0x10);
+        nint data = AddBlock((text.Length + 1) * 2);
+        var bytes = System.Text.Encoding.Unicode.GetBytes(text + "\0");
+        for (int i = 0; i < bytes.Length; i++)
+        {
+            Memory.Write(data + i, bytes[i]);
+        }
+
+        Memory.Write(header, (long)data);
+        Memory.Write(header + 8, text.Length + 1);
+        Memory.Write(header + 12, text.Length + 1);
+        return header;
     }
 
     /// <summary>A block of plain memory at a fresh address, for structures that are not objects.</summary>
@@ -218,14 +252,14 @@ public sealed class FakeGame
 
     private void SetCounts()
     {
-        nint objObjects = Image.Address(ObjectArray.GUObjectArrayRva) + ObjectArray.ObjObjectsOffset;
-        Memory.Write(objObjects + 0x10, _count); // max elements
-        Memory.Write(objObjects + 0x14, _count); // num elements
+        nint global = Image.Address(ObjectArray.GUObjectArrayRva);
+        Memory.Write(global + ObjectArray.MaxElementsOffset, _count);
+        Memory.Write(global + ObjectArray.NumElementsOffset, _count);
     }
 
     public void CorruptChunkCount(int chunks)
     {
-        nint objObjects = Image.Address(ObjectArray.GUObjectArrayRva) + ObjectArray.ObjObjectsOffset;
-        Memory.Write(objObjects + 0x1C, chunks);
+        nint global = Image.Address(ObjectArray.GUObjectArrayRva);
+        Memory.Write(global + ObjectArray.NumChunksOffset, chunks);
     }
 }
