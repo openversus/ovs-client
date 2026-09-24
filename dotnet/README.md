@@ -97,6 +97,11 @@ still reaches the console mirror. `Log.Notice` says which happened and is the fi
 - JSON goes through the source-generated `Net/OvsJson.cs` context (NativeAOT has no reflection
   for System.Text.Json); add a `[JsonSerializable]` there for any new shape.
 - Background loops stop through a `CancellationToken`, waited on rather than slept through.
+- Reads of the game's memory go through `IMemory` (`ProcessMemory` in the plugin, a byte-backed
+  fake in the tests) and engine name lookups through `IGameNames`, so the object array, the
+  finder and the reflection decoder are tested on Linux against a synthetic game
+  (`OpenVersus.Tests/FakeGame.cs`). Those tests prove the comparisons; the offsets they are built
+  from come from the same dump the code uses, and only the running game checks those.
 - What stays C-shaped is what must: `[UnmanagedCallersOnly]` hooks and the static state they
   need, function-pointer casts, sequential-layout structs mirroring the game, `nint` arithmetic,
   and Win32 names in `Native/`.

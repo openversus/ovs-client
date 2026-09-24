@@ -45,10 +45,6 @@ public sealed class Settings
         // A level name (trace, debug, info, warn, error, critical, none) or number; "0", which
         // existing files carry from the C++ client, means "decide from DebugLogging".
         public static readonly SettingDef LogLevel = SettingDef.Str("Settings", "LogLevel", "0");
-        public static readonly SettingDef ModLoader = SettingDef.Str("Settings", "ModLoader", "Kernel32.CreateFileW");
-        public static readonly SettingDef AntiCheatEngine = SettingDef.Str("Settings", "AntiCheatEngine", "User32.EnumChildWindows");
-        public static readonly SettingDef CurlSetOpt = SettingDef.Str("Settings", "CurlSetOpt", "libcurl.curl_easy_setopt");
-        public static readonly SettingDef CurlPerform = SettingDef.Str("Settings", "CurlPerform", "libcurl.curl_easy_perform");
         public static readonly SettingDef EnableKeyboardHotkeys = SettingDef.Bool("Settings", "EnableKeyboardHotkeys", true);
         public static readonly SettingDef AutoUpdate = SettingDef.Bool("Settings", "AutoUpdate", true);
         // Keybinds
@@ -94,10 +90,6 @@ public sealed class Settings
         Rows.NonMvsPatching,
         Rows.CountSunsetCalls,
         Rows.LogLevel,
-        Rows.ModLoader,
-        Rows.AntiCheatEngine,
-        Rows.CurlSetOpt,
-        Rows.CurlPerform,
         Rows.EnableKeyboardHotkeys,
         Rows.AutoUpdate,
         Rows.ToggleMenu,

@@ -108,7 +108,7 @@ public sealed class Client
         ApplyHooks();
         GameThread.Attach(Log);
         SpawnP2PServer();
-        Objects = new ObjectFinder(Image, Log, tryObjectArray: Status.UeFuncs);
+        Objects = new ObjectFinder(Image, ProcessMemory.Instance, EngineNames.Instance, Log, tryObjectArray: Status.UeFuncs);
         StartBackgroundWork();
         return true;
     }

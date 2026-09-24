@@ -18,6 +18,14 @@ public sealed unsafe class GameImage
         Sections = PeImage.Sections(headers);
     }
 
+    /// <summary>An image described rather than mapped, for tests of the code that only needs its bounds.</summary>
+    internal GameImage(nint @base, int size, IReadOnlyList<PeSection> sections)
+    {
+        Base = @base;
+        Size = size;
+        Sections = sections;
+    }
+
     public static GameImage Host() => new(Kernel32.GetModuleHandle(null));
 
     /// <summary>Base to SizeOfImage: what the C++ pattern scan covered.</summary>

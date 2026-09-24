@@ -55,7 +55,7 @@ public sealed class NetStatsLogger(ObjectFinder finder, ILogger log)
             long now = clock.ElapsedMilliseconds;
             try
             {
-                if (sessionClass == 0 && UE.Ready && now >= nextFind)
+                if (sessionClass == 0 && finder.Names.Ready && now >= nextFind)
                 {
                     sessionClass = finder.FindClass("PfgNetcodeSession");
                     nextFind = now + 5000;
@@ -98,14 +98,14 @@ public sealed class NetStatsLogger(ObjectFinder finder, ILogger log)
     private bool Sample(Match m, out bool gone)
     {
         gone = false;
-        if (!ObjectHeader.TryRead(m.Session, out var h) || !CodeWriter.TryRead(m.Session + Mvs.SessionState, out byte state))
+        if (!ObjectHeader.TryRead(finder.Memory, m.Session, out var h) || !finder.Memory.TryRead(m.Session + Mvs.SessionState, out byte state))
         {
             gone = true;
             return false;
         }
         if (state == 4)
         {
-            CodeWriter.TryRead(m.Session + Mvs.SessionResimCount, out int resim);
+            finder.Memory.TryRead(m.Session + Mvs.SessionResimCount, out int resim);
             if (m.StartFrame == 0)
             {
                 m.StartFrame = Frame(m.Session);
@@ -135,7 +135,7 @@ public sealed class NetStatsLogger(ObjectFinder finder, ILogger log)
         {
             m.Summarized = true;
             int frames = m.LastFrame - m.StartFrame, total = m.LastResim - m.StartResim;
-            CodeWriter.TryRead(m.Session + Mvs.SessionInputDelay, out int delay);
+            finder.Memory.TryRead(m.Session + Mvs.SessionInputDelay, out int delay);
             log.Info($"NETSTATS-SUMMARY frames={frames} resim_total={total} rollbacks={m.Rollbacks} mean_depth={(m.Rollbacks > 0 ? m.DepthSum / m.Rollbacks : 0):F2} max_depth={m.MaxDepth} final_delay={delay} state={state}");
         }
         if (state is 6 or 9)
@@ -149,18 +149,18 @@ public sealed class NetStatsLogger(ObjectFinder finder, ILogger log)
     private void Line(Match m)
     {
         nint s = m.Session;
-        CodeWriter.TryRead(s + Mvs.SessionState, out byte state);
+        finder.Memory.TryRead(s + Mvs.SessionState, out byte state);
         if (state != 4)
         {
             return;
         }
 
-        CodeWriter.TryRead(s + Mvs.SessionInputDelay, out int delay);
-        CodeWriter.TryRead(s + Mvs.SessionPing, out int ping);
-        CodeWriter.TryRead(s + Mvs.SessionRift, out float rift);
-        CodeWriter.TryRead(s + Mvs.SessionNumPredictedOverrides, out int pred);
-        CodeWriter.TryRead(s + Mvs.SessionNumZeroedOverrides, out int zero);
-        CodeWriter.TryRead(s + Mvs.SessionPlayerIndex, out int player);
+        finder.Memory.TryRead(s + Mvs.SessionInputDelay, out int delay);
+        finder.Memory.TryRead(s + Mvs.SessionPing, out int ping);
+        finder.Memory.TryRead(s + Mvs.SessionRift, out float rift);
+        finder.Memory.TryRead(s + Mvs.SessionNumPredictedOverrides, out int pred);
+        finder.Memory.TryRead(s + Mvs.SessionNumZeroedOverrides, out int zero);
+        finder.Memory.TryRead(s + Mvs.SessionPlayerIndex, out int player);
         int resim1s = m.LastResim - m.ResimAtSecond;
         log.Info($"NETSTATS player={player} frame={m.LastFrame} delay={delay} ping={ping} rift={rift:F2} resim_total={m.LastResim - m.StartResim} resim_1s={resim1s} rollbacks_1s={m.Rollbacks1s} max_depth_1s={m.MaxDepth1s} pred={pred} zero={zero}");
         m.ResimAtSecond = m.LastResim;
@@ -168,6 +168,6 @@ public sealed class NetStatsLogger(ObjectFinder finder, ILogger log)
         m.MaxDepth1s = 0;
     }
 
-    private static int Frame(nint session) =>
-        CodeWriter.TryRead(session + Mvs.SessionStateManager, out nint manager) && manager != 0 && CodeWriter.TryRead(manager + Mvs.StateManagerCurrentFrame, out int frame) ? frame : 0;
+    private int Frame(nint session) =>
+        finder.Memory.TryRead(session + Mvs.SessionStateManager, out nint manager) && manager != 0 && finder.Memory.TryRead(manager + Mvs.StateManagerCurrentFrame, out int frame) ? frame : 0;
 }

@@ -24,44 +24,44 @@ public sealed record ReflectedParameter(string Name, string Type, int Offset, in
 /// </summary>
 public static class Reflection
 {
-    private const int UStructChildProperties = 0x60;
-    private const int UFunctionFunctionFlags = 0xC0;
-    private const int UFunctionNumParms = 0xC4;
-    private const int UFunctionParmsSize = 0xC6;
-    private const int UFunctionReturnValueOffset = 0xC8;
-    private const int UFunctionFunc = 0xE8;
-    private const int FFieldClassPrivate = 0x08;
-    private const int FFieldNext = 0x20;
-    private const int FFieldNamePrivate = 0x28;
-    private const int FPropertyArrayDim = 0x38;
-    private const int FPropertyElementSize = 0x3C;
-    private const int FPropertyFlags = 0x40;
-    private const int FPropertyOffset = 0x4C;
+    internal const int UStructChildProperties = 0x60;
+    internal const int UFunctionFunctionFlags = 0xC0;
+    internal const int UFunctionNumParms = 0xC4;
+    internal const int UFunctionParmsSize = 0xC6;
+    internal const int UFunctionReturnValueOffset = 0xC8;
+    internal const int UFunctionFunc = 0xE8;
+    internal const int FFieldClassPrivate = 0x08;
+    internal const int FFieldNext = 0x20;
+    internal const int FFieldNamePrivate = 0x28;
+    internal const int FPropertyArrayDim = 0x38;
+    internal const int FPropertyElementSize = 0x3C;
+    internal const int FPropertyFlags = 0x40;
+    internal const int FPropertyOffset = 0x4C;
 
-    public static ReflectedSignature Describe(nint ufunction, string className, string functionName, nint ownerClass)
+    public static ReflectedSignature Describe(IMemory memory, IGameNames names, nint ufunction, string className, string functionName, nint ownerClass)
     {
-        CodeWriter.TryRead(ufunction + UFunctionFunctionFlags, out uint functionFlags);
-        CodeWriter.TryRead(ufunction + UFunctionNumParms, out byte numParms);
-        CodeWriter.TryRead(ufunction + UFunctionParmsSize, out ushort parmsSize);
-        CodeWriter.TryRead(ufunction + UFunctionReturnValueOffset, out ushort returnOffset);
-        CodeWriter.TryRead(ufunction + UFunctionFunc, out nint nativeFunc);
+        memory.TryRead(ufunction + UFunctionFunctionFlags, out uint functionFlags);
+        memory.TryRead(ufunction + UFunctionNumParms, out byte numParms);
+        memory.TryRead(ufunction + UFunctionParmsSize, out ushort parmsSize);
+        memory.TryRead(ufunction + UFunctionReturnValueOffset, out ushort returnOffset);
+        memory.TryRead(ufunction + UFunctionFunc, out nint nativeFunc);
 
         var parameters = new List<ReflectedParameter>();
-        CodeWriter.TryRead(ufunction + UStructChildProperties, out nint field);
+        memory.TryRead(ufunction + UStructChildProperties, out nint field);
         for (int guard = 0; field != 0 && guard < 64; guard++)
         {
-            CodeWriter.TryRead(field + FPropertyFlags, out ulong flags);
+            memory.TryRead(field + FPropertyFlags, out ulong flags);
             if ((flags & ReflectedParameter.CPF_Parm) != 0)
             {
-                CodeWriter.TryRead(field + FFieldNamePrivate, out FName name);
-                CodeWriter.TryRead(field + FFieldClassPrivate, out nint fieldClass);
-                CodeWriter.TryRead(fieldClass, out FName typeName);
-                CodeWriter.TryRead(field + FPropertyOffset, out int offset);
-                CodeWriter.TryRead(field + FPropertyElementSize, out int size);
-                CodeWriter.TryRead(field + FPropertyArrayDim, out int dim);
-                parameters.Add(new ReflectedParameter(UE.NameToString(name) ?? $"#{name.Index}", UE.NameToString(typeName) ?? "?", offset, size, dim, flags));
+                memory.TryRead(field + FFieldNamePrivate, out FName name);
+                memory.TryRead(field + FFieldClassPrivate, out nint fieldClass);
+                memory.TryRead(fieldClass, out FName typeName);
+                memory.TryRead(field + FPropertyOffset, out int offset);
+                memory.TryRead(field + FPropertyElementSize, out int size);
+                memory.TryRead(field + FPropertyArrayDim, out int dim);
+                parameters.Add(new ReflectedParameter(names.ToString(name) ?? $"#{name.Index}", names.ToString(typeName) ?? "?", offset, size, dim, flags));
             }
-            if (!CodeWriter.TryRead(field + FFieldNext, out field))
+            if (!memory.TryRead(field + FFieldNext, out field))
             {
                 break;
             }
@@ -84,7 +84,7 @@ public static class Reflection
             return null;
         }
 
-        var signature = Describe(ufunction, className, functionName, owner);
+        var signature = Describe(finder.Memory, finder.Names, ufunction, className, functionName, owner);
         return GameFunctions.Register(new GameFunction
         {
             Name = key,

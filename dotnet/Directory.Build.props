@@ -19,6 +19,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- The .editorconfig rules run as analyzers during the build. Braces on every control-flow
+         body (IDE0011) is an error there; one-line auto-properties and expression bodies are
+         allowed by the same file and stay that way. -->
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
   </PropertyGroup>
 
   <!-- Trampoline pages are read-execute at rest and only writable while a stub is placed.

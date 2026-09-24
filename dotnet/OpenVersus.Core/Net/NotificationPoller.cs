@@ -1,5 +1,6 @@
 using System.Text.Json;
 using OpenVersus.Game;
+using OpenVersus.Memory;
 using Microsoft.Extensions.Logging;
 
 namespace OpenVersus.Net;
@@ -167,17 +168,17 @@ public sealed class NotificationPoller(string serverUrl, IHttpTransport http, Ob
             return;
         }
 
-        if (!Memory.CodeWriter.TryRead(preMatch + Mvs.PreMatchStateMachine, out nint stateMachine) || !Plausible(stateMachine))
+        if (!finder.Memory.TryRead(preMatch + Mvs.PreMatchStateMachine, out nint stateMachine) || !Plausible(stateMachine))
         {
             log.Info($"[CancelMatch] StateMachine ptr invalid (0x{stateMachine:X})");
             return;
         }
-        if (!Memory.CodeWriter.TryRead(stateMachine + Mvs.StateMachineCurrentState, out nint currentState) || !Plausible(currentState))
+        if (!finder.Memory.TryRead(stateMachine + Mvs.StateMachineCurrentState, out nint currentState) || !Plausible(currentState))
         {
             log.Info($"[CancelMatch] CurrentState ptr invalid (0x{currentState:X}) — no-op");
             return;
         }
-        string className = ObjectHeader.TryRead(currentState, out var h) && ObjectHeader.TryRead(h.ClassPrivate, out var cls) ? UE.NameToString(cls.Name) ?? "?" : "?";
+        string className = ObjectHeader.TryRead(finder.Memory, currentState, out var h) && ObjectHeader.TryRead(finder.Memory, h.ClassPrivate, out var cls) ? finder.Names.ToString(cls.Name) ?? "?" : "?";
         log.Info($"[CancelMatch] CurrentState=0x{currentState:X} class='{className}'");
 
         var handler = Reflection.Find(finder, image, "MvsPreMatchTransitioningToGameplayState", "HandleTransitionToGameplayFailed");

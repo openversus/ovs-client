@@ -10,10 +10,10 @@ public readonly record struct ObjectHeader(nint Address, nint VTable, uint Flags
     public const uint RF_ClassDefaultObject = 0x10;
     public bool IsDefaultObject => (Flags & RF_ClassDefaultObject) != 0;
 
-    public static bool TryRead(nint address, out ObjectHeader header)
+    public static bool TryRead(IMemory memory, nint address, out ObjectHeader header)
     {
         Span<byte> raw = stackalloc byte[0x30];
-        if (!CodeWriter.TryRead(address, raw))
+        if (!memory.TryRead(address, raw))
         {
             header = default;
             return false;
@@ -41,29 +41,31 @@ public readonly record struct ObjectHeader(nint Address, nint VTable, uint Flags
 public sealed class ObjectArray
 {
     public const uint GUObjectArrayRva = 0x081C5090;
-    private const int ObjObjectsOffset = 0x10;
-    private const int ItemSize = 24;
-    private const int ChunkItems = 65536;
+    internal const int ObjObjectsOffset = 0x10;
+    internal const int ItemSize = 24;
+    internal const int ChunkItems = 65536;
 
+    private readonly IMemory _memory;
     private readonly nint _chunkTable;
     public int Count { get; }
     public int Chunks { get; }
 
-    private ObjectArray(nint chunkTable, int count, int chunks)
+    private ObjectArray(IMemory memory, nint chunkTable, int count, int chunks)
     {
+        _memory = memory;
         _chunkTable = chunkTable;
         Count = count;
         Chunks = chunks;
     }
 
-    public static ObjectArray? Open(GameImage image, ILogger log)
+    public static ObjectArray? Open(GameImage image, IMemory memory, IGameNames names, ILogger log)
     {
         nint objObjects = image.Address(GUObjectArrayRva) + ObjObjectsOffset;
-        if (!CodeWriter.TryRead(objObjects, out nint chunkTable) ||
-            !CodeWriter.TryRead(objObjects + 0x10, out int maxElements) ||
-            !CodeWriter.TryRead(objObjects + 0x14, out int numElements) ||
-            !CodeWriter.TryRead(objObjects + 0x18, out int maxChunks) ||
-            !CodeWriter.TryRead(objObjects + 0x1C, out int numChunks))
+        if (!memory.TryRead(objObjects, out nint chunkTable) ||
+            !memory.TryRead(objObjects + 0x10, out int maxElements) ||
+            !memory.TryRead(objObjects + 0x14, out int numElements) ||
+            !memory.TryRead(objObjects + 0x18, out int maxChunks) ||
+            !memory.TryRead(objObjects + 0x1C, out int numChunks))
         {
             log.Warn("object array: header unreadable");
             return null;
@@ -74,17 +76,17 @@ public sealed class ObjectArray
             log.Warn($"object array: header does not look like a chunked array (elements {numElements}/{maxElements}, chunks {numChunks}/{maxChunks})");
             return null;
         }
-        var array = new ObjectArray(chunkTable, numElements, numChunks);
+        var array = new ObjectArray(memory, chunkTable, numElements, numChunks);
         // The first live object must look like one: a vtable inside the image, and a name the
         // engine can print once FName::ToString is available.
         foreach (nint obj in array.Objects().Take(16))
         {
-            if (!ObjectHeader.TryRead(obj, out var h) || !image.Contains(h.VTable))
+            if (!ObjectHeader.TryRead(memory, obj, out var h) || !image.Contains(h.VTable))
             {
                 log.Warn($"object array: entry 0x{obj:X} has no vtable in the image; not using it");
                 return null;
             }
-            if (UE.Ready && UE.NameToString(h.Name) == null)
+            if (names.Ready && names.ToString(h.Name) == null)
             {
                 log.Warn($"object array: entry 0x{obj:X} has a name that does not resolve; not using it");
                 return null;
@@ -103,12 +105,12 @@ public sealed class ObjectArray
                 return 0;
             }
 
-            if (!CodeWriter.TryRead(_chunkTable + (nint)(index / ChunkItems) * sizeof(long), out nint chunk) || chunk == 0)
+            if (!_memory.TryRead(_chunkTable + (nint)(index / ChunkItems) * sizeof(long), out nint chunk) || chunk == 0)
             {
                 return 0;
             }
 
-            return CodeWriter.TryRead(chunk + (nint)(index % ChunkItems) * ItemSize, out nint obj) ? obj : 0;
+            return _memory.TryRead(chunk + (nint)(index % ChunkItems) * ItemSize, out nint obj) ? obj : 0;
         }
     }
 
@@ -118,13 +120,13 @@ public sealed class ObjectArray
         var chunkBytes = new byte[ChunkItems * ItemSize];
         for (int c = 0; c < Chunks; c++)
         {
-            if (!CodeWriter.TryRead(_chunkTable + (nint)c * sizeof(long), out nint chunk) || chunk == 0)
+            if (!_memory.TryRead(_chunkTable + (nint)c * sizeof(long), out nint chunk) || chunk == 0)
             {
                 continue;
             }
 
             int items = Math.Min(ChunkItems, Count - c * ChunkItems);
-            if (!CodeWriter.TryRead(chunk, chunkBytes.AsSpan(0, items * ItemSize)))
+            if (!_memory.TryRead(chunk, chunkBytes.AsSpan(0, items * ItemSize)))
             {
                 continue;
             }
@@ -146,9 +148,13 @@ public sealed class ObjectArray
 /// validated, otherwise by scanning readable heap regions for objects, as the C++ poller did.
 /// Every dereference is a guarded read.
 /// </summary>
-public sealed class ObjectFinder(GameImage image, ILogger log, bool tryObjectArray)
+public sealed class ObjectFinder(GameImage image, IMemory memory, IGameNames names, ILogger log, bool tryObjectArray)
 {
     private readonly Dictionary<string, nint> _classes = new(StringComparer.Ordinal);
+
+    /// <summary>The memory and names this finder reads, for code that follows what it found.</summary>
+    public IMemory Memory => memory;
+    public IGameNames Names => names;
     private readonly object _arrayLock = new();
     private ObjectArray? _array;
     private long _nextArrayAttempt;
@@ -176,7 +182,7 @@ public sealed class ObjectFinder(GameImage image, ILogger log, bool tryObjectArr
                 if (_array == null && now >= _nextArrayAttempt)
                 {
                     _nextArrayAttempt = now + 5000;
-                    _array = ObjectArray.Open(image, log);
+                    _array = ObjectArray.Open(image, memory, names, log);
                     if (_array == null)
                     {
                         log.Warn("object array not usable yet; scanning the heap");
@@ -198,7 +204,7 @@ public sealed class ObjectFinder(GameImage image, ILogger log, bool tryObjectArr
             }
         }
 
-        FName name = UE.FindName(className);
+        FName name = names.Find(className);
         if (name.Index == 0)
         {
             return 0;
@@ -206,14 +212,14 @@ public sealed class ObjectFinder(GameImage image, ILogger log, bool tryObjectArr
 
         if (_classNameIndex < 0)
         {
-            _classNameIndex = UE.FindName("Class").Index;
+            _classNameIndex = names.Find("Class").Index;
         }
 
         nint found = 0;
         foreach (var h in Candidates(name.Index))
         {
             // A UClass's own class is "Class"; that separates the class from anything else that shares the name.
-            if (ObjectHeader.TryRead(h.ClassPrivate, out var cls) && cls.Name.Index == _classNameIndex)
+            if (ObjectHeader.TryRead(memory, h.ClassPrivate, out var cls) && cls.Name.Index == _classNameIndex)
             {
                 found = h.Address;
                 break;
@@ -245,7 +251,7 @@ public sealed class ObjectFinder(GameImage image, ILogger log, bool tryObjectArr
                 continue;
             }
 
-            if (h.ClassPrivate == uclass || Inherits(h.ClassPrivate, uclass))
+            if (h.ClassPrivate == uclass || Inherits(memory, h.ClassPrivate, uclass))
             {
                 return h.Address;
             }
@@ -253,7 +259,7 @@ public sealed class ObjectFinder(GameImage image, ILogger log, bool tryObjectArr
         return 0;
     }
 
-    public static bool Inherits(nint uclass, nint ancestor)
+    public static bool Inherits(IMemory memory, nint uclass, nint ancestor)
     {
         for (int depth = 0; depth < 20 && uclass != 0; depth++)
         {
@@ -262,7 +268,7 @@ public sealed class ObjectFinder(GameImage image, ILogger log, bool tryObjectArr
                 return true;
             }
 
-            if (!CodeWriter.TryRead(uclass + Mvs.StructSuperStruct, out uclass))
+            if (!memory.TryRead(uclass + Mvs.StructSuperStruct, out uclass))
             {
                 return false;
             }
@@ -278,7 +284,7 @@ public sealed class ObjectFinder(GameImage image, ILogger log, bool tryObjectArr
     public nint FindFunction(string className, string functionName, out nint ownerClass)
     {
         ownerClass = 0;
-        FName fn = UE.FindName(functionName), cls = UE.FindName(className);
+        FName fn = names.Find(functionName), cls = names.Find(className);
         if (fn.Index == 0 || cls.Index == 0)
         {
             return 0;
@@ -292,7 +298,7 @@ public sealed class ObjectFinder(GameImage image, ILogger log, bool tryObjectArr
                 continue;
             }
 
-            if (!ObjectHeader.TryRead(h.Outer, out var outer) || outer.Name.Index != cls.Index)
+            if (!ObjectHeader.TryRead(memory, h.Outer, out var outer) || outer.Name.Index != cls.Index)
             {
                 continue;
             }
@@ -320,7 +326,7 @@ public sealed class ObjectFinder(GameImage image, ILogger log, bool tryObjectArr
         {
             foreach (nint obj in array.Objects())
             {
-                if (ObjectHeader.TryRead(obj, out var h) && image.Contains(h.VTable))
+                if (ObjectHeader.TryRead(memory, obj, out var h) && image.Contains(h.VTable))
                 {
                     yield return h;
                 }

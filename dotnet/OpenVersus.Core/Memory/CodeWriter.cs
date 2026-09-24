@@ -57,16 +57,10 @@ public static unsafe class CodeWriter
     public static byte[] Read(nint address, int length) => new ReadOnlySpan<byte>((void*)address, length).ToArray();
 
     /// <summary>
-    /// A read that cannot take the process down. NativeAOT turns an access violation outside the
-    /// null page into a fail-fast, so anything read from a pointer that came out of the game's
-    /// heap goes through here rather than a dereference. Never throws.
+    /// A read that cannot take the process down: <see cref="ProcessMemory"/>, for code that has
+    /// no <see cref="IMemory"/> to hand (hooks and the game-thread jobs). Never throws.
     /// </summary>
-    public static bool TryRead(nint address, Span<byte> into) =>
-        Kernel32.ReadProcessMemory(Kernel32.GetCurrentProcess(), address, into, (nuint)into.Length, out nuint read) && read == (nuint)into.Length;
+    public static bool TryRead(nint address, Span<byte> into) => ProcessMemory.Instance.TryRead(address, into);
 
-    public static bool TryRead<T>(nint address, out T value) where T : unmanaged
-    {
-        value = default;
-        return TryRead(address, MemoryMarshal.AsBytes(MemoryMarshal.CreateSpan(ref value, 1)));
-    }
+    public static bool TryRead<T>(nint address, out T value) where T : unmanaged => ProcessMemory.Instance.TryRead(address, out value);
 }
