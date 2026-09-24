@@ -53,6 +53,20 @@ minimum level comes from `[Settings] LogLevel`: a name (`trace`, `debug`, `info`
 Tags in the file are `TRC DBG NFO WRN ERR CRT`. Per-attempt and game-thread queue lines are
 Trace; pattern and function resolution is Debug; hooks, banners and netstats are Information.
 
+## Settings files
+
+`OpenVersus.ini`, `OVSState.ini` and `PatternsCache.cache` are read and written by
+`Config/IniFile.cs`, which keeps the file line for line. Reading behaves like the Windows profile
+API the C++ client used (names match regardless of case, values are trimmed and lose surrounding
+quotes, `;` starts a comment), so every file players already have reads the same. Writing adds a
+missing key at the end of its section in the file's own `Key = Value` or `Key=Value` style, adds a
+missing section at the end, and touches nothing else: blank lines, comments, spacing, unknown
+keys, line endings and encoding stay as the player left them, and a complete file is not
+rewritten at all. Booleans are `true`/`false`, `on`/`off` or `1`/`0` in any case. A value that does not
+parse is logged as a warning, read as its default and left on disk, where the C++ client would
+have replaced it with the default. A file written from nothing comes out in the
+shape of `sample.ini`, with CRLF line endings.
+
 ## Sunset check switches
 
 The game's sunset-date check is called thousands of times a minute. `[Patches] SunsetDate`

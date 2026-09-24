@@ -29,7 +29,7 @@ public sealed class NetStatsLogger(ObjectFinder finder, Log log)
         public int StartFrame, LastFrame, LastResim, StartResim;
         public int Rollbacks, MaxDepth, Rollbacks1s, MaxDepth1s, ResimAtSecond;
         public double DepthSum;
-        public bool Summarised;
+        public bool Summarized;
     }
 
     private void Loop()
@@ -121,9 +121,9 @@ public sealed class NetStatsLogger(ObjectFinder finder, Log log)
             m.LastFrame = Frame(m.Session);
             return true;
         }
-        if (state is 7 or 8 && !m.Summarised && m.StartFrame != 0)
+        if (state is 7 or 8 && !m.Summarized && m.StartFrame != 0)
         {
-            m.Summarised = true;
+            m.Summarized = true;
             int frames = m.LastFrame - m.StartFrame, total = m.LastResim - m.StartResim;
             CodeWriter.TryRead(m.Session + Mvs.SessionInputDelay, out int delay);
             log.Info($"NETSTATS-SUMMARY frames={frames} resim_total={total} rollbacks={m.Rollbacks} mean_depth={(m.Rollbacks > 0 ? m.DepthSum / m.Rollbacks : 0):F2} max_depth={m.MaxDepth} final_delay={delay} state={state}");

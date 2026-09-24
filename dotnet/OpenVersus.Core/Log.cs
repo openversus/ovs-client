@@ -8,7 +8,7 @@ namespace OpenVersus;
 /// <summary>
 /// The client's log. Lines are queued and written by one background thread, so a hook never
 /// waits on the disk; the writer flushes every 250 ms and at once after a warning or error, so
-/// a crash loses at most a quarter second. The console mirror uses the prefixes and colours
+/// a crash loses at most a quarter second. The console mirror uses the prefixes and colors
 /// the C++ client printed, with the timestamp.
 ///
 /// A session log (<see cref="OpenSession"/>) lives in a logs directory as a fixed name,
@@ -39,8 +39,8 @@ public sealed class Log : ILogger, IDisposable
     public Action<string>? ConsoleWriter { get; set; }
     /// <summary>Lines below this level are dropped before they are queued.</summary>
     public LogLevel MinimumLevel { get; set; } = LogLevel.Information;
-    /// <summary>Colour escapes in the console mirror; the file never has them.</summary>
-    public bool Colour { get; set; } = true;
+    /// <summary>Color escapes in the console mirror; the file never has them.</summary>
+    public bool Color { get; set; } = true;
 
     /// <summary>A log at <paramref name="path"/>, truncated now, with no archiving.</summary>
     public Log(string path) : this(path, null) { }
@@ -123,7 +123,7 @@ public sealed class Log : ILogger, IDisposable
         };
     }
 
-    public void Line(LogLevel level, string message, string? colour = null)
+    public void Line(LogLevel level, string message, string? color = null)
     {
         if (!IsEnabled(level))
         {
@@ -144,15 +144,15 @@ public sealed class Log : ILogger, IDisposable
         if (ConsoleWriter != null)
         {
             // Same shape as the C++ console: "[TAG] [timestamp]: message".
-            string tagColour = level switch
+            string tagColor = level switch
             {
                 LogLevel.Trace => "\x1b[90m",
                 LogLevel.Debug or LogLevel.Warning => "\x1b[33m",
                 LogLevel.Information => "\x1b[32m",
                 _ => "\x1b[31m",
             };
-            console = Colour
-                ? $"\x1b[0m[{tagColour}{tag}\x1b[0m] [{stamp}]: {colour}{message}\x1b[0m\n"
+            console = Color
+                ? $"\x1b[0m[{tagColor}{tag}\x1b[0m] [{stamp}]: {color}{message}\x1b[0m\n"
                 : $"[{tag}] [{stamp}]: {message}\n";
         }
         try

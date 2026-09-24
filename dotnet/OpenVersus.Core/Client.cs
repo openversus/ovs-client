@@ -45,7 +45,7 @@ public sealed class Client
     public bool Initialize()
     {
         Log.Info($"On Attach Initialize ({OvsVersion.Name} {OvsVersion.Current})");
-        Settings = Settings.Load(Path.Combine(Directory, Settings.FileName));
+        Settings = Settings.Load(Path.Combine(Directory, Settings.FileName), Log);
         State = new State(Path.Combine(Directory, State.FileName)).Load();
         Log.MinimumLevel = Log.ResolveLevel(Settings.LogLevel, Settings.Debug);
         Log.Info($"log level {Log.MinimumLevel} (LogLevel=\"{Settings.LogLevel}\", DebugLogging={Settings.Debug})");
@@ -106,7 +106,7 @@ public sealed class Client
     private void StartBackgroundWork()
     {
         // NativeAOT cannot run managed code at process detach any more than at attach, so
-        // there is no shutdown moment to summarise in; a heartbeat reports instead, and the
+        // there is no shutdown moment to summarize in; a heartbeat reports instead, and the
         // game window going away is taken as the exit signal for closing the log.
         Start("OVS heartbeat", Heartbeat);
         Start("OVS exit watch", WatchForExit);

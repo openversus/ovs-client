@@ -102,7 +102,7 @@ public sealed class NotificationPoller(string serverUrl, IHttpTransport http, Ob
         {
             case "match_cancel":
                 log.Info($"[NotifPoller] Match cancel received: {n.Title} — {n.Message}");
-                ShowBanner("Match Cancelled", "Opponent left the match", 5.0f);
+                ShowBanner("Match Canceled", "Opponent left the match", 5.0f);
                 GameThread.Post("CancelMatch", CancelMatchOnGameThread);
                 break;
             case "toast_received":

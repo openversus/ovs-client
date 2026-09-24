@@ -9,7 +9,7 @@ public static class Mvs
     public const int DialogOnButtonOneClicked = 0x3E8;
     public const int DialogOnButtonTwoClicked = 0x410;
     public const int DialogOnButtonThreeClicked = 0x438;
-    public const int DialogOnCancelled = 0x450;
+    public const int DialogOnCancelled = 0x450; // spelled as the game spells it
     public const int DialogNativeOnDismissed = 0x478;
 
     // UMvsFrontendManager
@@ -57,7 +57,7 @@ public struct DialogFocusButton
     [MarshalAs(UnmanagedType.U1)] public bool IsSet;
 }
 
-/// <summary>FMvsDialogParameters, 144 bytes. Every FText must be initialised with UE.EmptyText().</summary>
+/// <summary>FMvsDialogParameters, 144 bytes. Every FText must be initialized with UE.EmptyText().</summary>
 [StructLayout(LayoutKind.Sequential)]
 public struct FMvsDialogParameters
 {

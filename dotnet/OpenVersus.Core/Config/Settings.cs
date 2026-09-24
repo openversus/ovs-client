@@ -1,4 +1,5 @@
 using System.Globalization;
+using Microsoft.Extensions.Logging;
 
 namespace OpenVersus.Config;
 
@@ -16,11 +17,13 @@ public sealed record SettingDef(string Name, string Section, string Key, Setting
 }
 
 /// <summary>
-/// OpenVersus.ini. Every setting is read and then written straight back, defaults included,
-/// which is what the C++ client did: a fresh install gets a complete file, and a file missing a
-/// new key gains it on the next run. The table is the C++ OVSDefaultSettingsArray in its order,
-/// with the rows this port adds at the end of their sections. Values are looked up by the row's
-/// name so the table is the only list.
+/// OpenVersus.ini. Every row is read, and a row the file lacks is added with its default, so a
+/// fresh install gets a complete file and a file missing a new key gains it on the next run.
+/// Nothing already in the file is rewritten: the player's values, spacing, blank lines and
+/// comments stay as they are, and a value that does not parse is logged and read as its default
+/// rather than replaced. Booleans are true/false, on/off or 1/0 in any case.
+/// The table is the C++ OVSDefaultSettingsArray in its order, with the rows this port adds at
+/// the end of their sections. Values are looked up by the row's name so the table is the only list.
 /// </summary>
 public sealed class Settings
 {
@@ -85,22 +88,37 @@ public sealed class Settings
 
     private Settings(string path) => Path = path;
 
-    /// <summary>Reads every row and writes it back, so the file ends up complete.</summary>
-    public static Settings Load(string path)
+    /// <summary>Reads every row, adding the missing ones to the file with their defaults.</summary>
+    public static Settings Load(string path, ILogger? log = null)
     {
-        var ini = new IniFile(path);
+        var ini = IniFile.Load(path);
+        if (ini.LoadError != null)
+        {
+            log?.LogWarning("[Settings] Could not read {Path}, using defaults: {Error}", path, ini.LoadError.Message);
+        }
+
         var settings = new Settings(path);
         foreach (var def in Table)
         {
-            string value = def.Kind switch
+            string? value = ini.Get(def.Section, def.Key);
+            if (value == null)
             {
-                SettingKind.Bool => ini.ReadBool(def.Section, def.Key, def.Default == "true") ? "true" : "false",
-                SettingKind.Int => ini.ReadUInt64(def.Section, def.Key, ulong.Parse(def.Default, CultureInfo.InvariantCulture)).ToString(CultureInfo.InvariantCulture),
-                _ => ini.ReadString(def.Section, def.Key, def.Default),
-            };
-            settings._values[def.Name] = value;
-            ini.WriteString(def.Section, def.Key, value);
+                value = def.Default;
+                ini.Set(def.Section, def.Key, value);
+            }
+
+            settings._values[def.Name] = Normalize(def, value, log);
         }
+
+        if (ini.Save())
+        {
+            log?.LogInformation("[Settings] Added missing keys to {Path}", path);
+        }
+        else if (ini.SaveError != null)
+        {
+            log?.LogWarning("[Settings] Could not write {Path}, continuing with the values read: {Error}", path, ini.SaveError.Message);
+        }
+
         return settings;
     }
 
@@ -110,14 +128,30 @@ public sealed class Settings
         var settings = new Settings("");
         foreach (var def in Table)
         {
-            settings._values[def.Name] = values.TryGetValue(def.Name, out string? v) ? v : def.Default;
+            settings._values[def.Name] = values.TryGetValue(def.Name, out string? v) ? Normalize(def, v, null) : def.Default;
         }
 
         return settings;
     }
 
+    /// <summary>The value if it parses as the row's kind, else the row's default, with a warning.</summary>
+    private static string Normalize(SettingDef def, string value, ILogger? log)
+    {
+        switch (def.Kind)
+        {
+            case SettingKind.Bool when !IniFile.TryParseBool(value, out _):
+                log?.LogWarning("[Settings] [{Section}] {Key} = \"{Value}\" is not true/false, on/off or 1/0; using {Default}", def.Section, def.Key, value, def.Default);
+                return def.Default;
+            case SettingKind.Int when !ulong.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out _):
+                log?.LogWarning("[Settings] [{Section}] {Key} = \"{Value}\" is not a whole number; using {Default}", def.Section, def.Key, value, def.Default);
+                return def.Default;
+            default:
+                return value;
+        }
+    }
+
     public string String(string name) => _values[name];
-    public bool Bool(string name) => _values[name] is "true" or "True";
+    public bool Bool(string name) => IniFile.TryParseBool(_values[name], out bool value) && value;
     public ulong Int(string name) => ulong.TryParse(_values[name], NumberStyles.None, CultureInfo.InvariantCulture, out ulong v) ? v : 0;
 
     // Debug
