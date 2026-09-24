@@ -430,6 +430,7 @@ FodyWeavers.xsd
 /.codegraph/
 /graphify-out/
 /local/
+.idea/
 
 # Windows Installer files from build outputs
 *.cab

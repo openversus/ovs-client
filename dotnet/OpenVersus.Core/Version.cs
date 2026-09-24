@@ -7,10 +7,10 @@ public static class OvsVersion
 	/// and goes to the server in the identity and update checks. A test checks it against the
 	/// repo's VERSION file so the two cannot drift.
 	/// </summary>
-	public const string Current = "2026.04.08.14";
+	public const string Current = "2026.09.24.01";
 
 	public const string Name = "OpenVersus";
 	public const string ConsoleTitle = "OpenVersus Debug Console";
 	/// <summary>The C++ default for both server URLs when the key is missing from the ini.</summary>
-	public const string DefaultServerUrl = "http://testing.openversus.org:8000/";
+	public const string DefaultServerUrl = "https://prod.openversus.org/";
 }

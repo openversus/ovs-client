@@ -123,7 +123,7 @@ public sealed class Client
 		else
 		{
 			Log.Warn("[AutoUpdate] AutoUpdate is disabled in your config file. Don't be surprised if the game doesn't work correctly, or if it doesn't even work at all.");
-			Log.Warn("[AutoUpdate] The latest version of OpenVersus can always be obtained from: https://github.com/christopher-conley/OpenVersus");
+			Log.Warn("[AutoUpdate] The latest version of OpenVersus can always be obtained from: https://github.com/openversus/ovs-client");
 			Log.Warn("[AutoUpdate] If you want to enable auto-updates, set AutoUpdate=true in the [Settings] section of your config file.");
 			Log.Warn("[AutoUpdate] Good luck, hopefully the game still works for you.");
 		}
