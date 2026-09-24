@@ -161,9 +161,19 @@ public sealed class Client
 
         if (Settings.NetStats)
         {
-            var stats = new NetStatsLogger(Objects, Log);
+            // Its own file beside the main log, with the same writer thread, archive and
+            // retention behavior; one line a second must not bury everything else.
+            var statsLog = Log.OpenSession(Path.GetDirectoryName(Log.Path)!, "NetStats", fallbackDirectory: Directory);
+            statsLog.MinimumLevel = LogLevel.Information;
+            if (statsLog.Notice != null)
+            {
+                Log.Warn(statsLog.Notice);
+            }
+
+            var stats = new NetStatsLogger(Objects, Log, statsLog);
             stats.Start();
             _shutdown.Add(stats.Stop);
+            _shutdown.Add(statsLog.Close);
         }
     }
 

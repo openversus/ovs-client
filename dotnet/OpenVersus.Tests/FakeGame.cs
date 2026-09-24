@@ -162,6 +162,24 @@ public sealed class FakeGame
     public nint AddInstance(nint uclass, string name = "Instance", bool defaultObject = false) =>
         AddObject(name, GenericVTable, uclass, 0, defaultObject ? ObjectHeader.RF_ClassDefaultObject : 0);
 
+    /// <summary>An object whose fields reach past the default object size (a netcode session, say).</summary>
+    public nint AddLargeInstance(nint uclass, string name, int size)
+    {
+        nint address = AddInstance(uclass, name);
+        _nextObject += size; // leave room after it; the header block already covers the first 0x100 bytes
+        Memory.Alloc(address + ObjectSize, size);
+        return address;
+    }
+
+    /// <summary>A block of plain memory at a fresh address, for structures that are not objects.</summary>
+    public nint AddBlock(int size)
+    {
+        nint address = _nextObject;
+        _nextObject += size;
+        Memory.Alloc(address, size);
+        return address;
+    }
+
     /// <summary>A UFunction with a parameter block; properties are chained through ChildProperties.</summary>
     public nint AddFunction(string name, nint vtable, nint outer, uint flags = 0, byte numParms = 0, ushort parmsSize = 0, ushort returnOffset = 0xFFFF, nint nativeFunc = 0, nint firstProperty = 0)
     {

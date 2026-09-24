@@ -40,8 +40,6 @@ public static unsafe class StartupNotices
         }
     }
 
-    /// <summary>How long the instance must have been stable before the UI is asked for anything.</summary>
-    private const int SettleMs = 3000;
 
     private static bool Attempt()
     {
@@ -57,7 +55,7 @@ public static unsafe class StartupNotices
         // instance has been stable for a while and the frontend has a current state widget,
         // which is what the C++ dialog path required.
         long age = Environment.TickCount64 - GameUi.FighterGameInstanceTick;
-        if (age < SettleMs)
+        if (!Engine.IsUp)
         {
             if (verbose)
             {

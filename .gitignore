@@ -429,7 +429,7 @@ FodyWeavers.xsd
 # Local-only stuff
 /.codegraph/
 codegraph.json
-/graphify-out/
+graphify-out/
 .graphifyignore
 /local/
 .idea/

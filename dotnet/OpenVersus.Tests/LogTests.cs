@@ -95,6 +95,43 @@ public class LogTests
     }
 
     [Fact]
+    public void ABusyLogStillReachesTheDiskEveryQuarterSecond()
+    {
+        string path = Path.Combine(Path.GetTempPath(), "ovs-logtest-" + Guid.NewGuid().ToString("N") + ".log");
+        try
+        {
+            using var log = new Log(path);
+            var stop = new ManualResetEventSlim();
+            // Information lines without pause: nothing here triggers a flush on its own.
+            var producer = new Thread(() =>
+            {
+                int i = 0;
+                while (!stop.IsSet)
+                {
+                    log.Info($"l{i++}");
+                    Thread.Sleep(5);
+                }
+            });
+            producer.Start();
+            Thread.Sleep(Log.FlushIntervalMs * 3);
+            long size = new FileInfo(path).Length;
+            stop.Set();
+            producer.Join();
+            Assert.True(size > 0, "nothing reached the disk while the log was busy");
+        }
+        finally
+        {
+            try
+            {
+                File.Delete(path);
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    [Fact]
     public void VerbsGoThroughILoggerAndSuccessIsGreenOnTheConsole()
     {
         string path = Path.Combine(Path.GetTempPath(), "ovs-logtest-" + Guid.NewGuid().ToString("N") + ".log");

@@ -73,6 +73,10 @@ not a level is logged and falls back the same way. Tags in the file are `TRC DBG
 Per-attempt and game-thread queue lines are Trace; pattern and function resolution is Debug; hooks,
 banners and netstats are Information.
 
+With `[Features] NetStats=true` the per-second `NETSTATS` lines go to `logs/NetStats.log`, a
+second log with the same archiving; the main log gets only the session start and end and the
+`NETSTATS-SUMMARY` line. Anything that used to grep the main log for `NETSTATS` reads that file now.
+
 Archives from the last week stay as plain text; older ones are compressed to `.zst` (zstd level
 11, through `ZstdSharp`) on a background thread at launch, keeping their timestamps.
 
@@ -97,6 +101,10 @@ still reaches the console mirror. `Log.Notice` says which happened and is the fi
 - JSON goes through the source-generated `Net/OvsJson.cs` context (NativeAOT has no reflection
   for System.Text.Json); add a `[JsonSerializable]` there for any new shape.
 - Background loops stop through a `CancellationToken`, waited on rather than slept through.
+- Nothing calls into the engine before `Engine.IsUp` (the game instance has existed for three
+  seconds): every entry point in `UE` and `GameUi` refuses with an exception until then, and
+  background work waits with `Engine.WaitUntilUp`. Calling the engine during its own startup
+  crashed the game with no log line to show for it.
 - Reads of the game's memory go through `IMemory` (`ProcessMemory` in the plugin, a byte-backed
   fake in the tests) and engine name lookups through `IGameNames`, so the object array, the
   finder and the reflection decoder are tested on Linux against a synthetic game

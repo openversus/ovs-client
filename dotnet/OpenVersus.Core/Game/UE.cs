@@ -62,7 +62,7 @@ public enum EFindName
 /// <summary>
 /// The engine functions the client calls, through the addresses HookUEFuncs resolves. Each
 /// wrapper reads the registry at call time, so a hook that runs before resolution fails
-/// visibly (a zero address) rather than quietly.
+/// visibly (a zero address) rather than quietly, and each refuses until <see cref="Engine.IsUp"/>.
 /// </summary>
 public static unsafe class UE
 {
@@ -80,6 +80,7 @@ public static unsafe class UE
     /// <summary>FName(text, FNAME_Add): the name is created if it does not exist.</summary>
     public static FName MakeName(string text)
     {
+        Engine.Require("MakeName");
         var fn = (delegate* unmanaged<FName*, char*, int, void>)GameFunctions.Address(FNameCtorWideName);
         if (fn == null)
         {
@@ -98,6 +99,7 @@ public static unsafe class UE
     /// <summary>FName(text, FNAME_Find): Index 0 when the name does not exist.</summary>
     public static FName FindName(string text)
     {
+        Engine.Require("FindName");
         var fn = (delegate* unmanaged<FName*, byte*, int, void>)GameFunctions.Address(FNameCtorCharName);
         if (fn == null)
         {
@@ -117,6 +119,7 @@ public static unsafe class UE
     /// <summary>The string behind an FName, or null if the engine gives nothing sensible back.</summary>
     public static string? NameToString(FName name)
     {
+        Engine.Require("NameToString");
         var fn = (delegate* unmanaged<FName*, FString*, FString*>)GameFunctions.Address(FNameToStringName);
         if (fn == null)
         {
@@ -136,6 +139,7 @@ public static unsafe class UE
     /// <summary>FText(): a copy of the engine's empty text.</summary>
     public static FText EmptyText()
     {
+        Engine.Require("EmptyText");
         var fn = (delegate* unmanaged<FText*>)GameFunctions.Address(FTextGetEmptyName);
         if (fn == null)
         {
@@ -148,6 +152,7 @@ public static unsafe class UE
     /// <summary>FText(text), as the C++ client built it: through an FName, then FText::FromName.</summary>
     public static FText MakeText(string text)
     {
+        Engine.Require("MakeText");
         var fromName = (delegate* unmanaged<FText*, FName*, FText*>)GameFunctions.Address(FTextFromNameName);
         if (fromName == null)
         {
@@ -163,6 +168,7 @@ public static unsafe class UE
     /// <summary>UObject::ProcessEvent(object, function, parameters). Game thread only.</summary>
     public static void ProcessEvent(nint target, nint ufunction, nint parameters)
     {
+        Engine.Require("ProcessEvent");
         var fn = (delegate* unmanaged<nint, nint, nint, void>)GameFunctions.Address(ProcessEventName);
         if (fn == null)
         {

@@ -24,7 +24,7 @@ public sealed class EngineNames : IGameNames
     {
     }
 
-    public bool Ready => UE.Ready;
+    public bool Ready => UE.Ready && Engine.IsUp;
     public FName Find(string text) => UE.FindName(text);
     public string? ToString(FName name) => UE.NameToString(name);
 }

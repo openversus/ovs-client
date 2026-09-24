@@ -41,6 +41,7 @@ public static unsafe class GameUi
     /// </summary>
     public static (nint Frontend, nint StateWidget) FrontendState()
     {
+        Engine.Require("FrontendState");
         var getFrontend = (delegate* unmanaged<nint, nint>)GameFunctions.Address(GetFrontendManagerName);
         if (getFrontend == null || FighterGameInstance == 0)
         {
@@ -58,6 +59,7 @@ public static unsafe class GameUi
 
     public static nint NotificationManager()
     {
+        Engine.Require("NotificationManager");
         var get = (delegate* unmanaged<nint, nint>)GameFunctions.Address(GetNotificationManagerName);
         return get == null || FighterGameInstance == 0 ? 0 : get(FighterGameInstance);
     }
@@ -65,6 +67,7 @@ public static unsafe class GameUi
     /// <summary>Shows a toast. Returns the manager it went to, or 0 if there was none yet.</summary>
     public static nint ShowNotification(string? text, string? caption, float timeoutSeconds = 5.0f, bool autoDismissWhenClicked = true, bool setWidgetClass = false)
     {
+        Engine.Require("ShowNotification");
         nint manager = NotificationManager();
         if (manager == 0)
         {
@@ -111,6 +114,7 @@ public static unsafe class GameUi
     public static nint ShowDialog(string prompt, string? description = null, string? buttonOne = null, string? buttonTwo = null, string? buttonThree = null,
         int selectedButton = -1, bool showExitButton = false, bool showSpinner = false, bool showSolidBackground = true, bool hideActionBar = false)
     {
+        Engine.Require("ShowDialog");
         var getFrontend = (delegate* unmanaged<nint, nint>)GameFunctions.Address(GetFrontendManagerName);
         var addDialog = (delegate* unmanaged<nint, FMvsDialogParameters*, nint>)GameFunctions.Address(AddDialogName);
         if (getFrontend == null || addDialog == null || FighterGameInstance == 0)
@@ -164,6 +168,7 @@ public static unsafe class GameUi
     /// </summary>
     public static ulong AssignCallbackToButton(nint dialog, int delegateOffset, nint mainCallback, nint cleanupCallback = 0)
     {
+        Engine.Require("AssignCallbackToButton");
         var setter = (delegate* unmanaged<nint, ulong*, nint, nint*, void>)GameFunctions.Address(DialogCallbackSetterName);
         if (setter == null)
         {

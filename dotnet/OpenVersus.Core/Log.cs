@@ -27,6 +27,8 @@ public sealed class Log : ILogger, IDisposable
     private const string StampFormat = "yyyy-MM-dd HH:mm:ss.fff";
     private const string ArchiveStampFormat = "yyyy-MM-dd-HH.mm.ss";
     private const string ClosedMarker = "log closed";
+    /// <summary>The most a crash can lose: lines are flushed at least this often while they keep coming.</summary>
+    public const int FlushIntervalMs = 250;
     /// <summary>Archives younger than this stay as plain text; older ones are compressed.</summary>
     public static readonly TimeSpan HotArchiveAge = TimeSpan.FromDays(7);
     /// <summary>zstd level for the cold archives: small files, and it runs once per launch in the background.</summary>
@@ -234,9 +236,10 @@ public sealed class Log : ILogger, IDisposable
     private void WriteLoop()
     {
         StreamWriter? writer = FileError == null ? TryOpenFile() : null;
+        long lastFlush = Environment.TickCount64;
         while (true)
         {
-            if (!_queue.TryTake(out var item, 250))
+            if (!_queue.TryTake(out var item, FlushIntervalMs))
             {
                 if (_queue.IsCompleted)
                 {
@@ -244,6 +247,7 @@ public sealed class Log : ILogger, IDisposable
                 }
 
                 writer = TryWrite(writer, w => w.Flush());
+                lastFlush = Environment.TickCount64;
                 continue;
             }
 
@@ -262,9 +266,13 @@ public sealed class Log : ILogger, IDisposable
                 }
             }
 
-            if (item.Level >= LogLevel.Warning || item.Flushed != null || _queue.Count == 0 && _queue.IsAddingCompleted)
+            // Warnings, explicit flushes, and a steady stream of lines that never goes quiet:
+            // a crash in the middle of a busy startup must still leave its last lines on disk.
+            if (item.Level >= LogLevel.Warning || item.Flushed != null || _queue.Count == 0 && _queue.IsAddingCompleted
+                || Environment.TickCount64 - lastFlush >= FlushIntervalMs)
             {
                 writer = TryWrite(writer, w => w.Flush());
+                lastFlush = Environment.TickCount64;
             }
 
             item.Flushed?.Set();

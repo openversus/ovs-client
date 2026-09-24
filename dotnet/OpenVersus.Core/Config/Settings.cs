@@ -44,7 +44,7 @@ public sealed class Settings
         // Settings
         // A level name (trace, debug, info, warn, error, critical, none) or number; "0", which
         // existing files carry from the C++ client, means "decide from DebugLogging".
-        public static readonly SettingDef LogLevel = SettingDef.Str("Settings", "LogLevel", "0");
+        public static readonly SettingDef LogLevel = SettingDef.Str("Settings", "LogLevel", "info");
         public static readonly SettingDef EnableKeyboardHotkeys = SettingDef.Bool("Settings", "EnableKeyboardHotkeys", true);
         public static readonly SettingDef AutoUpdate = SettingDef.Bool("Settings", "AutoUpdate", true);
         // Keybinds
