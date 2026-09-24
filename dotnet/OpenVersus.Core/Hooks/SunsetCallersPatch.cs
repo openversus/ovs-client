@@ -56,15 +56,14 @@ public static class SunsetCallersPatch
         int ok = 0;
         foreach (var (at, jump) in sites)
         {
-            byte[] expected = CodeWriter.Read(at, CallSite.Length);
-            string? error = CodeWriter.WriteIf(at, expected, jump ? [0x31, 0xC0, 0xC3, 0x90, 0x90] : [0x31, 0xC0, 0x90, 0x90, 0x90], code: true);
-            if (error != null)
+            try
             {
-                c.Log.Error($"SunsetCallers: {error}");
-            }
-            else
-            {
+                CodeWriter.Write(at, jump ? [0x31, 0xC0, 0xC3, 0x90, 0x90] : [0x31, 0xC0, 0x90, 0x90, 0x90], code: true);
                 ok++;
+            }
+            catch (PatchException e)
+            {
+                c.Log.Error($"SunsetCallers: {e.Message}");
             }
         }
         c.Log.Success($"SunsetCallers: {ok}/{sites.Count} sites patched");

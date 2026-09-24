@@ -14,6 +14,23 @@ public class NetTests
         Assert.Null(Urls.Join("", "/x"));
     }
 
+    [Theory]
+    [InlineData("http://blah.something.com/", "http", 80, "http://blah.something.com/ovs/notifications")]
+    [InlineData("http://blah.something.com:80/", "http", 80, "http://blah.something.com/ovs/notifications")]
+    [InlineData("https://blah.something.com/", "https", 443, "https://blah.something.com/ovs/notifications")]
+    [InlineData("https://blah.something.com:443/", "https", 443, "https://blah.something.com/ovs/notifications")]
+    [InlineData("https://blah.something.com:57013/", "https", 57013, "https://blah.something.com:57013/ovs/notifications")]
+    [InlineData("blah.something.com:57013", "http", 57013, "http://blah.something.com:57013/ovs/notifications")]
+    public void ServerUrlsWithAndWithoutPortsParse(string text, string scheme, int port, string joined)
+    {
+        var url = Urls.Parse(text);
+        Assert.NotNull(url);
+        Assert.Equal(scheme, url!.Scheme);
+        Assert.Equal(port, url.Port);
+        Assert.Equal("blah.something.com", url.Host);
+        Assert.Equal(joined, Urls.Join(text, "/ovs/notifications")!.ToString());
+    }
+
     [Fact]
     public void VersionResponseParses()
     {
@@ -23,6 +40,27 @@ public class NetTests
         Assert.Equal("2026.04.08.14", info.LatestVersion);
         Assert.Equal("https://example.org/OpenVersus.asi", info.DownloadUrl);
         Assert.Null(AutoUpdate.Parse("not json"));
+    }
+
+    [Theory]
+    [InlineData("true", true)]
+    [InlineData("false", false)]
+    [InlineData("1", true)]
+    [InlineData("0", false)]
+    [InlineData("2", false)]
+    [InlineData("\"TRUE\"", true)]
+    [InlineData("\"tRuE\"", true)]
+    [InlineData("\"on\"", true)]
+    [InlineData("\"OFF\"", false)]
+    [InlineData("\"yes\"", false)]
+    [InlineData("null", false)]
+    [InlineData("{}", false)]
+    [InlineData("[1]", false)]
+    public void IsLatestForgivesTheServersSpelling(string json, bool expected)
+    {
+        var info = AutoUpdate.Parse($$"""{"latest_version":"1","is_latest":{{json}}}""");
+        Assert.NotNull(info);
+        Assert.Equal(expected, info!.IsLatest);
     }
 
     [Fact]
@@ -35,6 +73,62 @@ public class NetTests
         Assert.Equal("X toasted you!", list[2].Message);
         Assert.Empty(NotificationPoller.Parse("{}"));
         Assert.Empty(NotificationPoller.Parse("garbage"));
+    }
+
+    [Fact]
+    public void VersionStringsForgiveTheServersTypes()
+    {
+        var info = AutoUpdate.Parse("""{"latest_version":20260924,"download_url":null,"is_latest":false,"release_name":{"x":1}}""");
+        Assert.NotNull(info);
+        Assert.Equal("20260924", info!.LatestVersion);
+        Assert.Null(info.DownloadUrl);
+        Assert.Null(info.ReleaseName);
+    }
+
+    [Fact]
+    public void OneBadNotificationDoesNotLoseTheOthers()
+    {
+        var list = NotificationPoller.Parse("""[{"type":"toast_received","title":5},{"type":"admin_banner","title":"ok","message":"m"},{"type":"toast_received","timeout":"soon"}]""", out var problems);
+        Assert.Single(list);
+        Assert.Equal("ok", list[0].Title);
+        Assert.Equal(2, problems.Count);
+        Assert.All(problems, p => Assert.Contains("skipping", p));
+        Assert.Empty(NotificationPoller.Parse("garbage", out problems));
+        Assert.Contains(problems, p => p.Contains("not JSON"));
+    }
+
+    [Theory]
+    [InlineData("2026.09.25.01", "2026.09.24.01", true)]
+    [InlineData("2026.09.24.02", "2026.09.24.01", true)]
+    [InlineData("2026.09.24.01", "2026.09.24.01", false)]
+    [InlineData("2026.09.23.09", "2026.09.24.01", false)]
+    [InlineData(" 2026.10.01.01 ", "2026.09.24.01", true)]
+    public void OnlyALaterVersionIsAnUpdate(string offered, string running, bool expected) => Assert.Equal(expected, AutoUpdate.IsNewer(offered, running));
+
+    [Fact]
+    public void DownloadsThatAreNotAPluginAreRefused()
+    {
+        Assert.Contains("too small", AutoUpdate.Validate(new byte[9999]));
+        Assert.Contains("not a Windows binary", AutoUpdate.Validate(new byte[20000]));
+        var html = new byte[20000];
+        "<!DOCTYPE html><html>"u8.CopyTo(html);
+        Assert.Contains("not a Windows binary", AutoUpdate.Validate(html));
+
+        // "MZ" with a header offset past the end of the body must be refused, not thrown.
+        var junk = new byte[20000];
+        junk[0] = (byte)'M';
+        junk[1] = (byte)'Z';
+        BitConverter.TryWriteBytes(junk.AsSpan(0x3C), 0x7FFFFFFF);
+        Assert.Contains("outside the file", AutoUpdate.Validate(junk));
+
+        // The smallest thing that passes: an MZ header pointing at a PE signature with a size.
+        var pe = new byte[20000];
+        pe[0] = (byte)'M';
+        pe[1] = (byte)'Z';
+        BitConverter.TryWriteBytes(pe.AsSpan(0x3C), 0x80);
+        "PE\0\0"u8.CopyTo(pe.AsSpan(0x80));
+        BitConverter.TryWriteBytes(pe.AsSpan(0x80 + 24 + 56), 0x1000u);
+        Assert.Null(AutoUpdate.Validate(pe));
     }
 
     [Fact]

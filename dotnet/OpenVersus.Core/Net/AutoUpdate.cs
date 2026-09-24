@@ -11,19 +11,12 @@ namespace OpenVersus.Net;
 /// </summary>
 public sealed class AutoUpdate(string serverUrl, string pluginPath, IHttpTransport http, IHttpTransport download, Log log)
 {
-    public sealed record VersionInfo(string? LatestVersion, string? DownloadUrl, bool IsLatest, string? ReleaseName);
-
+    /// <summary>The version response, or null when the text is not that.</summary>
     public static VersionInfo? Parse(string json)
     {
         try
         {
-            using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
-            return new VersionInfo(
-                root.TryGetProperty("latest_version", out var v) ? v.GetString() : null,
-                root.TryGetProperty("download_url", out var d) ? d.GetString() : null,
-                root.TryGetProperty("is_latest", out var l) && l.ValueKind == JsonValueKind.True,
-                root.TryGetProperty("release_name", out var r) ? r.GetString() : null);
+            return JsonSerializer.Deserialize(json, OvsJson.Default.VersionInfo);
         }
         catch (JsonException)
         {
@@ -70,8 +63,46 @@ public sealed class AutoUpdate(string serverUrl, string pluginPath, IHttpTranspo
             return;
         }
 
+        if (!IsNewer(info.LatestVersion, OvsVersion.Current))
+        {
+            log.Info($"[AutoUpdate] Server offers {info.LatestVersion} and this is {OvsVersion.Current}; not installing");
+            return;
+        }
+
         log.Info($"[AutoUpdate] Update available ({info.LatestVersion}) — downloading automatically...");
         Install(info);
+    }
+
+    /// <summary>
+    /// Whether <paramref name="offered"/> is a later version than <paramref name="running"/>.
+    /// Versions are zero-padded dates ("2026.09.24.01"), so ordinal order is date order; the
+    /// server cannot move a player backwards, which the C++ updater once did.
+    /// </summary>
+    public static bool IsNewer(string offered, string running) => string.CompareOrdinal(offered.Trim(), running.Trim()) > 0;
+
+    /// <summary>Why <paramref name="body"/> must not be installed as the plugin, or null when it looks like one.</summary>
+    public static string? Validate(ReadOnlySpan<byte> body)
+    {
+        if (body.Length < 10000)
+        {
+            return $"too small ({body.Length} bytes)";
+        }
+
+        try
+        {
+            Memory.PeImage.SizeOfImage(body);
+            return null;
+        }
+        catch (FormatException e)
+        {
+            return $"not a Windows binary ({e.Message})";
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            // "MZ" followed by a header offset that points outside the body: a DOS-era file, a
+            // truncated download, or junk that happens to start with those two bytes.
+            return "not a Windows binary (PE header offset is outside the file)";
+        }
     }
 
     private void Install(VersionInfo info)
@@ -90,9 +121,9 @@ public sealed class AutoUpdate(string serverUrl, string pluginPath, IHttpTranspo
             return;
         }
         log.Info($"[AutoUpdate] Downloaded {result.Body.Length} bytes");
-        if (result.Body.Length < 10000)
+        if (Validate(result.Body) is { } problem)
         {
-            log.Warn($"[AutoUpdate] Download update file too small ({result.Body.Length} bytes), aborting");
+            log.Warn($"[AutoUpdate] Download is {problem}; not installing it");
             return;
         }
 

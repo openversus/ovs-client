@@ -12,19 +12,14 @@ public static class SigCheckPatch
     public static bool Apply(HookContext c)
     {
         c.Log.Info("==DisableSignatureCheck==");
-        var hit = c.Patterns.Find("SigCheck", c.Settings.Pattern("pSigCheck"));
+        var hit = c.Patterns.Find("SigCheck");
         if (!hit.Found)
         {
             return false;
         }
 
         nint site = hit.Address + 0x30 + 7;
-        string? error = CodeWriter.WriteIf(site, [CallSite.JumpOpcode], [0xC3], code: true);
-        if (error != null)
-        {
-            c.Log.Error($"SigCheck: {error}");
-            return false;
-        }
+        CodeWriter.WriteIf(site, [CallSite.JumpOpcode], [0xC3], code: true);
         c.Log.Success($"SigCheck patched: jmp at 0x{site:X} is now ret");
         return true;
     }

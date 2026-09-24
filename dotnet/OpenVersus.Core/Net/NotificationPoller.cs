@@ -11,12 +11,12 @@ namespace OpenVersus.Net;
 /// </summary>
 public sealed class NotificationPoller(string serverUrl, IHttpTransport http, ObjectFinder finder, GameImage image, Log log)
 {
-    private volatile bool _running;
-    private Thread? _thread;
+    // Lives as long as the process; never disposed, since the loop thread may be waiting on it.
+    private CancellationTokenSource? _stopping;
 
     public void Start()
     {
-        if (_running)
+        if (_stopping != null)
         {
             log.Info("[NotifPoller] Already running");
             return;
@@ -26,20 +26,20 @@ public sealed class NotificationPoller(string serverUrl, IHttpTransport http, Ob
             log.Warn($"[NotifPoller] Failed to parse server URL: {serverUrl}");
             return;
         }
-        _running = true;
-        _thread = new Thread(() => Loop(url)) { IsBackground = true, Name = "OVS notification poller" };
-        _thread.Start();
+        _stopping = new CancellationTokenSource();
+        CancellationToken token = _stopping.Token;
+        new Thread(() => Loop(url, token)) { IsBackground = true, Name = "OVS notification poller" }.Start();
         log.Info("[NotifPoller] Started");
     }
 
-    public void Stop() => _running = false;
+    public void Stop() => _stopping?.Cancel();
 
-    private void Loop(Uri url)
+    private void Loop(Uri url, CancellationToken stopping)
     {
-        Thread.Sleep(8000); // let the hooks finish before polling
+        stopping.WaitHandle.WaitOne(8000); // let the hooks finish before polling
         log.Info($"[NotifPoller] Polling {url} every 2s");
-        int failures = 0;
-        while (_running)
+        int failures = 0, badPolls = 0;
+        while (!stopping.IsCancellationRequested)
         {
             var result = http.Get(url, TimeSpan.FromSeconds(2));
             if (!result.Ok)
@@ -53,24 +53,37 @@ public sealed class NotificationPoller(string serverUrl, IHttpTransport http, Ob
             else
             {
                 failures = 0;
-                foreach (var n in Parse(result.Text))
+                var notifications = Parse(result.Text, out var problems);
+                // A bad item may sit in the queue for a while; say so once, then every thirty polls.
+                badPolls = problems.Count == 0 ? 0 : badPolls + 1;
+                if (badPolls == 1 || badPolls % 30 == 0)
+                {
+                    foreach (string problem in problems)
+                    {
+                        log.Warn($"[NotifPoller] {problem}{(badPolls > 1 ? $" (for {badPolls} polls)" : "")}");
+                    }
+                }
+
+                foreach (var n in notifications)
                 {
                     Dispatch(n);
                 }
             }
-            for (int i = 0; i < 20 && _running; i++)
-            {
-                Thread.Sleep(100);
-            }
+            stopping.WaitHandle.WaitOne(2000);
         }
         log.Info("[NotifPoller] Thread exiting");
     }
 
-    public sealed record Notification(string Type, string Title, string Message, double? Timeout);
-
-    public static List<Notification> Parse(string json)
+    /// <summary>
+    /// The notifications in a poll response. Each item is read on its own, so one the server got
+    /// wrong (a numeric title, a string timeout) is skipped while the rest are still delivered,
+    /// with a line in <paramref name="problems"/> saying what was wrong. An item without a type
+    /// is skipped quietly; a body that is not a list gives none.
+    /// </summary>
+    public static List<Notification> Parse(string json, out List<string> problems)
     {
         var list = new List<Notification>();
+        problems = [];
         try
         {
             using var doc = JsonDocument.Parse(json);
@@ -79,26 +92,35 @@ public sealed class NotificationPoller(string serverUrl, IHttpTransport http, Ob
                 return list;
             }
 
-            foreach (var e in doc.RootElement.EnumerateArray())
+            foreach (JsonElement item in doc.RootElement.EnumerateArray())
             {
-                if (e.ValueKind != JsonValueKind.Object || !e.TryGetProperty("type", out var type) || type.ValueKind != JsonValueKind.String)
+                try
                 {
-                    continue;
+                    if (JsonSerializer.Deserialize(item, OvsJson.Default.Notification) is { Type: not null } n)
+                    {
+                        list.Add(n);
+                    }
                 }
-
-                list.Add(new Notification(type.GetString()!,
-                    e.TryGetProperty("title", out var t) && t.ValueKind == JsonValueKind.String ? t.GetString()! : "",
-                    e.TryGetProperty("message", out var m) && m.ValueKind == JsonValueKind.String ? m.GetString()! : "",
-                    e.TryGetProperty("timeout", out var o) && o.ValueKind == JsonValueKind.Number ? o.GetDouble() : null));
+                catch (JsonException e)
+                {
+                    string raw = item.GetRawText();
+                    problems.Add($"skipping a notification the server got wrong ({e.Message}): {(raw.Length > 200 ? raw[..200] + "..." : raw)}");
+                }
             }
         }
-        catch (JsonException) { }
+        catch (JsonException e)
+        {
+            problems.Add($"poll response is not JSON: {e.Message}");
+        }
+
         return list;
     }
 
+    public static List<Notification> Parse(string json) => Parse(json, out _);
+
     private void Dispatch(Notification n)
     {
-        switch (n.Type)
+        switch (n.Type!)
         {
             case "match_cancel":
                 log.Info($"[NotifPoller] Match cancel received: {n.Title} — {n.Message}");
@@ -144,12 +166,12 @@ public sealed class NotificationPoller(string serverUrl, IHttpTransport http, Ob
             return;
         }
 
-        if (!Memory.CodeWriter.TryRead(preMatch + 0x320, out nint stateMachine) || !Plausible(stateMachine))
+        if (!Memory.CodeWriter.TryRead(preMatch + Mvs.PreMatchStateMachine, out nint stateMachine) || !Plausible(stateMachine))
         {
             log.Info($"[CancelMatch] StateMachine ptr invalid (0x{stateMachine:X})");
             return;
         }
-        if (!Memory.CodeWriter.TryRead(stateMachine + 0x58, out nint currentState) || !Plausible(currentState))
+        if (!Memory.CodeWriter.TryRead(stateMachine + Mvs.StateMachineCurrentState, out nint currentState) || !Plausible(currentState))
         {
             log.Info($"[CancelMatch] CurrentState ptr invalid (0x{currentState:X}) — no-op");
             return;

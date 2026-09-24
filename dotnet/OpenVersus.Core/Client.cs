@@ -1,8 +1,11 @@
+using System.Runtime.InteropServices;
+using Microsoft.Extensions.Logging;
 using OpenVersus.Config;
 using OpenVersus.Game;
 using OpenVersus.Hooking;
 using OpenVersus.Hooks;
 using OpenVersus.Identity;
+using OpenVersus.Memory;
 using OpenVersus.Native;
 using OpenVersus.Net;
 using OpenVersus.NetStats;
@@ -47,7 +50,22 @@ public sealed class Client
         Log.Info($"On Attach Initialize ({OvsVersion.Name} {OvsVersion.Current})");
         Settings = Settings.Load(Path.Combine(Directory, Settings.FileName), Log);
         State = new State(Path.Combine(Directory, State.FileName)).Load();
-        Log.MinimumLevel = Log.ResolveLevel(Settings.LogLevel, Settings.Debug);
+        if (Log.Notice != null)
+        {
+            Log.Warn(Log.Notice);
+        }
+        else if (Log.FileError != null)
+        {
+            Log.Warn($"log file {Log.Path} cannot be written ({Log.FileError.Message}); logging to the console only");
+        }
+
+        LogLevel level = Log.ResolveLevel(Settings.LogLevel, Settings.Debug, out string? note);
+        if (note != null)
+        {
+            Log.Warn(note);
+        }
+
+        Log.MinimumLevel = level;
         Log.Info($"log level {Log.MinimumLevel} (LogLevel=\"{Settings.LogLevel}\", DebugLogging={Settings.Debug})");
         Log.Debug($"[OVS] INI File: {Settings.Path}");
 
@@ -80,7 +98,7 @@ public sealed class Client
         ulong hash = Image.HashTextSection();
         Log.Debug($".text hash: 0x{hash:X16} | Time: {stopwatch.Elapsed.TotalMilliseconds:F3} ms");
         var cache = new PatternCache(Path.Combine(Directory, PatternCache.FileName), hash, OvsVersion.Current);
-        Patterns = new PatternResolver(Image, cache, Log);
+        Patterns = new PatternResolver(Image, cache, Settings, Log);
         Log.Info("Parsed Settings");
 
         // Collect Steam/Epic identity and hardware fingerprint. It makes accounts "sticky", so
@@ -171,53 +189,70 @@ public sealed class Client
         var c = new HookContext(Image, Patterns, Settings, State, Log, Status);
         if (Settings.DisableSignatureCheck)
         {
-            Status.AntiSigCheck = SigCheckPatch.Apply(c);
+            Status.AntiSigCheck = Apply("SigCheck", c, SigCheckPatch.Apply);
         }
 
         if (Settings.EnableServerProxy)
         {
-            Status.GameEndpointSwap = EndpointHooks.ApplyGame(c);
+            Status.GameEndpointSwap = Apply("EndpointLoader", c, EndpointHooks.ApplyGame);
         }
 
         if (Settings.EnableProdServerProxy)
         {
-            Status.ProdEndpointSwap = EndpointHooks.ApplyProd(c);
+            Status.ProdEndpointSwap = Apply("ProdEndpointLoader", c, EndpointHooks.ApplyProd);
         }
 
         if (Settings.SunsetDate)
         {
-            Status.SunsetDate = SunsetPatch.Apply(c, count: Settings.CountSunsetCalls);
+            Status.SunsetDate = Apply("SunsetDate", c, ctx => SunsetPatch.Apply(ctx, count: Settings.CountSunsetCalls));
         }
 
         if (Settings.SunsetCallers)
         {
-            Status.SunsetCallers = SunsetCallersPatch.Apply(c);
+            Status.SunsetCallers = Apply("SunsetCallers", c, SunsetCallersPatch.Apply);
         }
 
         if (Settings.HookUe)
         {
-            Status.UeFuncs = UeFunctionHooks.Apply(c);
+            Status.UeFuncs = Apply("UE Funcs", c, UeFunctionHooks.Apply);
         }
 
         if (Settings.Dialog)
         {
-            Status.Dialog = DialogHooks.Apply(c);
+            Status.Dialog = Apply("Dialog", c, DialogHooks.Apply);
         }
 
         if (Settings.Notifications)
         {
-            Status.Notifications = NotificationHooks.Apply(c);
+            Status.Notifications = Apply("Notifications", c, NotificationHooks.Apply);
         }
 
         if (Settings.PostMatchFreeze)
         {
-            Status.PostMatchFreeze = PostMatchFreezePatch.Apply(c);
+            Status.PostMatchFreeze = Apply("PostMatchFreeze", c, PostMatchFreezePatch.Apply);
         }
 
         Log.Info($"hooks: {Status}");
         foreach (var f in GameFunctions.All)
         {
             Log.Debug($"function {f}");
+        }
+    }
+
+    /// <summary>
+    /// Runs one hook's Apply. A patch that cannot be made throws a <see cref="PatchException"/>
+    /// out of the memory layer; any failure is logged as that hook's and the rest still apply.
+    /// </summary>
+    private bool Apply(string name, HookContext c, Func<HookContext, bool> apply)
+    {
+        try
+        {
+            return apply(c);
+        }
+        catch (Exception e)
+        {
+            Log.Error(e is PatchException ? $"{name}: {e.Message}" : $"{name}: {e}");
+            return false;
         }
     }
 
@@ -305,7 +340,7 @@ public static class Wine
 
         unsafe
         {
-            return System.Runtime.InteropServices.Marshal.PtrToStringUTF8(((delegate* unmanaged[Cdecl]<nint>)fn)());
+            return Marshal.PtrToStringUTF8(((delegate* unmanaged[Cdecl]<nint>)fn)());
         }
     });
 

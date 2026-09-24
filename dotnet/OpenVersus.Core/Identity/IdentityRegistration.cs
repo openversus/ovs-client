@@ -8,9 +8,7 @@ namespace OpenVersus.Identity;
 public static class IdentityRegistration
 {
     public static string Body(EnvInfo env) =>
-        $"{{\"steamId\":\"{Escape(env.SteamId)}\",\"epicId\":\"{Escape(env.EpicId)}\",\"hardwareId\":\"{Escape(env.HardwareId)}\",\"clientVersion\":\"{Escape(OvsVersion.Current)}\"}}";
-
-    private static string Escape(string value) => JsonEncodedText.Encode(value).ToString();
+        JsonSerializer.Serialize(new IdentityBody(env.SteamId, env.EpicId, env.HardwareId, OvsVersion.Current), OvsJson.Default.IdentityBody);
 
     public static void Run(EnvInfo env, string serverUrl, IHttpTransport http, Log log)
     {

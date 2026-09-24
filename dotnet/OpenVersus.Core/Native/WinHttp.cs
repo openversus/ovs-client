@@ -2,7 +2,7 @@ using System.Runtime.InteropServices;
 
 namespace OpenVersus.Native;
 
-public static unsafe partial class WinHttp
+public static partial class WinHttp
 {
     public const uint WINHTTP_ACCESS_TYPE_DEFAULT_PROXY = 0;
     public const uint WINHTTP_ACCESS_TYPE_NO_PROXY = 1;
@@ -28,7 +28,7 @@ public static unsafe partial class WinHttp
 
     [LibraryImport("winhttp.dll", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    public static partial bool WinHttpSendRequest(nint request, string? headers, uint headersLength, void* optional, uint optionalLength, uint totalLength, nuint context);
+    public static partial bool WinHttpSendRequest(nint request, string? headers, uint headersLength, ReadOnlySpan<byte> optional, uint optionalLength, uint totalLength, nuint context);
 
     [LibraryImport("winhttp.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -36,7 +36,7 @@ public static unsafe partial class WinHttp
 
     [LibraryImport("winhttp.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    public static partial bool WinHttpQueryHeaders(nint request, uint infoLevel, nint name, void* buffer, ref uint bufferLength, ref uint index);
+    public static partial bool WinHttpQueryHeaders(nint request, uint infoLevel, nint name, ref uint buffer, ref uint bufferLength, ref uint index);
 
     [LibraryImport("winhttp.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -44,7 +44,7 @@ public static unsafe partial class WinHttp
 
     [LibraryImport("winhttp.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    public static partial bool WinHttpReadData(nint request, void* buffer, uint toRead, out uint read);
+    public static partial bool WinHttpReadData(nint request, Span<byte> buffer, uint toRead, out uint read);
 
     [LibraryImport("winhttp.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]

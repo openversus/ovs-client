@@ -17,10 +17,22 @@ public static unsafe class GameUi
     public const string RequestShowNotificationName = "UMvsNotificationManager::RequestShowNotification";
     public const string FighterGameInstanceCtorName = "UFighterGameInstance::UFighterGameInstance";
 
-    /// <summary>The UFighterGameInstance the game constructed, captured by the FighterInstance hook; 0 until then.</summary>
-    public static nint FighterGameInstance;
+    private static nint s_fighterGameInstance;
+    private static long s_fighterGameInstanceTick;
+
+    /// <summary>The UFighterGameInstance the game constructed, captured by the FighterInstance hook; 0 until then.
+    /// Written by a hook on a game thread and read from others, so the read is volatile.</summary>
+    public static nint FighterGameInstance => Volatile.Read(ref s_fighterGameInstance);
+
     /// <summary>When the instance was last (re)constructed; the game builds several in its first seconds.</summary>
-    public static long FighterGameInstanceTick;
+    public static long FighterGameInstanceTick => Volatile.Read(ref s_fighterGameInstanceTick);
+
+    /// <summary>Called by the FighterInstance hook each time the game constructs an instance.</summary>
+    public static void RecordFighterGameInstance(nint instance)
+    {
+        Volatile.Write(ref s_fighterGameInstanceTick, Environment.TickCount64);
+        Volatile.Write(ref s_fighterGameInstance, instance);
+    }
 
     /// <summary>
     /// The frontend manager, and whether it has a current state widget: the condition the C++

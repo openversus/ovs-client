@@ -12,27 +12,36 @@ namespace OpenVersus.NetStats;
 /// </summary>
 public sealed class NetStatsLogger(ObjectFinder finder, Log log)
 {
-    private volatile bool _running;
+    // Lives as long as the process; never disposed, since the loop thread may be waiting on it.
+    private readonly CancellationTokenSource _stopping = new();
 
     public void Start()
     {
-        _running = true;
-        new Thread(Loop) { IsBackground = true, Name = "OVS netstats" }.Start();
+        CancellationToken token = _stopping.Token;
+        new Thread(() => Loop(token)) { IsBackground = true, Name = "OVS netstats" }.Start();
         log.Info("[NetStats] enabled; sampling at 60 Hz while a session is playing");
     }
 
-    public void Stop() => _running = false;
+    public void Stop() => _stopping.Cancel();
 
-    private sealed class Match
+    /// <summary>The counters for one session, from the first playing sample to the summary.</summary>
+    private sealed class Match(nint session)
     {
-        public nint Session;
-        public int StartFrame, LastFrame, LastResim, StartResim;
-        public int Rollbacks, MaxDepth, Rollbacks1s, MaxDepth1s, ResimAtSecond;
-        public double DepthSum;
-        public bool Summarized;
+        public nint Session { get; } = session;
+        public int StartFrame { get; set; }
+        public int LastFrame { get; set; }
+        public int LastResim { get; set; }
+        public int StartResim { get; set; }
+        public int Rollbacks { get; set; }
+        public int MaxDepth { get; set; }
+        public int Rollbacks1s { get; set; }
+        public int MaxDepth1s { get; set; }
+        public int ResimAtSecond { get; set; }
+        public double DepthSum { get; set; }
+        public bool Summarized { get; set; }
     }
 
-    private void Loop()
+    private void Loop(CancellationToken stopping)
     {
         // 5.714286 × 0.7 = 4.0
 
@@ -40,7 +49,7 @@ public sealed class NetStatsLogger(ObjectFinder finder, Log log)
         Match? match = null;
         var clock = Stopwatch.StartNew();
         long nextFind = 0, nextLine = 0;
-        while (_running)
+        while (!stopping.IsCancellationRequested)
         {
             long now = clock.ElapsedMilliseconds;
             try
@@ -57,7 +66,7 @@ public sealed class NetStatsLogger(ObjectFinder finder, Log log)
                     nint session = finder.FindInstanceOfClass(sessionClass);
                     if (session != 0)
                     {
-                        match = new Match { Session = session };
+                        match = new Match(session);
                         nextLine = now + 1000;
                         log.Info($"[NetStats] session 0x{session:X}");
                     }
@@ -81,7 +90,7 @@ public sealed class NetStatsLogger(ObjectFinder finder, Log log)
                 log.Error($"[NetStats] {e.Message}");
                 match = null;
             }
-            Thread.Sleep(16);
+            stopping.WaitHandle.WaitOne(16);
         }
     }
 

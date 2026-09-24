@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 namespace OpenVersus.Native;
@@ -32,6 +33,7 @@ public struct SYSTEM_INFO
 
 public static unsafe partial class Kernel32
 {
+    public const uint PAGE_READONLY = 0x02;
     public const uint PAGE_READWRITE = 0x04;
     public const uint PAGE_EXECUTE_READ = 0x20;
     public const uint PAGE_EXECUTE_READWRITE = 0x40;
@@ -62,8 +64,12 @@ public static unsafe partial class Kernel32
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool VirtualProtect(nint address, nuint size, uint newProtect, out uint oldProtect);
 
-    [LibraryImport("kernel32.dll", SetLastError = true)]
-    public static partial nuint VirtualQuery(nint address, out MEMORY_BASIC_INFORMATION info, nuint length);
+    [LibraryImport("kernel32.dll", EntryPoint = "VirtualQuery", SetLastError = true)]
+    private static partial nuint VirtualQuery(nint address, out MEMORY_BASIC_INFORMATION info, nuint length);
+
+    /// <summary>The region containing <paramref name="address"/>; 0 when the query fails.</summary>
+    public static nuint VirtualQuery(nint address, out MEMORY_BASIC_INFORMATION info) =>
+        VirtualQuery(address, out info, (nuint)Unsafe.SizeOf<MEMORY_BASIC_INFORMATION>());
 
     [LibraryImport("kernel32.dll", SetLastError = true)]
     public static partial nint VirtualAlloc(nint address, nuint size, uint allocationType, uint protect);
@@ -87,22 +93,24 @@ public static unsafe partial class Kernel32
 
     [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    public static partial bool ReadProcessMemory(nint process, nint address, void* buffer, nuint size, out nuint bytesRead);
+    public static partial bool ReadProcessMemory(nint process, nint address, Span<byte> buffer, nuint size, out nuint bytesRead);
 
     /// <summary>Full path of a loaded module; 0 means the host executable.</summary>
     public static string GetModulePath(nint module)
     {
         var buffer = new char[32768];
+        uint length;
         fixed (char* p = buffer)
         {
-            uint length = GetModuleFileName(module, p, (uint)buffer.Length);
-            if (length == 0)
-            {
-                throw new InvalidOperationException($"GetModuleFileNameW failed: {Marshal.GetLastPInvokeError()}");
-            }
-
-            return new string(p, 0, (int)length);
+            length = GetModuleFileName(module, p, (uint)buffer.Length);
         }
+
+        if (length == 0)
+        {
+            throw new InvalidOperationException($"GetModuleFileNameW failed: {Marshal.GetLastPInvokeError()}");
+        }
+
+        return new string(buffer, 0, (int)length);
     }
 
     /// <summary>The module containing <paramref name="address"/>, typically one of our own exports.</summary>

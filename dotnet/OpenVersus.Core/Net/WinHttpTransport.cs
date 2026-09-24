@@ -3,7 +3,7 @@ using OpenVersus.Native;
 
 namespace OpenVersus.Net;
 
-public sealed unsafe class WinHttpTransport(string agent = "OVS/1.0", bool useSystemProxy = false) : IHttpTransport
+public sealed class WinHttpTransport(string agent = "OVS/1.0", bool useSystemProxy = false) : IHttpTransport
 {
     public HttpResult Get(Uri url, TimeSpan timeout) => Send(url, "GET", null, default, timeout);
 
@@ -37,13 +37,7 @@ public sealed unsafe class WinHttpTransport(string agent = "OVS/1.0", bool useSy
                 return HttpResult.Failed($"WinHttpOpenRequest failed ({Marshal.GetLastPInvokeError()})");
             }
 
-            bool sent;
-            fixed (byte* p = body)
-            {
-                sent = WinHttp.WinHttpSendRequest(request, headers, headers == null ? 0 : uint.MaxValue, body.Length == 0 ? null : p, (uint)body.Length, (uint)body.Length, 0);
-            }
-
-            if (!sent)
+            if (!WinHttp.WinHttpSendRequest(request, headers, headers == null ? 0 : uint.MaxValue, body, (uint)body.Length, (uint)body.Length, 0))
             {
                 return HttpResult.Failed($"WinHttpSendRequest failed ({Marshal.GetLastPInvokeError()})");
             }
@@ -54,21 +48,18 @@ public sealed unsafe class WinHttpTransport(string agent = "OVS/1.0", bool useSy
             }
 
             uint status = 0, size = sizeof(uint), index = 0;
-            WinHttp.WinHttpQueryHeaders(request, WinHttp.WINHTTP_QUERY_STATUS_CODE | WinHttp.WINHTTP_QUERY_FLAG_NUMBER, 0, &status, ref size, ref index);
+            WinHttp.WinHttpQueryHeaders(request, WinHttp.WINHTTP_QUERY_STATUS_CODE | WinHttp.WINHTTP_QUERY_FLAG_NUMBER, 0, ref status, ref size, ref index);
 
             var data = new MemoryStream();
             while (WinHttp.WinHttpQueryDataAvailable(request, out uint available) && available > 0)
             {
                 var chunk = new byte[available];
-                fixed (byte* p = chunk)
+                if (!WinHttp.WinHttpReadData(request, chunk, available, out uint read) || read == 0)
                 {
-                    if (!WinHttp.WinHttpReadData(request, p, available, out uint read) || read == 0)
-                    {
-                        break;
-                    }
-
-                    data.Write(chunk, 0, (int)read);
+                    break;
                 }
+
+                data.Write(chunk, 0, (int)read);
             }
             return new HttpResult(status is >= 200 and < 300, (int)status, data.ToArray(), null);
         }

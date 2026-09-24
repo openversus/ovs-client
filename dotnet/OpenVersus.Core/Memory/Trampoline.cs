@@ -18,17 +18,15 @@ namespace OpenVersus.Memory;
 public sealed unsafe class Trampoline
 {
     private const int StubSize = 12;
-    private static Trampoline? s_first;
+    private static readonly List<Trampoline> s_pages = [];
     private static readonly object s_lock = new();
 
-    private readonly Trampoline? _next;
     private readonly nuint _size;
     private byte* _memory;
     private nuint _left;
 
     private Trampoline(byte* memory, nuint size)
     {
-        _next = s_first;
         _memory = memory;
         _size = size;
         _left = size;
@@ -42,25 +40,25 @@ public sealed unsafe class Trampoline
     {
         lock (s_lock)
         {
-            for (Trampoline? t = s_first; t != null; t = t._next)
+            foreach (Trampoline page in s_pages)
             {
-                if (t.Feasible(address))
+                if (page.Feasible(address))
                 {
-                    return t;
+                    return page;
                 }
             }
 
             Kernel32.GetSystemInfo(out SYSTEM_INFO info);
             uint size = info.AllocationGranularity;
-            nint page = FindAndAllocate(address, size);
-            if (page == 0)
+            nint memory = FindAndAllocate(address, size);
+            if (memory == 0)
             {
-                throw new InvalidOperationException($"no free page within 2 GB of 0x{address:X} for trampolines (error {Marshal.GetLastPInvokeError()})");
+                throw new PatchException($"no free page within 2 GB of 0x{address:X} for trampolines (error {Marshal.GetLastPInvokeError()})");
             }
 
-            var t2 = new Trampoline((byte*)page, size) { Base = page };
-            s_first = t2;
-            return t2;
+            var fresh = new Trampoline((byte*)memory, size) { Base = memory };
+            s_pages.Add(fresh);
+            return fresh;
         }
     }
 
@@ -119,7 +117,7 @@ public sealed unsafe class Trampoline
 #if !OVS_RWX_TRAMPOLINES
         if (!Kernel32.VirtualProtect(Base, _size, Kernel32.PAGE_EXECUTE_READWRITE, out _))
         {
-            throw new InvalidOperationException($"could not make trampoline page 0x{Base:X} writable (error {Marshal.GetLastPInvokeError()})");
+            throw new PatchException($"could not make trampoline page 0x{Base:X} writable (error {Marshal.GetLastPInvokeError()})");
         }
 #endif
     }
@@ -129,7 +127,7 @@ public sealed unsafe class Trampoline
 #if !OVS_RWX_TRAMPOLINES
         if (!Kernel32.VirtualProtect(Base, _size, Kernel32.PAGE_EXECUTE_READ, out _))
         {
-            throw new InvalidOperationException($"could not seal trampoline page 0x{Base:X} (error {Marshal.GetLastPInvokeError()})");
+            throw new PatchException($"could not seal trampoline page 0x{Base:X} (error {Marshal.GetLastPInvokeError()})");
         }
 #endif
     }
@@ -140,7 +138,7 @@ public sealed unsafe class Trampoline
         nuint pad = misalign == 0 ? 0 : (nuint)align - misalign;
         if (_left < pad + (nuint)size)
         {
-            throw new InvalidOperationException("out of trampoline space");
+            throw new PatchException("out of trampoline space");
         }
 
         byte* space = _memory + pad;
@@ -161,7 +159,7 @@ public sealed unsafe class Trampoline
         nint current = near;
         while (true)
         {
-            if (Kernel32.VirtualQuery(current, out MEMORY_BASIC_INFORMATION mbi, (nuint)sizeof(MEMORY_BASIC_INFORMATION)) == 0)
+            if (Kernel32.VirtualQuery(current, out MEMORY_BASIC_INFORMATION mbi) == 0)
             {
                 return 0;
             }

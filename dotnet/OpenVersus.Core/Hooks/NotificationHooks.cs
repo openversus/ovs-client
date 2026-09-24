@@ -18,7 +18,7 @@ public static class NotificationHooks
             return false;
         }
         // This pattern matches three identical functions; the first is as good as any.
-        var hit = c.Patterns.Find("Notifications", c.Settings.Pattern("pNotifs"));
+        var hit = c.Patterns.Find("Notifications");
         if (!hit.Found)
         {
             return false;

@@ -37,7 +37,7 @@ public static unsafe class SunsetPatch
     public static bool Apply(HookContext c, bool count = false)
     {
         c.Log.Info("==Override Sunset Function==");
-        var hit = c.Patterns.Find("SunsetDate", c.Settings.Pattern("pSunsetDate"));
+        var hit = c.Patterns.Find("SunsetDate");
         if (!hit.Found)
         {
             return false;
@@ -62,43 +62,23 @@ public static unsafe class SunsetPatch
 
         // pattern+0x15: "mov [rsp+38h], edi" begins the date construction; jump over it to
         // the "lea rcx, guard; call Init_thread_footer" at pattern+0x40.
-        string? error = CodeWriter.WriteIf(p + 0x15, [0x89, 0x7C, 0x24, 0x38], [0xEB, 0x29], code: true);
-        if (error != null)
-        {
-            c.Log.Error($"SunsetDate: {error}");
-            return false;
-        }
+        CodeWriter.WriteIf(p + 0x15, [0x89, 0x7C, 0x24, 0x38], [0xEB, 0x29], code: true);
 
         // pattern-0x2F: "lea rcx, [rsp+50h]" (5 bytes) becomes "xor eax, eax; jmp +0x13" to
         // the epilogue at pattern-0x18, returning false. The fifth byte is never reached.
         // With counting on, it becomes "call counter; jmp +0x10" instead (the C++ client's
         // shape), and the counter returns the false.
         nint site = p - 0x2F;
-        ReadOnlySpan<byte> lea = [0x48, 0x8D, 0x4C, 0x24, 0x50];
-        if (!lea.SequenceEqual(CodeWriter.Read(site, 5)))
-        {
-            c.Log.Error($"SunsetDate: expected lea at 0x{site:X}, found {Log.Hex(CodeWriter.Read(site, 5))}; not patching");
-            return false;
-        }
+        CodeWriter.Expect(site, [0x48, 0x8D, 0x4C, 0x24, 0x50]);
         if (count)
         {
-            error = CallSite.Inject(site, (nint)(delegate* unmanaged<nint, byte>)&Count, jump: false, out _);
-            if (error == null)
-            {
-                error = CodeWriter.Write(site + 5, [0xEB, 0x10], code: true);
-            }
-
-            Counting = error == null;
+            CallSite.Inject(site, (nint)(delegate* unmanaged<nint, byte>)&Count, jump: false);
+            CodeWriter.Write(site + 5, [0xEB, 0x10], code: true);
+            Counting = true;
         }
         else
         {
-            error = CodeWriter.Write(site, [0x31, 0xC0, 0xEB, 0x13, 0x90], code: true);
-        }
-
-        if (error != null)
-        {
-            c.Log.Error($"SunsetDate: {error}");
-            return false;
+            CodeWriter.Write(site, [0x31, 0xC0, 0xEB, 0x13, 0x90], code: true);
         }
 
         foreach (string name in new[] { InitThreadHeaderName, InitThreadFooterName, FDateTimeName, SunsetDateName })

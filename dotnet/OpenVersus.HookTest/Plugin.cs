@@ -3,7 +3,6 @@ using OpenVersus;
 using OpenVersus.Hooking;
 using OpenVersus.Memory;
 using OpenVersus.Native;
-using Microsoft.Extensions.Logging;
 
 namespace OpenVersus.HookTest;
 
@@ -79,8 +78,15 @@ public static unsafe class Plugin
         else
         {
             nint site = (nint)image + hits[0] + 1;
-            string? error = CodeWriter.WriteIf(site, [0xD2, 0x04, 0x00, 0x00], [0xE1, 0x10, 0x00, 0x00], code: true);
-            log.Line(error == null ? LogLevel.Information : LogLevel.Error, error ?? $"answer patched at 0x{site:X}");
+            try
+            {
+                CodeWriter.WriteIf(site, [0xD2, 0x04, 0x00, 0x00], [0xE1, 0x10, 0x00, 0x00], code: true);
+                log.Info($"answer patched at 0x{site:X}");
+            }
+            catch (PatchException e)
+            {
+                log.Error(e.Message);
+            }
         }
 
         // The guarded read must refuse an unmapped address instead of taking the process down.
@@ -92,7 +98,7 @@ public static unsafe class Plugin
 
         // The page that holds the stubs must be back at its resting protection.
         nint page = Trampoline.Near((nint)image).Base;
-        Kernel32.VirtualQuery(page, out MEMORY_BASIC_INFORMATION mbi, (nuint)sizeof(MEMORY_BASIC_INFORMATION));
+        Kernel32.VirtualQuery(page, out MEMORY_BASIC_INFORMATION mbi);
         log.Info($"trampoline page 0x{page:X} protect 0x{mbi.Protect:X} ({(mbi.Protect == Trampoline.RestingProtection ? "as expected" : "WRONG")})");
 
         log.Info("done");
@@ -110,12 +116,17 @@ public static unsafe class Plugin
         }
         nint site = (nint)image + at + 10;
         byte[] before = CodeWriter.Read(site, CallSite.Length);
-        nint target = CallSite.Redirect(site, hook, out string? error);
-        if (error != null)
+        nint target;
+        try
         {
-            log.Error($"redirect at 0x{site:X} failed: {error}");
+            target = CallSite.Redirect(site, hook);
+        }
+        catch (PatchException e)
+        {
+            log.Error($"redirect at 0x{site:X} failed: {e.Message}");
             return;
         }
+
         original = (delegate* unmanaged<long, long>)target;
         log.Info($"redirected 0x{site:X} ({Log.Hex(before)} -> {Log.Hex(CodeWriter.Read(site, CallSite.Length))}), original target 0x{target:X}");
     }

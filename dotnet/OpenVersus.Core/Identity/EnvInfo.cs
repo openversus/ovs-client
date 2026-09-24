@@ -98,23 +98,20 @@ public sealed class EnvInfo
     }
 
     /// <summary>SMBIOS type 2 (baseboard) serial, minus the usual OEM placeholders.</summary>
-    private static unsafe string ReadBaseboardSerial()
+    private static string ReadBaseboardSerial()
     {
         try
         {
-            uint size = Firmware.GetSystemFirmwareTable(Firmware.RSMB, 0, null, 0);
+            uint size = Firmware.GetSystemFirmwareTable(Firmware.RSMB, 0, [], 0);
             if (size < 8)
             {
                 return "Unknown";
             }
 
             var buffer = new byte[size];
-            fixed (byte* p = buffer)
+            if (Firmware.GetSystemFirmwareTable(Firmware.RSMB, 0, buffer, size) != size)
             {
-                if (Firmware.GetSystemFirmwareTable(Firmware.RSMB, 0, p, size) != size)
-                {
-                    return "Unknown";
-                }
+                return "Unknown";
             }
 
             int tableLength = BitConverter.ToInt32(buffer, 4);
@@ -160,14 +157,10 @@ public sealed class EnvInfo
         return "Unknown";
     }
 
+    /// <summary>Length of the NUL-terminated string at <paramref name="at"/>, or to <paramref name="end"/> if it never ends.</summary>
     private static int StrLen(byte[] buffer, int at, int end)
     {
-        int n = 0;
-        while (at + n < end && buffer[at + n] != 0)
-        {
-            n++;
-        }
-
-        return n;
+        int nul = buffer.AsSpan(at, end - at).IndexOf((byte)0);
+        return nul < 0 ? end - at : nul;
     }
 }

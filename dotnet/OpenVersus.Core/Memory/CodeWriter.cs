@@ -3,20 +3,21 @@ using OpenVersus.Native;
 
 namespace OpenVersus.Memory;
 
-/// <summary>Writes into the mapped image and reports what is actually there afterwards.</summary>
+/// <summary>Writes into the mapped image and checks what is actually there afterwards.</summary>
 public static unsafe class CodeWriter
 {
     /// <summary>
-    /// Null on success, else why not. Code pages stay executable while written: another thread
-    /// may be running them, and a page flipped to read-write faults under it. The write is read
-    /// back, so a success means the bytes are in memory, not that the call returned.
+    /// Writes <paramref name="bytes"/> at <paramref name="target"/>, or throws a <see cref="PatchException"/>.
+    /// Code pages stay executable while written: another thread may be running them, and a page
+    /// flipped to read-write faults under it. The write is read back, so a return means the bytes
+    /// are in memory, not that the call returned.
     /// </summary>
-    public static string? Write(nint target, ReadOnlySpan<byte> bytes, bool code)
+    public static void Write(nint target, ReadOnlySpan<byte> bytes, bool code)
     {
         uint protect = code ? Kernel32.PAGE_EXECUTE_READWRITE : Kernel32.PAGE_READWRITE;
         if (!Kernel32.VirtualProtect(target, (nuint)bytes.Length, protect, out uint oldProtect))
         {
-            return $"VirtualProtect error {Marshal.GetLastPInvokeError()} at 0x{target:X}";
+            throw new PatchException($"VirtualProtect error {Marshal.GetLastPInvokeError()} at 0x{target:X}");
         }
 
         bytes.CopyTo(new Span<byte>((void*)target, bytes.Length));
@@ -27,27 +28,30 @@ public static unsafe class CodeWriter
 
         if (!Kernel32.VirtualProtect(target, (nuint)bytes.Length, oldProtect, out _))
         {
-            return $"written, but protection not restored (VirtualProtect error {Marshal.GetLastPInvokeError()}) at 0x{target:X}";
+            throw new PatchException($"written, but protection not restored (VirtualProtect error {Marshal.GetLastPInvokeError()}) at 0x{target:X}");
         }
 
         if (!new ReadOnlySpan<byte>((void*)target, bytes.Length).SequenceEqual(bytes))
         {
-            return $"read back {Hex(Read(target, bytes.Length))} at 0x{target:X}, wrote {Hex(bytes)}";
+            throw new PatchException($"read back {Convert.ToHexString(Read(target, bytes.Length))} at 0x{target:X}, wrote {Convert.ToHexString(bytes)}");
         }
-
-        return null;
     }
 
-    /// <summary>Writes only if the bytes there are <paramref name="expected"/>. Null on success.</summary>
-    public static string? WriteIf(nint target, ReadOnlySpan<byte> expected, ReadOnlySpan<byte> bytes, bool code)
+    /// <summary>Writes only if the bytes there are <paramref name="expected"/>; throws a <see cref="PatchException"/> otherwise.</summary>
+    public static void WriteIf(nint target, ReadOnlySpan<byte> expected, ReadOnlySpan<byte> bytes, bool code)
+    {
+        Expect(target, expected);
+        Write(target, bytes, code);
+    }
+
+    /// <summary>Throws a <see cref="PatchException"/> unless the bytes at <paramref name="target"/> are <paramref name="expected"/>.</summary>
+    public static void Expect(nint target, ReadOnlySpan<byte> expected)
     {
         var current = new ReadOnlySpan<byte>((void*)target, expected.Length);
         if (!current.SequenceEqual(expected))
         {
-            return $"expected {Hex(expected)} at 0x{target:X}, found {Hex(current)}; not patching";
+            throw new PatchException($"expected {Convert.ToHexString(expected)} at 0x{target:X}, found {Convert.ToHexString(current)}; not patching");
         }
-
-        return Write(target, bytes, code);
     }
 
     public static byte[] Read(nint address, int length) => new ReadOnlySpan<byte>((void*)address, length).ToArray();
@@ -55,26 +59,14 @@ public static unsafe class CodeWriter
     /// <summary>
     /// A read that cannot take the process down. NativeAOT turns an access violation outside the
     /// null page into a fail-fast, so anything read from a pointer that came out of the game's
-    /// heap goes through here rather than a dereference.
+    /// heap goes through here rather than a dereference. Never throws.
     /// </summary>
-    public static bool TryRead(nint address, Span<byte> into)
-    {
-        fixed (byte* p = into)
-        {
-            return Kernel32.ReadProcessMemory(Kernel32.GetCurrentProcess(), address, p, (nuint)into.Length, out nuint read)
-                && read == (nuint)into.Length;
-        }
-    }
+    public static bool TryRead(nint address, Span<byte> into) =>
+        Kernel32.ReadProcessMemory(Kernel32.GetCurrentProcess(), address, into, (nuint)into.Length, out nuint read) && read == (nuint)into.Length;
 
     public static bool TryRead<T>(nint address, out T value) where T : unmanaged
     {
         value = default;
-        fixed (T* p = &value)
-        {
-            return Kernel32.ReadProcessMemory(Kernel32.GetCurrentProcess(), address, p, (nuint)sizeof(T), out nuint read)
-                && read == (nuint)sizeof(T);
-        }
+        return TryRead(address, MemoryMarshal.AsBytes(MemoryMarshal.CreateSpan(ref value, 1)));
     }
-
-    public static string Hex(ReadOnlySpan<byte> bytes) => Convert.ToHexString(bytes);
 }

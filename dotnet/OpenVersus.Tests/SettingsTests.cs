@@ -1,4 +1,3 @@
-using Microsoft.Extensions.Logging;
 using OpenVersus.Config;
 
 namespace OpenVersus.Tests;
@@ -6,17 +5,19 @@ namespace OpenVersus.Tests;
 public class SettingsTests
 {
     [Fact]
-    public void RowNamesAndIniKeysAreUnique()
+    public void IniKeysAreUniqueAndEveryRowFieldIsInTheTable()
     {
-        Assert.Equal(Settings.Table.Count, Settings.Table.Select(d => d.Name).Distinct().Count());
         Assert.Equal(Settings.Table.Count, Settings.Table.Select(d => d.Section + "/" + d.Key).Distinct().Count());
+        var fields = typeof(Settings.Rows).GetFields().Select(f => (SettingDef)f.GetValue(null)!).ToList();
+        Assert.Equal(fields.Count, Settings.Table.Count);
+        Assert.All(fields, f => Assert.Contains(f, Settings.Table));
     }
 
     [Fact]
     public void EveryTypedPropertyReadsARowThatExists()
     {
         // The properties are the only hand-written list; each must resolve to a table row.
-        var s = Settings.FromValues(new Dictionary<string, string>());
+        var s = Settings.FromValues(new Dictionary<SettingDef, string>());
         foreach (var prop in typeof(Settings).GetProperties().Where(p => p.DeclaringType == typeof(Settings) && p.Name != "Path"))
         {
             _ = prop.GetValue(s);
@@ -26,7 +27,7 @@ public class SettingsTests
     [Fact]
     public void DefaultsMatchTheCppClient()
     {
-        var s = Settings.FromValues(new Dictionary<string, string>());
+        var s = Settings.FromValues(new Dictionary<SettingDef, string>());
         Assert.True(s.EnableConsoleWindow);
         Assert.False(s.Debug);
         Assert.True(s.AutoUpdate);
@@ -34,22 +35,23 @@ public class SettingsTests
         Assert.True(s.DisableSignatureCheck);
         Assert.False(s.NetStats);
         Assert.Equal(OvsVersion.DefaultServerUrl, s.ServerUrl);
-        Assert.StartsWith("48 8D 0D ? ? ? ? E9", s.Pattern("pSigCheck"));
+        Assert.StartsWith("48 8D 0D ? ? ? ? E9", s.Pattern("SigCheck"));
+        Assert.Throws<ArgumentException>(() => s.Pattern("NoSuchPattern"));
     }
 
     [Fact]
     public void BooleansIgnoreCaseAndAcceptDigits()
     {
-        var s = Settings.FromValues(new Dictionary<string, string>
+        var s = Settings.FromValues(new Dictionary<SettingDef, string>
         {
-            ["bDebug"] = "True",
-            ["bAutoUpdate"] = "tRuE",
-            ["bNotifs"] = "1",
-            ["bDialog"] = "FALSE",
-            ["bHookUE"] = "0",
-            ["bSunsetDate"] = "yes",
-            ["bNetStats"] = "on",
-            ["bPostMatchFreeze"] = "OFF",
+            [Settings.Rows.DebugLogging] = "True",
+            [Settings.Rows.AutoUpdate] = "tRuE",
+            [Settings.Rows.Notifications] = "1",
+            [Settings.Rows.Dialog] = "FALSE",
+            [Settings.Rows.HookUe] = "0",
+            [Settings.Rows.SunsetDate] = "yes",
+            [Settings.Rows.NetStats] = "on",
+            [Settings.Rows.PostMatchFreeze] = "OFF",
         });
         Assert.True(s.Debug);
         Assert.True(s.AutoUpdate);
@@ -145,7 +147,6 @@ public class SettingsTests
         Assert.Equal(original, File.ReadAllBytes(path));
         Assert.Equal(written, File.GetLastWriteTimeUtc(path));
         Assert.False(s.AutoUpdate);
-        Assert.Equal(50UL, s.Int("iLogSize"));
         Directory.Delete(dir, recursive: true);
     }
 
@@ -154,19 +155,16 @@ public class SettingsTests
     {
         string dir = Directory.CreateTempSubdirectory("ovs-settings-").FullName;
         string path = Path.Combine(dir, Settings.FileName);
-        File.WriteAllText(path, "[Settings]\nAutoUpdate = yes\nLogSize = lots\nEnableKeyboardHotkeys = FALSE\n");
+        File.WriteAllText(path, "[Settings]\nAutoUpdate = yes\nEnableKeyboardHotkeys = FALSE\n");
         var log = new ListLogger();
 
         var s = Settings.Load(path, log);
         Assert.True(s.AutoUpdate);
         Assert.False(s.EnableKeyboardHotkeys);
-        Assert.Equal(50UL, s.Int("iLogSize"));
-        Assert.Equal(2, log.Lines.Count(l => l.Contains("is not")));
+        Assert.Equal(1, log.Lines.Count(l => l.Contains("is not")));
         Assert.Contains(log.Lines, l => l.Contains("AutoUpdate = \"yes\""));
-        Assert.Contains(log.Lines, l => l.Contains("LogSize = \"lots\""));
         string[] after = File.ReadAllLines(path);
         Assert.Contains("AutoUpdate = yes", after);
-        Assert.Contains("LogSize = lots", after);
         Directory.Delete(dir, recursive: true);
     }
 
@@ -192,11 +190,4 @@ public class SettingsTests
         }
     }
 
-    private sealed class ListLogger : ILogger
-    {
-        public List<string> Lines { get; } = [];
-        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-        public bool IsEnabled(LogLevel logLevel) => true;
-        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) => Lines.Add(formatter(state, exception));
-    }
 }

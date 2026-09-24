@@ -14,7 +14,7 @@ public static class DialogHooks
             c.Log.Error("UE Funcs were not enabled therefore Dialog cannot be used!");
             return false;
         }
-        var dialog = c.Patterns.Find("Dialog", c.Settings.Pattern("pDialog"));
+        var dialog = c.Patterns.Find("Dialog");
         if (!dialog.Found)
         {
             return false;
@@ -23,13 +23,13 @@ public static class DialogHooks
         GameFunctions.Register(GameUi.AddDialogName, dialog.Address + 30, FunctionSource.Pattern, "Dialog+30", "UMvsDialog* UMvsFrontendManager::AddDialog(UMvsFrontendManager* this, FMvsDialogParameters* params)", c.Image);
         GameFunctions.FromCallSite(GameUi.GetFrontendManagerName, dialog.Address + 38, "call at Dialog+38", "UMvsFrontendManager* GetFrontendManager(UFighterGameInstance* instance)", c.Image);
 
-        var parameters = c.Patterns.Find("DialogParams", c.Settings.Pattern("pDialogParams"));
+        var parameters = c.Patterns.Find("DialogParams");
         if (parameters.Found)
         {
             GameFunctions.Register(GameUi.DialogParametersCtorName, parameters.Address, FunctionSource.Pattern, "DialogParams", "void FMvsDialogParameters::FMvsDialogParameters(FMvsDialogParameters* this, FText* prompt, uint8_t flags)", c.Image);
         }
 
-        var callback = c.Patterns.Find("DialogCallback", c.Settings.Pattern("pDialogCallback"));
+        var callback = c.Patterns.Find("DialogCallback");
         if (!callback.Found)
         {
             return false;
@@ -37,7 +37,7 @@ public static class DialogHooks
 
         GameFunctions.FromCallSite(GameUi.DialogCallbackSetterName, callback.Address, "call at DialogCallback", "void SingleParamDialogCallbackSetter(TMulticastDelegateBase* button, uint64_t* result, UMvsDialog* dialog, UMvsDialog** self)", c.Image);
 
-        var quit = c.Patterns.Find("QuitGameCallback", c.Settings.Pattern("pQuitGameCallback"));
+        var quit = c.Patterns.Find("QuitGameCallback");
         if (quit.Found)
         {
             GameFunctions.Register(GameUi.QuitGameName, quit.Address, FunctionSource.Pattern, "QuitGameCallback", "bool QuitGame(UMvsDialog* dialog)", c.Image);

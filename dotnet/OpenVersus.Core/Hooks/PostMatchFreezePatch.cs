@@ -15,19 +15,14 @@ public static class PostMatchFreezePatch
     public static bool Apply(HookContext c)
     {
         c.Log.Info("==PostMatchFreeze==");
-        var hit = c.Patterns.Find("PostMatchFreeze", c.Settings.Pattern("pPostMatchFreeze"));
+        var hit = c.Patterns.Find("PostMatchFreeze");
         if (!hit.Found)
         {
             return false;
         }
 
         nint site = hit.Address + 0x10;
-        string? error = CodeWriter.WriteIf(site, s_expected, s_nops, code: true);
-        if (error != null)
-        {
-            c.Log.Error($"PostMatchFreeze: {error}");
-            return false;
-        }
+        CodeWriter.WriteIf(site, s_expected, s_nops, code: true);
         c.Log.Success($"PostMatchFreeze patched at 0x{site:X}");
         return true;
     }

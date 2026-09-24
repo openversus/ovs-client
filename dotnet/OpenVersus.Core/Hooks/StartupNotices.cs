@@ -27,9 +27,7 @@ public static unsafe class StartupNotices
         s_log = log;
         s_dialogDone = state.PaidModWarned;
         log.Debug("startup notices: waiting for the game instance and window");
-        // Volatile reads: the instance is written by a hook on another thread, and a plain
-        // static read in a loop may legally be hoisted out of it.
-        while (Volatile.Read(ref GameUi.FighterGameInstance) == 0 || GameThread.Window == 0)
+        while (GameUi.FighterGameInstance == 0 || GameThread.Window == 0)
         {
             Thread.Sleep(500);
         }

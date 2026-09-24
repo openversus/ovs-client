@@ -20,7 +20,7 @@ public static unsafe class UeFunctionHooks
         c.Log.Info("==UE Funcs==");
         var image = c.Image;
 
-        var ftext = c.Patterns.Find("FText", c.Settings.Pattern("pFText"));
+        var ftext = c.Patterns.Find("FText");
         if (!ftext.Found)
         {
             return false;
@@ -32,7 +32,7 @@ public static unsafe class UeFunctionHooks
         GameFunctions.FromCallSite(UE.FTextGetEmptyName, fromString.Address + 32, "call at FText::FromString+32", "FText* FText::GetEmpty()", image);
         GameFunctions.FromCallSite(UE.FNameToStringName, first, "call at FText-26", "FString* FName::ToString(FName* name, FString* out)", image);
 
-        var cfname = c.Patterns.Find("CFName", c.Settings.Pattern("pCFName"));
+        var cfname = c.Patterns.Find("CFName");
         if (!cfname.Found)
         {
             return false;
@@ -40,7 +40,7 @@ public static unsafe class UeFunctionHooks
 
         GameFunctions.FromCallSite(UE.FNameCtorCharName, cfname.Address + 79, "call at CFName+79", "void FName::FName(FName* this, const char* name, EFindName find)", image);
 
-        var wcfname = c.Patterns.Find("WCFName", c.Settings.Pattern("pWCFname"));
+        var wcfname = c.Patterns.Find("WCFName");
         if (!wcfname.Found)
         {
             return false;
@@ -55,7 +55,7 @@ public static unsafe class UeFunctionHooks
             c.Log.Debug(GameFunctions.Find(name)!.ToString());
         }
 
-        var fighter = c.Patterns.Find("FighterInstance", c.Settings.Pattern("pFighterInstance"));
+        var fighter = c.Patterns.Find("FighterInstance");
         if (!fighter.Found)
         {
             return false;
@@ -63,12 +63,7 @@ public static unsafe class UeFunctionHooks
         // The pattern is a lea to the function whose tail jump goes to the constructor.
         nint function = CallSite.Destination(fighter.Address, displacementOffset: 3, instructionLength: 7);
         nint site = function + 14;
-        nint original = CallSite.Redirect(site, (nint)(delegate* unmanaged<nint, nint, nint>)&CopyFighterInstance, out string? error);
-        if (error != null)
-        {
-            c.Log.Error($"FighterInstance: {error}");
-            return false;
-        }
+        nint original = CallSite.Redirect(site, (nint)(delegate* unmanaged<nint, nint, nint>)&CopyFighterInstance);
         s_fighterInstanceCtor = (delegate* unmanaged<nint, nint, nint>)original;
         GameFunctions.Register(GameUi.FighterGameInstanceCtorName, original, FunctionSource.CallSite, $"jmp at 0x{site:X}", "UFighterGameInstance* UFighterGameInstance::UFighterGameInstance(UFighterGameInstance* this, const uint64_t* a2)", image);
         c.Log.Debug($"FighterInstance proxied at 0x{site:X}: {GameFunctions.Find(GameUi.FighterGameInstanceCtorName)}");
@@ -84,8 +79,7 @@ public static unsafe class UeFunctionHooks
         // whatever happens in the bookkeeping.
         HookGuard.Run("CopyFighterInstance", self, static self =>
         {
-            GameUi.FighterGameInstance = self;
-            GameUi.FighterGameInstanceTick = Environment.TickCount64;
+            GameUi.RecordFighterGameInstance(self);
             s_log?.Debug($"UFighterGameInstance constructed at 0x{self:X}");
         });
         return s_fighterInstanceCtor(self, a2);

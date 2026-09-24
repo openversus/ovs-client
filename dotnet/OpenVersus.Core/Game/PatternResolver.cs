@@ -16,9 +16,12 @@ public readonly record struct PatternHit(string Name, string Text, nint Address,
 /// PatternFinder: first match over the whole image, and a cached address is used when present,
 /// except that here the pattern is checked to still match at the cached address.
 /// </summary>
-public sealed class PatternResolver(GameImage image, PatternCache cache, Log log)
+public sealed class PatternResolver(GameImage image, PatternCache cache, Settings settings, Log log)
 {
     public GameImage Image { get; } = image;
+
+    /// <summary>Finds the pattern the ini keeps under <paramref name="name"/>.</summary>
+    public PatternHit Find(string name) => Find(name, settings.Pattern(name));
 
     public PatternHit Find(string name, string text)
     {

@@ -48,10 +48,30 @@ sysroot (about 2.4 GB) into `~/.cache/xwin`; `AcceptVSBuildToolsLicense=true` ac
 
 `Log` is a `Microsoft.Extensions.Logging.ILogger` with its own writer (file plus console). The
 minimum level comes from `[Settings] LogLevel`: a name (`trace`, `debug`, `info`, `warn`, `error`,
-`critical`, `none`) or a number (1 debug to 6 none). `0`, which existing files carry, means
-"decide from `[Settings.Debug] DebugLogging`": Debug when it is on, Information when it is off.
-Tags in the file are `TRC DBG NFO WRN ERR CRT`. Per-attempt and game-thread queue lines are
-Trace; pattern and function resolution is Debug; hooks, banners and netstats are Information.
+`critical`, `none`, or the usual aliases such as `verbose`, `all`, `err`, `quiet`) or a number
+(1 debug to 6 none; a number past 6 means 6). `0`, which existing files carry, means "decide from
+`[Settings.Debug] DebugLogging`": Debug when it is on, Information when it is off. A name that is
+not a level is logged and falls back the same way. Tags in the file are `TRC DBG NFO WRN ERR CRT`.
+Per-attempt and game-thread queue lines are Trace; pattern and function resolution is Debug; hooks,
+banners and netstats are Information.
+
+If the `logs` directory cannot be created or written, the log goes to the plugin's own directory
+instead; if that fails too, the client still runs, `Log.FileError` records why, and every line
+still reaches the console mirror. `Log.Notice` says which happened and is the first warning logged.
+
+## Conventions
+
+- A patch that cannot be made throws `PatchException` out of `Memory/` (`CodeWriter`, `CallSite`,
+  `Trampoline`); `Client.ApplyHooks` catches per hook, logs it as that hook's failure and goes on.
+  `CodeWriter.TryRead` never throws, since it runs on hot paths.
+- Settings are rows (`Settings.Rows.*`), one static `SettingDef` per ini key, read through typed
+  properties; `PatternResolver.Find("SigCheck")` reads the pattern text from the row of that key.
+- JSON goes through the source-generated `Net/OvsJson.cs` context (NativeAOT has no reflection
+  for System.Text.Json); add a `[JsonSerializable]` there for any new shape.
+- Background loops stop through a `CancellationToken`, waited on rather than slept through.
+- What stays C-shaped is what must: `[UnmanagedCallersOnly]` hooks and the static state they
+  need, function-pointer casts, sequential-layout structs mirroring the game, `nint` arithmetic,
+  and Win32 names in `Native/`.
 
 ## Settings files
 

@@ -35,6 +35,13 @@ public sealed class Log : ILogger, IDisposable
     public string Path { get; }
     public DateTime LaunchTime { get; } = DateTime.Now;
 
+    /// <summary>Why the file at <see cref="Path"/> could not be created or written, in which case
+    /// lines still reach the console and the client still runs. Null while the file is fine.</summary>
+    public Exception? FileError { get; private set; }
+
+    /// <summary>Set when the log is not where it was asked to be: which directory failed, why, and where it went instead.</summary>
+    public string? Notice { get; private init; }
+
     /// <summary>Where console lines go once a console window exists; null means no console.</summary>
     public Action<string>? ConsoleWriter { get; set; }
     /// <summary>Lines below this level are dropped before they are queued.</summary>
@@ -43,27 +50,46 @@ public sealed class Log : ILogger, IDisposable
     public bool Color { get; set; } = true;
 
     /// <summary>A log at <paramref name="path"/>, truncated now, with no archiving.</summary>
-    public Log(string path) : this(path, null) { }
+    public Log(string path) : this(path, null, Truncate(path)) { }
 
-    private Log(string path, string? name)
+    private Log(string path, string? name, Exception? fileError)
     {
         Path = path;
         _name = name;
-        File.WriteAllText(path, "");
+        FileError = fileError;
         _writer = new Thread(WriteLoop) { IsBackground = true, Name = "OVS log writer" };
         _writer.Start();
     }
 
     /// <summary>
     /// The session log "&lt;directory&gt;/&lt;name&gt;.log". If the previous run's file is still there and
-    /// was never archived, it is copied to its launch-time name first.
+    /// was never archived, it is copied to its launch-time name first. A directory that cannot be
+    /// created or written is given up for <paramref name="fallbackDirectory"/>, and if that fails
+    /// too the log has <see cref="FileError"/> set and lines reach the console only; either way
+    /// there is a log and the client runs. <see cref="Notice"/> says what happened.
     /// </summary>
-    public static Log OpenSession(string directory, string name)
+    public static Log OpenSession(string directory, string name, string? fallbackDirectory = null)
     {
-        Directory.CreateDirectory(directory);
         string path = System.IO.Path.Combine(directory, name + ".log");
-        ArchiveLeftover(path, name);
-        var log = new Log(path, name);
+        Exception? error = PrepareSession(directory, path, name);
+        string? notice = null;
+        if (error != null && fallbackDirectory != null)
+        {
+            string fallback = System.IO.Path.Combine(fallbackDirectory, name + ".log");
+            Exception? fallbackError = PrepareSession(fallbackDirectory, fallback, name);
+            if (fallbackError == null)
+            {
+                notice = $"log directory {directory} cannot be written ({error.Message}); logging to {fallback} instead";
+                path = fallback;
+                error = null;
+            }
+            else
+            {
+                notice = $"neither {directory} ({error.Message}) nor {fallbackDirectory} ({fallbackError.Message}) can hold the log; logging to the console only";
+            }
+        }
+
+        var log = new Log(path, name, error) { Notice = notice };
         AppDomain.CurrentDomain.ProcessExit += (_, _) => log.Close();
         return log;
     }
@@ -98,29 +124,52 @@ public sealed class Log : ILogger, IDisposable
 
     /// <summary>
     /// The minimum level from the ini: the LogLevel key by name (trace, debug, info, warn,
-    /// error, critical, none) or number (1 debug .. 6 none; 0 means not set), else Debug when
-    /// DebugLogging is on and Information when it is off, which is what the two settings meant
-    /// before levels existed.
+    /// error, critical, none, plus the usual aliases such as verbose and all) or number (1 debug
+    /// .. 6 none; 0 means not set), else Debug when DebugLogging is on and Information when it is
+    /// off, which is what the two settings meant before levels existed. A number past the end of
+    /// the scale means the end of the scale.
     /// </summary>
-    public static LogLevel ResolveLevel(string? logLevel, bool debugLogging)
+    public static LogLevel ResolveLevel(string? logLevel, bool debugLogging) => ResolveLevel(logLevel, debugLogging, out _);
+
+    /// <summary>As above; <paramref name="note"/> says when the value was not taken literally.</summary>
+    public static LogLevel ResolveLevel(string? logLevel, bool debugLogging, out string? note)
     {
+        note = null;
         string text = (logLevel ?? "").Trim();
-        if (int.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out int n) && n != 0)
+        LogLevel fallback = debugLogging ? LogLevel.Debug : LogLevel.Information;
+        if (long.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out long n) && n != 0)
         {
-            return (LogLevel)Math.Clamp(n, 1, 6);
+            var level = (LogLevel)Math.Clamp(n, 1, 6);
+            if (n > 6)
+            {
+                note = $"LogLevel {text} is past the end of the scale; using {(int)level} ({level})";
+            }
+
+            return level;
         }
 
-        return text.ToLowerInvariant() switch
+        switch (text.ToLowerInvariant())
         {
-            "trace" => LogLevel.Trace,
-            "debug" => LogLevel.Debug,
-            "info" or "information" => LogLevel.Information,
-            "warn" or "warning" => LogLevel.Warning,
-            "error" => LogLevel.Error,
-            "critical" or "fatal" => LogLevel.Critical,
-            "none" or "off" => LogLevel.None,
-            _ => debugLogging ? LogLevel.Debug : LogLevel.Information,
-        };
+            case "trace" or "verbose" or "all" or "v":
+                return LogLevel.Trace;
+            case "debug" or "dbg":
+                return LogLevel.Debug;
+            case "info" or "information" or "nfo":
+                return LogLevel.Information;
+            case "warn" or "warning" or "wrn":
+                return LogLevel.Warning;
+            case "error" or "err":
+                return LogLevel.Error;
+            case "critical" or "crit" or "fatal":
+                return LogLevel.Critical;
+            case "none" or "off" or "quiet" or "silent":
+                return LogLevel.None;
+            case "" or "0" or "default":
+                return fallback;
+            default:
+                note = $"LogLevel \"{text}\" is not a level name; using {fallback}";
+                return fallback;
+        }
     }
 
     public void Line(LogLevel level, string message, string? color = null)
@@ -162,46 +211,92 @@ public sealed class Log : ILogger, IDisposable
         catch (InvalidOperationException) { }
     }
 
+    /// <summary>
+    /// Drains the queue to the file and the console. The file is optional: if it cannot be opened,
+    /// or fails mid-run (a full disk), it is dropped, <see cref="FileError"/> says why, and the
+    /// console keeps going, so a log problem never stops the game or a waiting <see cref="Flush"/>.
+    /// </summary>
     private void WriteLoop()
+    {
+        StreamWriter? writer = FileError == null ? TryOpenFile() : null;
+        while (true)
+        {
+            if (!_queue.TryTake(out var item, 250))
+            {
+                if (_queue.IsCompleted)
+                {
+                    break;
+                }
+
+                writer = TryWrite(writer, w => w.Flush());
+                continue;
+            }
+
+            if (item.Text != null)
+            {
+                writer = TryWrite(writer, w => w.WriteLine(item.Text));
+                try
+                {
+                    if (item.Console != null)
+                    {
+                        ConsoleWriter?.Invoke(item.Console);
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            if (item.Level >= LogLevel.Warning || item.Flushed != null || _queue.Count == 0 && _queue.IsAddingCompleted)
+            {
+                writer = TryWrite(writer, w => w.Flush());
+            }
+
+            item.Flushed?.Set();
+        }
+
+        TryWrite(writer, w => w.Dispose());
+    }
+
+    private StreamWriter? TryOpenFile()
     {
         try
         {
-            using var stream = new FileStream(Path, FileMode.Append, FileAccess.Write, FileShare.Read, 1 << 14);
-            using var writer = new StreamWriter(stream, new UTF8Encoding(false));
-            while (true)
-            {
-                if (!_queue.TryTake(out var item, 250))
-                {
-                    if (_queue.IsCompleted)
-                    {
-                        break;
-                    }
-
-                    writer.Flush();
-                    continue;
-                }
-                if (item.Text != null)
-                {
-                    writer.WriteLine(item.Text);
-                    try
-                    {
-                        if (item.Console != null)
-                        {
-                            ConsoleWriter?.Invoke(item.Console);
-                        }
-                    }
-                    catch { }
-                }
-                if (item.Level >= LogLevel.Warning || item.Flushed != null || _queue.Count == 0 && _queue.IsAddingCompleted)
-                {
-                    writer.Flush();
-                }
-
-                item.Flushed?.Set();
-            }
-            writer.Flush();
+            return new StreamWriter(new FileStream(Path, FileMode.Append, FileAccess.Write, FileShare.Read, 1 << 14), new UTF8Encoding(false));
         }
-        catch { /* a full or read-only disk must not stop the game */ }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            FileError = e;
+            return null;
+        }
+    }
+
+    /// <summary>Runs one file operation; on failure the file is given up and null comes back.</summary>
+    private StreamWriter? TryWrite(StreamWriter? writer, Action<StreamWriter> action)
+    {
+        if (writer == null)
+        {
+            return null;
+        }
+
+        try
+        {
+            action(writer);
+            return writer;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ObjectDisposedException)
+        {
+            FileError ??= e;
+            try
+            {
+                writer.Dispose();
+            }
+            catch
+            {
+            }
+
+            return null;
+        }
     }
 
     /// <summary>Waits until everything queued so far is on disk, up to <paramref name="timeout"/>.</summary>
@@ -245,6 +340,35 @@ public sealed class Log : ILogger, IDisposable
     }
 
     public void Dispose() => Close();
+
+    /// <summary>Creates the directory, archives a leftover file and truncates; the error if any of that fails.</summary>
+    private static Exception? PrepareSession(string directory, string path, string name)
+    {
+        try
+        {
+            Directory.CreateDirectory(directory);
+            ArchiveLeftover(path, name);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return e;
+        }
+
+        return Truncate(path);
+    }
+
+    private static Exception? Truncate(string path)
+    {
+        try
+        {
+            File.WriteAllText(path, "");
+            return null;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return e;
+        }
+    }
 
     private static string ArchivePath(string path, string name, DateTime launch) =>
         System.IO.Path.Combine(System.IO.Path.GetDirectoryName(path)!, $"{name}_{launch.ToString(ArchiveStampFormat, CultureInfo.InvariantCulture)}.log");

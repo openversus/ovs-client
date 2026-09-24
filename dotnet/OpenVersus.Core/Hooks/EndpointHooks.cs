@@ -1,8 +1,8 @@
 using System.Runtime.InteropServices;
-using System.Text;
 using OpenVersus.Game;
 using OpenVersus.Hooking;
 using OpenVersus.Memory;
+using OpenVersus.Net;
 
 namespace OpenVersus.Hooks;
 
@@ -32,26 +32,26 @@ public static unsafe class EndpointHooks
             c.Log.Warn("Server Url is empty or not specified. Skipping!");
             return false;
         }
-        var hit = c.Patterns.Find("EndpointLoader", c.Settings.Pattern("pEndpointLoader"));
+        if (Urls.Parse(c.Settings.ServerUrl) == null)
+        {
+            c.Log.Warn($"Server Url \"{c.Settings.ServerUrl}\" does not look like a URL; the game will be pointed at it anyway");
+        }
+
+        var hit = c.Patterns.Find("EndpointLoader");
         if (!hit.Found)
         {
             return false;
         }
 
         nint site = hit.Address + 0x0A;
-        nint original = CallSite.Redirect(site, (nint)(delegate* unmanaged<nint, nint, nint>)&OverrideGameEndpoint, out string? error);
-        if (error != null)
-        {
-            c.Log.Error($"EndpointLoader: {error}");
-            return false;
-        }
+        nint original = CallSite.Redirect(site, (nint)(delegate* unmanaged<nint, nint, nint>)&OverrideGameEndpoint);
         s_getEndpointKeyValue = (delegate* unmanaged<nint, byte*, nint>)original;
         GameFunctions.Register(GetEndpointKeyValueName, original, FunctionSource.CallSite, $"call at 0x{site:X}", "const char** GetEndpointKeyValue(int64_t* dest, const char* value)", c.Image);
 
         // The C++ passed the game URL exactly as configured, trailing slash included (its
         // strip was dead code), so that is what production has been running with.
         s_gameUrl = c.Settings.ServerUrl;
-        s_gameUrlUtf8 = Pin(Encoding.UTF8.GetBytes(s_gameUrl + "\0"));
+        s_gameUrlUtf8 = (byte*)Marshal.StringToCoTaskMemUTF8(s_gameUrl);
         c.Log.Success("EndpointLoader Proxied");
         return true;
     }
@@ -65,24 +65,24 @@ public static unsafe class EndpointHooks
             c.Log.Warn("Prod Server Url is empty or not specified. Skipping!");
             return false;
         }
-        var hit = c.Patterns.Find("ProdEndpointLoader", c.Settings.Pattern("pProdEndpointLoader"));
+        if (Urls.Parse(c.Settings.ProdServerUrl) == null)
+        {
+            c.Log.Warn($"Prod Server Url \"{c.Settings.ProdServerUrl}\" does not look like a URL; the game will be pointed at it anyway");
+        }
+
+        var hit = c.Patterns.Find("ProdEndpointLoader");
         if (!hit.Found)
         {
             return false;
         }
 
         nint site = hit.Address + 0x0A;
-        nint original = CallSite.Redirect(site, (nint)(delegate* unmanaged<nint, nint, nint>)&OverrideProdEndpoint, out string? error);
-        if (error != null)
-        {
-            c.Log.Error($"ProdEndpointLoader: {error}");
-            return false;
-        }
+        nint original = CallSite.Redirect(site, (nint)(delegate* unmanaged<nint, nint, nint>)&OverrideProdEndpoint);
         s_setFStringValue = (delegate* unmanaged<nint, char*, nint>)original;
         GameFunctions.Register(SetFStringValueName, original, FunctionSource.CallSite, $"call at 0x{site:X}", "int64_t* SetFStringValue(int64_t* fstring, const wchar_t* value)", c.Image);
 
         s_prodUrl = c.Settings.ProdServerUrl.TrimEnd('/') + "/";
-        s_prodUrlWide = PinWide(s_prodUrl);
+        s_prodUrlWide = (char*)Marshal.StringToCoTaskMemUni(s_prodUrl);
         c.Log.Success("ProdEndpointLoader Proxied");
         return true;
     }
@@ -120,18 +120,4 @@ public static unsafe class EndpointHooks
     private static string ReadUtf8(nint p) => p == 0 ? "" : Marshal.PtrToStringUTF8(p) ?? "";
     private static string ReadWide(nint p) => p == 0 ? "" : Marshal.PtrToStringUni(p) ?? "";
 
-    private static byte* Pin(byte[] bytes)
-    {
-        byte* p = (byte*)NativeMemory.Alloc((nuint)bytes.Length);
-        bytes.CopyTo(new Span<byte>(p, bytes.Length));
-        return p;
-    }
-
-    private static char* PinWide(string text)
-    {
-        char* p = (char*)NativeMemory.Alloc((nuint)((text.Length + 1) * sizeof(char)));
-        text.CopyTo(new Span<char>(p, text.Length));
-        p[text.Length] = '\0';
-        return p;
-    }
 }

@@ -1,4 +1,5 @@
 using OpenVersus.Memory;
+using OpenVersus.Native;
 
 namespace OpenVersus.Game;
 
@@ -340,25 +341,21 @@ public sealed class ObjectFinder(GameImage image, Log log, bool tryObjectArray)
 /// </summary>
 public static class HeapScanner
 {
-    private const uint MEM_COMMIT = 0x1000;
-    private const uint PAGE_READONLY = 0x02;
-    private const uint PAGE_READWRITE = 0x04;
-
     public static IEnumerable<ObjectHeader> Objects(GameImage image)
     {
-        Native.Kernel32.GetSystemInfo(out var si);
+        Kernel32.GetSystemInfo(out var si);
         nint address = si.MinimumApplicationAddress;
         nint max = si.MaximumApplicationAddress;
         var buffer = new byte[1 << 20];
         while (address < max)
         {
-            if (Native.Kernel32.VirtualQuery(address, out var mbi, (nuint)System.Runtime.InteropServices.Marshal.SizeOf<Native.MEMORY_BASIC_INFORMATION>()) == 0)
+            if (Kernel32.VirtualQuery(address, out var mbi) == 0)
             {
                 break;
             }
 
             nint next = (nint)((nuint)mbi.BaseAddress + mbi.RegionSize);
-            bool candidate = mbi.State == MEM_COMMIT && (mbi.Protect == PAGE_READWRITE || mbi.Protect == PAGE_READONLY)
+            bool candidate = mbi.State == Kernel32.MEM_COMMIT && (mbi.Protect == Kernel32.PAGE_READWRITE || mbi.Protect == Kernel32.PAGE_READONLY)
                 && mbi.RegionSize >= 0x100 && mbi.RegionSize < 0x10000000 && !image.Contains(mbi.BaseAddress);
             if (candidate)
             {

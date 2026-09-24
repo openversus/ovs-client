@@ -30,6 +30,9 @@ public static class Mvs
     public const int SessionNumZeroedOverrides = 0x670;
     public const int SessionStateManager = 0x710;      // pointer; its +0x420 is the current frame
     public const int StateManagerCurrentFrame = 0x420;
+    // AMvsPreMatchGameState: its state machine, and the machine's current state.
+    public const int PreMatchStateMachine = 0x320;
+    public const int StateMachineCurrentState = 0x58;
     // APfgFixedGameStateBase
     public const int GameStateNetcodeSession = 0x4A0;
     public const int GameStateResimFrames = 0x524;
