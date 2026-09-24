@@ -10,10 +10,10 @@ namespace OpenVersus.Native;
 /// </summary>
 public static unsafe partial class Profile
 {
-	[LibraryImport("kernel32.dll", EntryPoint = "GetPrivateProfileStringW", StringMarshalling = StringMarshalling.Utf16)]
-	public static partial uint GetPrivateProfileString(string section, string key, string defaultValue, char* buffer, uint size, string file);
+    [LibraryImport("kernel32.dll", EntryPoint = "GetPrivateProfileStringW", StringMarshalling = StringMarshalling.Utf16)]
+    public static partial uint GetPrivateProfileString(string section, string key, string defaultValue, char* buffer, uint size, string file);
 
-	[LibraryImport("kernel32.dll", EntryPoint = "WritePrivateProfileStringW", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
-	[return: MarshalAs(UnmanagedType.Bool)]
-	public static partial bool WritePrivateProfileString(string section, string key, string? value, string file);
+    [LibraryImport("kernel32.dll", EntryPoint = "WritePrivateProfileStringW", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool WritePrivateProfileString(string section, string key, string? value, string file);
 }

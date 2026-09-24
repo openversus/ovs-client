@@ -5,28 +5,28 @@ namespace OpenVersus.Game;
 /// <summary>The first 0x30 bytes of a UObject, as this build lays them out (UE4SS MemberVariableLayout).</summary>
 public readonly record struct ObjectHeader(nint Address, nint VTable, uint Flags, nint ClassPrivate, FName Name, nint Outer)
 {
-	public const uint RF_ClassDefaultObject = 0x10;
-	public bool IsDefaultObject => (Flags & RF_ClassDefaultObject) != 0;
+    public const uint RF_ClassDefaultObject = 0x10;
+    public bool IsDefaultObject => (Flags & RF_ClassDefaultObject) != 0;
 
-	public static bool TryRead(nint address, out ObjectHeader header)
-	{
-		Span<byte> raw = stackalloc byte[0x30];
-		if (!CodeWriter.TryRead(address, raw))
-		{
-			header = default;
-			return false;
-		}
-		header = FromBytes(address, raw);
-		return true;
-	}
+    public static bool TryRead(nint address, out ObjectHeader header)
+    {
+        Span<byte> raw = stackalloc byte[0x30];
+        if (!CodeWriter.TryRead(address, raw))
+        {
+            header = default;
+            return false;
+        }
+        header = FromBytes(address, raw);
+        return true;
+    }
 
-	public static ObjectHeader FromBytes(nint address, ReadOnlySpan<byte> raw) => new(
-		address,
-		(nint)BitConverter.ToInt64(raw[Mvs.ObjectVTable..]),
-		BitConverter.ToUInt32(raw[8..]),
-		(nint)BitConverter.ToInt64(raw[Mvs.ObjectClassPrivate..]),
-		new FName { Index = BitConverter.ToInt32(raw[Mvs.ObjectNamePrivate..]), Number = BitConverter.ToInt32(raw[(Mvs.ObjectNamePrivate + 4)..]) },
-		(nint)BitConverter.ToInt64(raw[Mvs.ObjectOuterPrivate..]));
+    public static ObjectHeader FromBytes(nint address, ReadOnlySpan<byte> raw) => new(
+        address,
+        (nint)BitConverter.ToInt64(raw[Mvs.ObjectVTable..]),
+        BitConverter.ToUInt32(raw[8..]),
+        (nint)BitConverter.ToInt64(raw[Mvs.ObjectClassPrivate..]),
+        new FName { Index = BitConverter.ToInt32(raw[Mvs.ObjectNamePrivate..]), Number = BitConverter.ToInt32(raw[(Mvs.ObjectNamePrivate + 4)..]) },
+        (nint)BitConverter.ToInt64(raw[Mvs.ObjectOuterPrivate..]));
 }
 
 /// <summary>
@@ -38,89 +38,105 @@ public readonly record struct ObjectHeader(nint Address, nint VTable, uint Flags
 /// </summary>
 public sealed class ObjectArray
 {
-	public const uint GUObjectArrayRva = 0x081C5090;
-	private const int ObjObjectsOffset = 0x10;
-	private const int ItemSize = 24;
-	private const int ChunkItems = 65536;
+    public const uint GUObjectArrayRva = 0x081C5090;
+    private const int ObjObjectsOffset = 0x10;
+    private const int ItemSize = 24;
+    private const int ChunkItems = 65536;
 
-	private readonly nint _chunkTable;
-	public int Count { get; }
-	public int Chunks { get; }
+    private readonly nint _chunkTable;
+    public int Count { get; }
+    public int Chunks { get; }
 
-	private ObjectArray(nint chunkTable, int count, int chunks)
-	{
-		_chunkTable = chunkTable;
-		Count = count;
-		Chunks = chunks;
-	}
+    private ObjectArray(nint chunkTable, int count, int chunks)
+    {
+        _chunkTable = chunkTable;
+        Count = count;
+        Chunks = chunks;
+    }
 
-	public static ObjectArray? Open(GameImage image, Log log)
-	{
-		nint objObjects = image.Address(GUObjectArrayRva) + ObjObjectsOffset;
-		if (!CodeWriter.TryRead(objObjects, out nint chunkTable) ||
-			!CodeWriter.TryRead(objObjects + 0x10, out int maxElements) ||
-			!CodeWriter.TryRead(objObjects + 0x14, out int numElements) ||
-			!CodeWriter.TryRead(objObjects + 0x18, out int maxChunks) ||
-			!CodeWriter.TryRead(objObjects + 0x1C, out int numChunks))
-		{
-			log.Warn("object array: header unreadable");
-			return null;
-		}
-		int expectedChunks = (numElements + ChunkItems - 1) / ChunkItems;
-		if (chunkTable == 0 || numElements < 1000 || numElements > 20_000_000 || numChunks != expectedChunks || maxChunks < numChunks || maxElements < numElements)
-		{
-			log.Warn($"object array: header does not look like a chunked array (elements {numElements}/{maxElements}, chunks {numChunks}/{maxChunks})");
-			return null;
-		}
-		var array = new ObjectArray(chunkTable, numElements, numChunks);
-		// The first live object must look like one: a vtable inside the image, and a name the
-		// engine can print once FName::ToString is available.
-		foreach (nint obj in array.Objects().Take(16))
-		{
-			if (!ObjectHeader.TryRead(obj, out var h) || !image.Contains(h.VTable))
-			{
-				log.Warn($"object array: entry 0x{obj:X} has no vtable in the image; not using it");
-				return null;
-			}
-			if (UE.Ready && UE.NameToString(h.Name) == null)
-			{
-				log.Warn($"object array: entry 0x{obj:X} has a name that does not resolve; not using it");
-				return null;
-			}
-		}
-		log.Info($"object array at 0x{objObjects - ObjObjectsOffset:X}: {numElements} objects in {numChunks} chunks");
-		return array;
-	}
+    public static ObjectArray? Open(GameImage image, Log log)
+    {
+        nint objObjects = image.Address(GUObjectArrayRva) + ObjObjectsOffset;
+        if (!CodeWriter.TryRead(objObjects, out nint chunkTable) ||
+            !CodeWriter.TryRead(objObjects + 0x10, out int maxElements) ||
+            !CodeWriter.TryRead(objObjects + 0x14, out int numElements) ||
+            !CodeWriter.TryRead(objObjects + 0x18, out int maxChunks) ||
+            !CodeWriter.TryRead(objObjects + 0x1C, out int numChunks))
+        {
+            log.Warn("object array: header unreadable");
+            return null;
+        }
+        int expectedChunks = (numElements + ChunkItems - 1) / ChunkItems;
+        if (chunkTable == 0 || numElements < 1000 || numElements > 20_000_000 || numChunks != expectedChunks || maxChunks < numChunks || maxElements < numElements)
+        {
+            log.Warn($"object array: header does not look like a chunked array (elements {numElements}/{maxElements}, chunks {numChunks}/{maxChunks})");
+            return null;
+        }
+        var array = new ObjectArray(chunkTable, numElements, numChunks);
+        // The first live object must look like one: a vtable inside the image, and a name the
+        // engine can print once FName::ToString is available.
+        foreach (nint obj in array.Objects().Take(16))
+        {
+            if (!ObjectHeader.TryRead(obj, out var h) || !image.Contains(h.VTable))
+            {
+                log.Warn($"object array: entry 0x{obj:X} has no vtable in the image; not using it");
+                return null;
+            }
+            if (UE.Ready && UE.NameToString(h.Name) == null)
+            {
+                log.Warn($"object array: entry 0x{obj:X} has a name that does not resolve; not using it");
+                return null;
+            }
+        }
+        log.Info($"object array at 0x{objObjects - ObjObjectsOffset:X}: {numElements} objects in {numChunks} chunks");
+        return array;
+    }
 
-	public nint this[int index]
-	{
-		get
-		{
-			if (index < 0 || index >= Count) return 0;
-			if (!CodeWriter.TryRead(_chunkTable + (nint)(index / ChunkItems) * sizeof(long), out nint chunk) || chunk == 0) return 0;
-			return CodeWriter.TryRead(chunk + (nint)(index % ChunkItems) * ItemSize, out nint obj) ? obj : 0;
-		}
-	}
+    public nint this[int index]
+    {
+        get
+        {
+            if (index < 0 || index >= Count)
+            {
+                return 0;
+            }
 
-	/// <summary>Every non-null object, reading each chunk in one go.</summary>
-	public IEnumerable<nint> Objects()
-	{
-		var chunkBytes = new byte[ChunkItems * ItemSize];
-		for (int c = 0; c < Chunks; c++)
-		{
-			if (!CodeWriter.TryRead(_chunkTable + (nint)c * sizeof(long), out nint chunk) || chunk == 0)
-				continue;
-			int items = Math.Min(ChunkItems, Count - c * ChunkItems);
-			if (!CodeWriter.TryRead(chunk, chunkBytes.AsSpan(0, items * ItemSize)))
-				continue;
-			for (int i = 0; i < items; i++)
-			{
-				nint obj = (nint)BitConverter.ToInt64(chunkBytes, i * ItemSize);
-				if (obj != 0)
-					yield return obj;
-			}
-		}
-	}
+            if (!CodeWriter.TryRead(_chunkTable + (nint)(index / ChunkItems) * sizeof(long), out nint chunk) || chunk == 0)
+            {
+                return 0;
+            }
+
+            return CodeWriter.TryRead(chunk + (nint)(index % ChunkItems) * ItemSize, out nint obj) ? obj : 0;
+        }
+    }
+
+    /// <summary>Every non-null object, reading each chunk in one go.</summary>
+    public IEnumerable<nint> Objects()
+    {
+        var chunkBytes = new byte[ChunkItems * ItemSize];
+        for (int c = 0; c < Chunks; c++)
+        {
+            if (!CodeWriter.TryRead(_chunkTable + (nint)c * sizeof(long), out nint chunk) || chunk == 0)
+            {
+                continue;
+            }
+
+            int items = Math.Min(ChunkItems, Count - c * ChunkItems);
+            if (!CodeWriter.TryRead(chunk, chunkBytes.AsSpan(0, items * ItemSize)))
+            {
+                continue;
+            }
+
+            for (int i = 0; i < items; i++)
+            {
+                nint obj = (nint)BitConverter.ToInt64(chunkBytes, i * ItemSize);
+                if (obj != 0)
+                {
+                    yield return obj;
+                }
+            }
+        }
+    }
 }
 
 /// <summary>
@@ -130,126 +146,191 @@ public sealed class ObjectArray
 /// </summary>
 public sealed class ObjectFinder(GameImage image, Log log, bool tryObjectArray)
 {
-	private readonly Dictionary<string, nint> _classes = new(StringComparer.Ordinal);
-	private readonly object _arrayLock = new();
-	private ObjectArray? _array;
-	private long _nextArrayAttempt;
-	private int _classNameIndex = -1;
+    private readonly Dictionary<string, nint> _classes = new(StringComparer.Ordinal);
+    private readonly object _arrayLock = new();
+    private ObjectArray? _array;
+    private long _nextArrayAttempt;
+    private int _classNameIndex = -1;
 
-	public bool UsesObjectArray => _array != null;
+    public bool UsesObjectArray => _array != null;
 
-	/// <summary>
-	/// The object array, opened on first use rather than at plugin load: the plugin loads before
-	/// the engine has created a single object, so validating then would always fail. A failed
-	/// attempt is retried a few seconds later; the heap scan covers the meantime.
-	/// </summary>
-	private ObjectArray? Array
-	{
-		get
-		{
-			if (_array != null || !tryObjectArray) return _array;
-			lock (_arrayLock)
-			{
-				long now = Environment.TickCount64;
-				if (_array == null && now >= _nextArrayAttempt)
-				{
-					_nextArrayAttempt = now + 5000;
-					_array = ObjectArray.Open(image, log);
-					if (_array == null) log.Warn("object array not usable yet; scanning the heap");
-				}
-				return _array;
-			}
-		}
-	}
+    /// <summary>
+    /// The object array, opened on first use rather than at plugin load: the plugin loads before
+    /// the engine has created a single object, so validating then would always fail. A failed
+    /// attempt is retried a few seconds later; the heap scan covers the meantime.
+    /// </summary>
+    private ObjectArray? Array
+    {
+        get
+        {
+            if (_array != null || !tryObjectArray)
+            {
+                return _array;
+            }
 
-	/// <summary>The UClass named <paramref name="className"/> (without its U/A prefix), or 0.</summary>
-	public nint FindClass(string className)
-	{
-		lock (_classes)
-			if (_classes.TryGetValue(className, out nint cached) && cached != 0)
-				return cached;
-		FName name = UE.FindName(className);
-		if (name.Index == 0) return 0;
-		if (_classNameIndex < 0) _classNameIndex = UE.FindName("Class").Index;
+            lock (_arrayLock)
+            {
+                long now = Environment.TickCount64;
+                if (_array == null && now >= _nextArrayAttempt)
+                {
+                    _nextArrayAttempt = now + 5000;
+                    _array = ObjectArray.Open(image, log);
+                    if (_array == null)
+                    {
+                        log.Warn("object array not usable yet; scanning the heap");
+                    }
+                }
+                return _array;
+            }
+        }
+    }
 
-		nint found = 0;
-		foreach (var h in Candidates(name.Index))
-		{
-			// A UClass's own class is "Class"; that separates the class from anything else that shares the name.
-			if (ObjectHeader.TryRead(h.ClassPrivate, out var cls) && cls.Name.Index == _classNameIndex)
-			{
-				found = h.Address;
-				break;
-			}
-		}
-		if (found != 0)
-			lock (_classes) _classes[className] = found;
-		return found;
-	}
+    /// <summary>The UClass named <paramref name="className"/> (without its U/A prefix), or 0.</summary>
+    public nint FindClass(string className)
+    {
+        lock (_classes)
+        {
+            if (_classes.TryGetValue(className, out nint cached) && cached != 0)
+            {
+                return cached;
+            }
+        }
 
-	/// <summary>Any live instance of <paramref name="uclass"/> or a subclass, skipping class default objects.</summary>
-	public nint FindInstanceOfClass(nint uclass)
-	{
-		if (uclass == 0) return 0;
-		foreach (var h in AllObjects())
-		{
-			if (h.IsDefaultObject || h.ClassPrivate == 0) continue;
-			if (h.ClassPrivate == uclass || Inherits(h.ClassPrivate, uclass))
-				return h.Address;
-		}
-		return 0;
-	}
+        FName name = UE.FindName(className);
+        if (name.Index == 0)
+        {
+            return 0;
+        }
 
-	public static bool Inherits(nint uclass, nint ancestor)
-	{
-		for (int depth = 0; depth < 20 && uclass != 0; depth++)
-		{
-			if (uclass == ancestor) return true;
-			if (!CodeWriter.TryRead(uclass + Mvs.StructSuperStruct, out uclass)) return false;
-		}
-		return false;
-	}
+        if (_classNameIndex < 0)
+        {
+            _classNameIndex = UE.FindName("Class").Index;
+        }
 
-	/// <summary>
-	/// The UFunction <paramref name="functionName"/> declared on <paramref name="className"/>.
-	/// Both names must match: several classes declare functions of the same name, and only a
-	/// real UFunction (by vtable) may be handed to ProcessEvent.
-	/// </summary>
-	public nint FindFunction(string className, string functionName, out nint ownerClass)
-	{
-		ownerClass = 0;
-		FName fn = UE.FindName(functionName), cls = UE.FindName(className);
-		if (fn.Index == 0 || cls.Index == 0) return 0;
-		nint vtNative = image.Address(Mvs.UFunctionVTableNativeRva), vtBlueprint = image.Address(Mvs.UFunctionVTableBlueprintRva);
-		foreach (var h in Candidates(fn.Index))
-		{
-			if (h.VTable != vtNative && h.VTable != vtBlueprint) continue;
-			if (!ObjectHeader.TryRead(h.Outer, out var outer) || outer.Name.Index != cls.Index) continue;
-			ownerClass = h.Outer;
-			return h.Address;
-		}
-		return 0;
-	}
+        nint found = 0;
+        foreach (var h in Candidates(name.Index))
+        {
+            // A UClass's own class is "Class"; that separates the class from anything else that shares the name.
+            if (ObjectHeader.TryRead(h.ClassPrivate, out var cls) && cls.Name.Index == _classNameIndex)
+            {
+                found = h.Address;
+                break;
+            }
+        }
+        if (found != 0)
+        {
+            lock (_classes)
+            {
+                _classes[className] = found;
+            }
+        }
 
-	private IEnumerable<ObjectHeader> Candidates(int nameIndex)
-	{
-		foreach (var h in AllObjects())
-			if (h.Name.Index == nameIndex && h.Name.Number == 0)
-				yield return h;
-	}
+        return found;
+    }
 
-	private IEnumerable<ObjectHeader> AllObjects()
-	{
-		if (Array is { } array)
-		{
-			foreach (nint obj in array.Objects())
-				if (ObjectHeader.TryRead(obj, out var h) && image.Contains(h.VTable))
-					yield return h;
-			yield break;
-		}
-		foreach (var h in HeapScanner.Objects(image))
-			yield return h;
-	}
+    /// <summary>Any live instance of <paramref name="uclass"/> or a subclass, skipping class default objects.</summary>
+    public nint FindInstanceOfClass(nint uclass)
+    {
+        if (uclass == 0)
+        {
+            return 0;
+        }
+
+        foreach (var h in AllObjects())
+        {
+            if (h.IsDefaultObject || h.ClassPrivate == 0)
+            {
+                continue;
+            }
+
+            if (h.ClassPrivate == uclass || Inherits(h.ClassPrivate, uclass))
+            {
+                return h.Address;
+            }
+        }
+        return 0;
+    }
+
+    public static bool Inherits(nint uclass, nint ancestor)
+    {
+        for (int depth = 0; depth < 20 && uclass != 0; depth++)
+        {
+            if (uclass == ancestor)
+            {
+                return true;
+            }
+
+            if (!CodeWriter.TryRead(uclass + Mvs.StructSuperStruct, out uclass))
+            {
+                return false;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// The UFunction <paramref name="functionName"/> declared on <paramref name="className"/>.
+    /// Both names must match: several classes declare functions of the same name, and only a
+    /// real UFunction (by vtable) may be handed to ProcessEvent.
+    /// </summary>
+    public nint FindFunction(string className, string functionName, out nint ownerClass)
+    {
+        ownerClass = 0;
+        FName fn = UE.FindName(functionName), cls = UE.FindName(className);
+        if (fn.Index == 0 || cls.Index == 0)
+        {
+            return 0;
+        }
+
+        nint vtNative = image.Address(Mvs.UFunctionVTableNativeRva), vtBlueprint = image.Address(Mvs.UFunctionVTableBlueprintRva);
+        foreach (var h in Candidates(fn.Index))
+        {
+            if (h.VTable != vtNative && h.VTable != vtBlueprint)
+            {
+                continue;
+            }
+
+            if (!ObjectHeader.TryRead(h.Outer, out var outer) || outer.Name.Index != cls.Index)
+            {
+                continue;
+            }
+
+            ownerClass = h.Outer;
+            return h.Address;
+        }
+        return 0;
+    }
+
+    private IEnumerable<ObjectHeader> Candidates(int nameIndex)
+    {
+        foreach (var h in AllObjects())
+        {
+            if (h.Name.Index == nameIndex && h.Name.Number == 0)
+            {
+                yield return h;
+            }
+        }
+    }
+
+    private IEnumerable<ObjectHeader> AllObjects()
+    {
+        if (Array is { } array)
+        {
+            foreach (nint obj in array.Objects())
+            {
+                if (ObjectHeader.TryRead(obj, out var h) && image.Contains(h.VTable))
+                {
+                    yield return h;
+                }
+            }
+
+            yield break;
+        }
+        foreach (var h in HeapScanner.Objects(image))
+        {
+            yield return h;
+        }
+    }
 }
 
 /// <summary>
@@ -259,40 +340,52 @@ public sealed class ObjectFinder(GameImage image, Log log, bool tryObjectArray)
 /// </summary>
 public static class HeapScanner
 {
-	private const uint MEM_COMMIT = 0x1000;
-	private const uint PAGE_READONLY = 0x02;
-	private const uint PAGE_READWRITE = 0x04;
+    private const uint MEM_COMMIT = 0x1000;
+    private const uint PAGE_READONLY = 0x02;
+    private const uint PAGE_READWRITE = 0x04;
 
-	public static IEnumerable<ObjectHeader> Objects(GameImage image)
-	{
-		Native.Kernel32.GetSystemInfo(out var si);
-		nint address = si.MinimumApplicationAddress;
-		nint max = si.MaximumApplicationAddress;
-		var buffer = new byte[1 << 20];
-		while (address < max)
-		{
-			if (Native.Kernel32.VirtualQuery(address, out var mbi, (nuint)System.Runtime.InteropServices.Marshal.SizeOf<Native.MEMORY_BASIC_INFORMATION>()) == 0)
-				break;
-			nint next = (nint)((nuint)mbi.BaseAddress + mbi.RegionSize);
-			bool candidate = mbi.State == MEM_COMMIT && (mbi.Protect == PAGE_READWRITE || mbi.Protect == PAGE_READONLY)
-				&& mbi.RegionSize >= 0x100 && mbi.RegionSize < 0x10000000 && !image.Contains(mbi.BaseAddress);
-			if (candidate)
-			{
-				for (nint at = mbi.BaseAddress; at < next; at += buffer.Length)
-				{
-					int length = (int)Math.Min(buffer.Length, next - at);
-					if (!CodeWriter.TryRead(at, buffer.AsSpan(0, length)))
-						break;
-					for (int i = 0; i + 0x30 <= length; i += 8)
-					{
-						nint vtable = (nint)BitConverter.ToInt64(buffer, i);
-						if (image.Contains(vtable))
-							yield return ObjectHeader.FromBytes(at + i, buffer.AsSpan(i, 0x30));
-					}
-				}
-			}
-			if (next <= address) break;
-			address = next;
-		}
-	}
+    public static IEnumerable<ObjectHeader> Objects(GameImage image)
+    {
+        Native.Kernel32.GetSystemInfo(out var si);
+        nint address = si.MinimumApplicationAddress;
+        nint max = si.MaximumApplicationAddress;
+        var buffer = new byte[1 << 20];
+        while (address < max)
+        {
+            if (Native.Kernel32.VirtualQuery(address, out var mbi, (nuint)System.Runtime.InteropServices.Marshal.SizeOf<Native.MEMORY_BASIC_INFORMATION>()) == 0)
+            {
+                break;
+            }
+
+            nint next = (nint)((nuint)mbi.BaseAddress + mbi.RegionSize);
+            bool candidate = mbi.State == MEM_COMMIT && (mbi.Protect == PAGE_READWRITE || mbi.Protect == PAGE_READONLY)
+                && mbi.RegionSize >= 0x100 && mbi.RegionSize < 0x10000000 && !image.Contains(mbi.BaseAddress);
+            if (candidate)
+            {
+                for (nint at = mbi.BaseAddress; at < next; at += buffer.Length)
+                {
+                    int length = (int)Math.Min(buffer.Length, next - at);
+                    if (!CodeWriter.TryRead(at, buffer.AsSpan(0, length)))
+                    {
+                        break;
+                    }
+
+                    for (int i = 0; i + 0x30 <= length; i += 8)
+                    {
+                        nint vtable = (nint)BitConverter.ToInt64(buffer, i);
+                        if (image.Contains(vtable))
+                        {
+                            yield return ObjectHeader.FromBytes(at + i, buffer.AsSpan(i, 0x30));
+                        }
+                    }
+                }
+            }
+            if (next <= address)
+            {
+                break;
+            }
+
+            address = next;
+        }
+    }
 }

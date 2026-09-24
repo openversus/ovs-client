@@ -9,46 +9,61 @@ namespace OpenVersus.Game;
 /// </summary>
 public static class GameFunctions
 {
-	private static readonly Dictionary<string, GameFunction> s_byName = new(StringComparer.Ordinal);
-	private static readonly object s_lock = new();
+    private static readonly Dictionary<string, GameFunction> s_byName = new(StringComparer.Ordinal);
+    private static readonly object s_lock = new();
 
-	/// <summary>The RVA of UObject::ProcessEvent in the final build (Dumper-7 OffsetsInfo.json).</summary>
-	public const uint ProcessEventRva = 0x02D3D810;
-	/// <summary>UMvsNotificationManager getter in the final build, used if its pattern fails.</summary>
-	public const uint GetNotificationManagerRva = 0x028B1D60;
+    /// <summary>The RVA of UObject::ProcessEvent in the final build (Dumper-7 OffsetsInfo.json).</summary>
+    public const uint ProcessEventRva = 0x02D3D810;
+    /// <summary>UMvsNotificationManager getter in the final build, used if its pattern fails.</summary>
+    public const uint GetNotificationManagerRva = 0x028B1D60;
 
-	public static GameFunction Register(GameFunction function)
-	{
-		lock (s_lock)
-			s_byName[function.Name] = function;
-		return function;
-	}
+    public static GameFunction Register(GameFunction function)
+    {
+        lock (s_lock)
+        {
+            s_byName[function.Name] = function;
+        }
 
-	public static GameFunction Register(string name, nint address, FunctionSource source, string origin, string nativeDeclaration, GameImage? image = null) =>
-		Register(new GameFunction
-		{
-			Name = name, Address = address, Source = source, Origin = origin, Image = image,
-			Signature = new FunctionSignature { Native = new NativeSignature(nativeDeclaration) },
-		});
+        return function;
+    }
 
-	/// <summary>The destination of the call or jmp at <paramref name="instruction"/>, registered under <paramref name="name"/>.</summary>
-	public static GameFunction FromCallSite(string name, nint instruction, string origin, string nativeDeclaration, GameImage image) =>
-		Register(name, CallSite.Destination(instruction), FunctionSource.CallSite, origin, nativeDeclaration, image);
+    public static GameFunction Register(string name, nint address, FunctionSource source, string origin, string nativeDeclaration, GameImage? image = null) =>
+        Register(new GameFunction
+        {
+            Name = name,
+            Address = address,
+            Source = source,
+            Origin = origin,
+            Image = image,
+            Signature = new FunctionSignature { Native = new NativeSignature(nativeDeclaration) },
+        });
 
-	public static GameFunction FromRva(string name, uint rva, string nativeDeclaration, GameImage image) =>
-		Register(name, image.Address(rva), FunctionSource.Rva, $"rva 0x{rva:X}", nativeDeclaration, image);
+    /// <summary>The destination of the call or jmp at <paramref name="instruction"/>, registered under <paramref name="name"/>.</summary>
+    public static GameFunction FromCallSite(string name, nint instruction, string origin, string nativeDeclaration, GameImage image) =>
+        Register(name, CallSite.Destination(instruction), FunctionSource.CallSite, origin, nativeDeclaration, image);
 
-	public static GameFunction? Find(string name)
-	{
-		lock (s_lock)
-			return s_byName.TryGetValue(name, out var f) ? f : null;
-	}
+    public static GameFunction FromRva(string name, uint rva, string nativeDeclaration, GameImage image) =>
+        Register(name, image.Address(rva), FunctionSource.Rva, $"rva 0x{rva:X}", nativeDeclaration, image);
 
-	/// <summary>The address by name, or 0. For code that would rather not branch on a null.</summary>
-	public static nint Address(string name) => Find(name)?.Address ?? 0;
+    public static GameFunction? Find(string name)
+    {
+        lock (s_lock)
+        {
+            return s_byName.TryGetValue(name, out var f) ? f : null;
+        }
+    }
 
-	public static IReadOnlyList<GameFunction> All
-	{
-		get { lock (s_lock) return s_byName.Values.OrderBy(f => f.Name, StringComparer.Ordinal).ToList(); }
-	}
+    /// <summary>The address by name, or 0. For code that would rather not branch on a null.</summary>
+    public static nint Address(string name) => Find(name)?.Address ?? 0;
+
+    public static IReadOnlyList<GameFunction> All
+    {
+        get
+        {
+            lock (s_lock)
+            {
+                return s_byName.Values.OrderBy(f => f.Name, StringComparer.Ordinal).ToList();
+            }
+        }
+    }
 }

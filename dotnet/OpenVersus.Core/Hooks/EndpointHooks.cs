@@ -12,117 +12,126 @@ namespace OpenVersus.Hooks;
 /// </summary>
 public static unsafe class EndpointHooks
 {
-	public const string GetEndpointKeyValueName = "GetEndpointKeyValue";
-	public const string SetFStringValueName = "SetFStringValue";
+    public const string GetEndpointKeyValueName = "GetEndpointKeyValue";
+    public const string SetFStringValueName = "SetFStringValue";
 
-	private static delegate* unmanaged<nint, byte*, nint> s_getEndpointKeyValue;
-	private static delegate* unmanaged<nint, char*, nint> s_setFStringValue;
-	private static byte* s_gameUrlUtf8;
-	private static char* s_prodUrlWide;
-	private static string s_gameUrl = "";
-	private static string s_prodUrl = "";
-	private static Log? s_log;
+    private static delegate* unmanaged<nint, byte*, nint> s_getEndpointKeyValue;
+    private static delegate* unmanaged<nint, char*, nint> s_setFStringValue;
+    private static byte* s_gameUrlUtf8;
+    private static char* s_prodUrlWide;
+    private static string s_gameUrl = "";
+    private static string s_prodUrl = "";
+    private static Log? s_log;
 
-	public static bool ApplyGame(HookContext c)
-	{
-		s_log = c.Log;
-		c.Log.Info("==OverrideGameEndpointsData==");
-		if (string.IsNullOrEmpty(c.Settings.ServerUrl))
-		{
-			c.Log.Warn("Server Url is empty or not specified. Skipping!");
-			return false;
-		}
-		var hit = c.Patterns.Find("EndpointLoader", c.Settings.Pattern("pEndpointLoader"));
-		if (!hit.Found) return false;
+    public static bool ApplyGame(HookContext c)
+    {
+        s_log = c.Log;
+        c.Log.Info("==OverrideGameEndpointsData==");
+        if (string.IsNullOrEmpty(c.Settings.ServerUrl))
+        {
+            c.Log.Warn("Server Url is empty or not specified. Skipping!");
+            return false;
+        }
+        var hit = c.Patterns.Find("EndpointLoader", c.Settings.Pattern("pEndpointLoader"));
+        if (!hit.Found)
+        {
+            return false;
+        }
 
-		nint site = hit.Address + 0x0A;
-		nint original = CallSite.Redirect(site, (nint)(delegate* unmanaged<nint, nint, nint>)&OverrideGameEndpoint, out string? error);
-		if (error != null)
-		{
-			c.Log.Error($"EndpointLoader: {error}");
-			return false;
-		}
-		s_getEndpointKeyValue = (delegate* unmanaged<nint, byte*, nint>)original;
-		GameFunctions.Register(GetEndpointKeyValueName, original, FunctionSource.CallSite, $"call at 0x{site:X}", "const char** GetEndpointKeyValue(int64_t* dest, const char* value)", c.Image);
+        nint site = hit.Address + 0x0A;
+        nint original = CallSite.Redirect(site, (nint)(delegate* unmanaged<nint, nint, nint>)&OverrideGameEndpoint, out string? error);
+        if (error != null)
+        {
+            c.Log.Error($"EndpointLoader: {error}");
+            return false;
+        }
+        s_getEndpointKeyValue = (delegate* unmanaged<nint, byte*, nint>)original;
+        GameFunctions.Register(GetEndpointKeyValueName, original, FunctionSource.CallSite, $"call at 0x{site:X}", "const char** GetEndpointKeyValue(int64_t* dest, const char* value)", c.Image);
 
-		// The C++ passed the game URL exactly as configured, trailing slash included (its
-		// strip was dead code), so that is what production has been running with.
-		s_gameUrl = c.Settings.ServerUrl;
-		s_gameUrlUtf8 = Pin(Encoding.UTF8.GetBytes(s_gameUrl + "\0"));
-		c.Log.Success("EndpointLoader Proxied");
-		return true;
-	}
+        // The C++ passed the game URL exactly as configured, trailing slash included (its
+        // strip was dead code), so that is what production has been running with.
+        s_gameUrl = c.Settings.ServerUrl;
+        s_gameUrlUtf8 = Pin(Encoding.UTF8.GetBytes(s_gameUrl + "\0"));
+        c.Log.Success("EndpointLoader Proxied");
+        return true;
+    }
 
-	public static bool ApplyProd(HookContext c)
-	{
-		s_log = c.Log;
-		c.Log.Info("==OverrideProdEndpointsData==");
-		if (string.IsNullOrEmpty(c.Settings.ProdServerUrl))
-		{
-			c.Log.Warn("Prod Server Url is empty or not specified. Skipping!");
-			return false;
-		}
-		var hit = c.Patterns.Find("ProdEndpointLoader", c.Settings.Pattern("pProdEndpointLoader"));
-		if (!hit.Found) return false;
+    public static bool ApplyProd(HookContext c)
+    {
+        s_log = c.Log;
+        c.Log.Info("==OverrideProdEndpointsData==");
+        if (string.IsNullOrEmpty(c.Settings.ProdServerUrl))
+        {
+            c.Log.Warn("Prod Server Url is empty or not specified. Skipping!");
+            return false;
+        }
+        var hit = c.Patterns.Find("ProdEndpointLoader", c.Settings.Pattern("pProdEndpointLoader"));
+        if (!hit.Found)
+        {
+            return false;
+        }
 
-		nint site = hit.Address + 0x0A;
-		nint original = CallSite.Redirect(site, (nint)(delegate* unmanaged<nint, nint, nint>)&OverrideProdEndpoint, out string? error);
-		if (error != null)
-		{
-			c.Log.Error($"ProdEndpointLoader: {error}");
-			return false;
-		}
-		s_setFStringValue = (delegate* unmanaged<nint, char*, nint>)original;
-		GameFunctions.Register(SetFStringValueName, original, FunctionSource.CallSite, $"call at 0x{site:X}", "int64_t* SetFStringValue(int64_t* fstring, const wchar_t* value)", c.Image);
+        nint site = hit.Address + 0x0A;
+        nint original = CallSite.Redirect(site, (nint)(delegate* unmanaged<nint, nint, nint>)&OverrideProdEndpoint, out string? error);
+        if (error != null)
+        {
+            c.Log.Error($"ProdEndpointLoader: {error}");
+            return false;
+        }
+        s_setFStringValue = (delegate* unmanaged<nint, char*, nint>)original;
+        GameFunctions.Register(SetFStringValueName, original, FunctionSource.CallSite, $"call at 0x{site:X}", "int64_t* SetFStringValue(int64_t* fstring, const wchar_t* value)", c.Image);
 
-		s_prodUrl = c.Settings.ProdServerUrl.TrimEnd('/') + "/";
-		s_prodUrlWide = PinWide(s_prodUrl);
-		c.Log.Success("ProdEndpointLoader Proxied");
-		return true;
-	}
+        s_prodUrl = c.Settings.ProdServerUrl.TrimEnd('/') + "/";
+        s_prodUrlWide = PinWide(s_prodUrl);
+        c.Log.Success("ProdEndpointLoader Proxied");
+        return true;
+    }
 
-	[UnmanagedCallersOnly]
-	private static nint OverrideGameEndpoint(nint dest, nint endpoint) =>
-		HookGuard.Run("OverrideGameEndpoint", (dest, endpoint), static s =>
-		{
-			if (s_gameUrlUtf8 != null)
-			{
-				s_log?.Info($"Rerouting traffic from vanilla HTTP/WS server \"{ReadUtf8(s.endpoint)}\" to \"{s_gameUrl}\"!");
-				s_getEndpointKeyValue(s.dest, s_gameUrlUtf8);
-				return s.dest;
-			}
-			return s_getEndpointKeyValue(s.dest, (byte*)s.endpoint);
-		}, dest);
+    [UnmanagedCallersOnly]
+    private static nint OverrideGameEndpoint(nint dest, nint endpoint) =>
+        HookGuard.Run("OverrideGameEndpoint", (dest, endpoint), static s =>
+        {
+            if (s_gameUrlUtf8 != null)
+            {
+                s_log?.Info($"Rerouting traffic from vanilla HTTP/WS server \"{ReadUtf8(s.endpoint)}\" to \"{s_gameUrl}\"!");
+                s_getEndpointKeyValue(s.dest, s_gameUrlUtf8);
+                return s.dest;
+            }
+            return s_getEndpointKeyValue(s.dest, (byte*)s.endpoint);
+        }, dest);
 
-	[UnmanagedCallersOnly]
-	private static nint OverrideProdEndpoint(nint fstring, nint endpoint) =>
-		HookGuard.Run("OverrideProdEndpoint", (fstring, endpoint), static s =>
-		{
-			if (s_prodUrlWide != null)
-			{
-				s_log?.Info($"Rerouting traffic from vanilla Prod HTTP/WS server \"{ReadWide(s.endpoint)}\" to \"{s_prodUrl}\"!");
-				s_setFStringValue(s.fstring, s_prodUrlWide);
-			}
-			else
-				s_setFStringValue(s.fstring, (char*)s.endpoint);
-			return s.fstring;
-		}, fstring);
+    [UnmanagedCallersOnly]
+    private static nint OverrideProdEndpoint(nint fstring, nint endpoint) =>
+        HookGuard.Run("OverrideProdEndpoint", (fstring, endpoint), static s =>
+        {
+            if (s_prodUrlWide != null)
+            {
+                s_log?.Info($"Rerouting traffic from vanilla Prod HTTP/WS server \"{ReadWide(s.endpoint)}\" to \"{s_prodUrl}\"!");
+                s_setFStringValue(s.fstring, s_prodUrlWide);
+            }
+            else
+            {
+                s_setFStringValue(s.fstring, (char*)s.endpoint);
+            }
 
-	private static string ReadUtf8(nint p) => p == 0 ? "" : Marshal.PtrToStringUTF8(p) ?? "";
-	private static string ReadWide(nint p) => p == 0 ? "" : Marshal.PtrToStringUni(p) ?? "";
+            return s.fstring;
+        }, fstring);
 
-	private static byte* Pin(byte[] bytes)
-	{
-		byte* p = (byte*)NativeMemory.Alloc((nuint)bytes.Length);
-		bytes.CopyTo(new Span<byte>(p, bytes.Length));
-		return p;
-	}
+    private static string ReadUtf8(nint p) => p == 0 ? "" : Marshal.PtrToStringUTF8(p) ?? "";
+    private static string ReadWide(nint p) => p == 0 ? "" : Marshal.PtrToStringUni(p) ?? "";
 
-	private static char* PinWide(string text)
-	{
-		char* p = (char*)NativeMemory.Alloc((nuint)((text.Length + 1) * sizeof(char)));
-		text.CopyTo(new Span<char>(p, text.Length));
-		p[text.Length] = '\0';
-		return p;
-	}
+    private static byte* Pin(byte[] bytes)
+    {
+        byte* p = (byte*)NativeMemory.Alloc((nuint)bytes.Length);
+        bytes.CopyTo(new Span<byte>(p, bytes.Length));
+        return p;
+    }
+
+    private static char* PinWide(string text)
+    {
+        char* p = (char*)NativeMemory.Alloc((nuint)((text.Length + 1) * sizeof(char)));
+        text.CopyTo(new Span<char>(p, text.Length));
+        p[text.Length] = '\0';
+        return p;
+    }
 }

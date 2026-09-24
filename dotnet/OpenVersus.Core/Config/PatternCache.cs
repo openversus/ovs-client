@@ -8,24 +8,26 @@ namespace OpenVersus.Config;
 /// </summary>
 public sealed class PatternCache
 {
-	public const string FileName = "PatternsCache.cache";
-	private readonly IniFile _ini;
-	private readonly string? _section;
+    public const string FileName = "PatternsCache.cache";
+    private readonly IniFile _ini;
+    private readonly string? _section;
 
-	public PatternCache(string path, ulong textHash, string version)
-	{
-		_ini = new IniFile(path);
-		_section = textHash == 0 ? null : $"{(uint)(textHash >> 32):X8}.{version}";
-	}
+    public PatternCache(string path, ulong textHash, string version)
+    {
+        _ini = new IniFile(path);
+        _section = textHash == 0 ? null : $"{(uint)(textHash >> 32):X8}.{version}";
+    }
 
-	public string? Section => _section;
+    public string? Section => _section;
 
-	/// <summary>The cached RVA, or 0 when unknown (a miss was cached as 0 too, as the C++ did).</summary>
-	public uint Load(string pattern) => _section == null ? 0 : (uint)_ini.ReadUInt64(_section, pattern, 0);
+    /// <summary>The cached RVA, or 0 when unknown (a miss was cached as 0 too, as the C++ did).</summary>
+    public uint Load(string pattern) => _section == null ? 0 : (uint)_ini.ReadUInt64(_section, pattern, 0);
 
-	public void Save(string pattern, uint rva)
-	{
-		if (_section != null)
-			_ini.WriteUInt64(_section, pattern, rva);
-	}
+    public void Save(string pattern, uint rva)
+    {
+        if (_section != null)
+        {
+            _ini.WriteUInt64(_section, pattern, rva);
+        }
+    }
 }

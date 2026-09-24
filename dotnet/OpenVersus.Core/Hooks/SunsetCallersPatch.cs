@@ -12,44 +12,62 @@ namespace OpenVersus.Hooks;
 /// </summary>
 public static class SunsetCallersPatch
 {
-	public const int ExpectedSites = 146;
+    public const int ExpectedSites = 146;
 
-	public static bool Apply(HookContext c)
-	{
-		c.Log.Info("==Sunset Callers==");
-		if (SunsetPatch.FunctionRva == 0)
-		{
-			c.Log.Error("SunsetCallers: the sunset function is not known (SunsetDate must be enabled and found first)");
-			return false;
-		}
-		nint target = c.Image.Address(SunsetPatch.FunctionRva);
-		var sites = new List<(nint Address, bool Jump)>();
-		foreach (var section in c.Image.Sections)
-		{
-			if (!section.IsExecutable()) continue;
-			ReadOnlySpan<byte> bytes = c.Image.Bytes.Slice((int)section.Rva, (int)Math.Min(section.VirtualSize, (uint)(c.Image.Size - section.Rva)));
-			for (int i = 0; i + CallSite.Length <= bytes.Length; i++)
-			{
-				byte op = bytes[i];
-				if (op is not (CallSite.CallOpcode or CallSite.JumpOpcode)) continue;
-				nint at = c.Image.Address(section.Rva + (uint)i);
-				if (at + CallSite.Length + BitConverter.ToInt32(bytes[(i + 1)..]) == target)
-					sites.Add((at, op == CallSite.JumpOpcode));
-			}
-		}
-		c.Log.Info($"SunsetCallers: {sites.Count} sites found ({sites.Count(s => s.Jump)} tail jumps); expected {ExpectedSites}");
-		if (sites.Count == 0)
-			return false;
+    public static bool Apply(HookContext c)
+    {
+        c.Log.Info("==Sunset Callers==");
+        if (SunsetPatch.FunctionRva == 0)
+        {
+            c.Log.Error("SunsetCallers: the sunset function is not known (SunsetDate must be enabled and found first)");
+            return false;
+        }
+        nint target = c.Image.Address(SunsetPatch.FunctionRva);
+        var sites = new List<(nint Address, bool Jump)>();
+        foreach (var section in c.Image.Sections)
+        {
+            if (!section.IsExecutable())
+            {
+                continue;
+            }
 
-		int ok = 0;
-		foreach (var (at, jump) in sites)
-		{
-			byte[] expected = CodeWriter.Read(at, CallSite.Length);
-			string? error = CodeWriter.WriteIf(at, expected, jump ? [0x31, 0xC0, 0xC3, 0x90, 0x90] : [0x31, 0xC0, 0x90, 0x90, 0x90], code: true);
-			if (error != null) c.Log.Error($"SunsetCallers: {error}");
-			else ok++;
-		}
-		c.Log.Success($"SunsetCallers: {ok}/{sites.Count} sites patched");
-		return ok == sites.Count;
-	}
+            ReadOnlySpan<byte> bytes = c.Image.Bytes.Slice((int)section.Rva, (int)Math.Min(section.VirtualSize, (uint)(c.Image.Size - section.Rva)));
+            for (int i = 0; i + CallSite.Length <= bytes.Length; i++)
+            {
+                byte op = bytes[i];
+                if (op is not (CallSite.CallOpcode or CallSite.JumpOpcode))
+                {
+                    continue;
+                }
+
+                nint at = c.Image.Address(section.Rva + (uint)i);
+                if (at + CallSite.Length + BitConverter.ToInt32(bytes[(i + 1)..]) == target)
+                {
+                    sites.Add((at, op == CallSite.JumpOpcode));
+                }
+            }
+        }
+        c.Log.Info($"SunsetCallers: {sites.Count} sites found ({sites.Count(s => s.Jump)} tail jumps); expected {ExpectedSites}");
+        if (sites.Count == 0)
+        {
+            return false;
+        }
+
+        int ok = 0;
+        foreach (var (at, jump) in sites)
+        {
+            byte[] expected = CodeWriter.Read(at, CallSite.Length);
+            string? error = CodeWriter.WriteIf(at, expected, jump ? [0x31, 0xC0, 0xC3, 0x90, 0x90] : [0x31, 0xC0, 0x90, 0x90, 0x90], code: true);
+            if (error != null)
+            {
+                c.Log.Error($"SunsetCallers: {error}");
+            }
+            else
+            {
+                ok++;
+            }
+        }
+        c.Log.Success($"SunsetCallers: {ok}/{sites.Count} sites patched");
+        return ok == sites.Count;
+    }
 }
