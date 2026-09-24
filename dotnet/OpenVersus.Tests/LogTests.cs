@@ -10,17 +10,21 @@ public class LogTests
         string dir = Path.Combine(Path.GetTempPath(), "ovs-logtest-" + Guid.NewGuid().ToString("N"));
         try
         {
-            // A "previous run" that ended without Close: a file with a stamped first line.
+            // A "previous run" that ended without Close: a file with a stamped first line. The
+            // stamp is an hour ago, so retention (a week) never touches it however old this test gets.
             Directory.CreateDirectory(dir);
             string running = Path.Combine(dir, "OpenVersus.log");
-            File.WriteAllText(running, "2026-09-23 16:26:28.846 [NFO] On Attach Initialize\n2026-09-23 16:26:29.001 [DBG] something\n");
+            DateTime previous = DateTime.Now.AddHours(-1);
+            string previousStamp = previous.ToString("yyyy-MM-dd HH:mm:ss.fff", System.Globalization.CultureInfo.InvariantCulture);
+            string previousArchive = Path.Combine(dir, $"OpenVersus_{previous:yyyy-MM-dd-HH.mm.ss}.log");
+            File.WriteAllText(running, $"{previousStamp} [NFO] On Attach Initialize\n{previousStamp} [DBG] something\n");
 
             using (var log = Log.OpenSession(dir, "OpenVersus"))
             {
                 log.Info("hello");
                 Assert.True(log.Flush());
-                Assert.True(File.Exists(Path.Combine(dir, "OpenVersus_2026-09-23-16.26.28.log")), "previous run not archived");
-                Assert.Contains("something", File.ReadAllText(Path.Combine(dir, "OpenVersus_2026-09-23-16.26.28.log")));
+                Assert.True(File.Exists(previousArchive), "previous run not archived");
+                Assert.Contains("something", File.ReadAllText(previousArchive));
                 string text = File.ReadAllText(running);
                 Assert.Contains("[NFO] hello", text);
                 Assert.DoesNotContain("something", text);
@@ -36,6 +40,88 @@ public class LogTests
             try
             {
                 Directory.Delete(dir, true);
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    [Fact]
+    public void ArchivesOlderThanAWeekAreCompressedAndTheRestStayHot()
+    {
+        string dir = Directory.CreateTempSubdirectory("ovs-logtest-").FullName;
+        try
+        {
+            var now = new DateTime(2026, 9, 24, 12, 0, 0);
+            string old = Path.Combine(dir, "OpenVersus_2026-09-10-08.00.00.log");
+            string edge = Path.Combine(dir, "OpenVersus_2026-09-17-11.59.59.log");
+            string fresh = Path.Combine(dir, "OpenVersus_2026-09-20-08.00.00.log");
+            string unnamed = Path.Combine(dir, "OpenVersus_not-a-stamp.log");
+            string running = Path.Combine(dir, "OpenVersus.log");
+            string body = string.Concat(Enumerable.Repeat("2026-09-10 08:00:00.000 [NFO] a line that repeats so zstd has something to do\n", 200));
+            foreach (string f in new[] { old, edge, fresh, unnamed, running })
+            {
+                File.WriteAllText(f, body);
+            }
+
+            File.SetLastWriteTime(unnamed, now.AddDays(-30));
+            File.SetLastWriteTime(old, now.AddDays(-14));
+
+            var compressed = Log.CompressColdArchives(dir, "OpenVersus", now);
+
+            Assert.Equal(3, compressed.Count);
+            Assert.False(File.Exists(old));
+            Assert.False(File.Exists(edge));
+            Assert.False(File.Exists(unnamed));
+            Assert.True(File.Exists(fresh));
+            Assert.True(File.Exists(running));
+            Assert.True(File.Exists(old + ".zst"));
+            Assert.True(new FileInfo(old + ".zst").Length < body.Length / 4, "not much of a compression");
+            Assert.Equal(now.AddDays(-14), File.GetLastWriteTime(old + ".zst"));
+
+            using var input = File.OpenRead(old + ".zst");
+            using var zstd = new ZstdSharp.DecompressionStream(input);
+            using var reader = new StreamReader(zstd);
+            Assert.Equal(body, reader.ReadToEnd());
+
+            // A second pass finds nothing left to do.
+            Assert.Empty(Log.CompressColdArchives(dir, "OpenVersus", now));
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void VerbsGoThroughILoggerAndSuccessIsGreenOnTheConsole()
+    {
+        string path = Path.Combine(Path.GetTempPath(), "ovs-logtest-" + Guid.NewGuid().ToString("N") + ".log");
+        try
+        {
+            using var log = new Log(path);
+            var console = new List<string>();
+            log.ConsoleWriter = console.Add;
+            ILogger logger = log;
+            logger.Success("patched");
+            logger.Info("""body {"steamId":"1"} with {braces}""");
+            Assert.True(log.Flush());
+            string text = File.ReadAllText(path);
+            Assert.Contains("[NFO] patched", text);
+            Assert.Contains("""body {"steamId":"1"} with {braces}""", text);
+            Assert.Contains(console, l => l.Contains("\x1b[32mpatched"));
+            Assert.DoesNotContain(console, l => l.Contains("\x1b[32mbody"));
+
+            var list = new ListLogger();
+            list.Warn("through any ILogger");
+            Assert.Equal(["through any ILogger"], list.Lines);
+        }
+        finally
+        {
+            try
+            {
+                File.Delete(path);
             }
             catch
             {
@@ -78,12 +164,13 @@ public class LogTests
         Assert.Null(note);
     }
 
-    [Fact]
+    [SkippableFact]
     public void AnUnwritableLogsDirectoryFallsBackToThePluginDirectory()
     {
+        UnixPermissions.SkipUnlessUnix();
         string plugin = Directory.CreateTempSubdirectory("ovs-logtest-").FullName;
         string locked = Directory.CreateTempSubdirectory("ovs-logtest-").FullName;
-        File.SetUnixFileMode(locked, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+        UnixPermissions.MakeReadOnly(locked);
         try
         {
             using var log = Log.OpenSession(Path.Combine(locked, "logs"), "OpenVersus", fallbackDirectory: plugin);
@@ -99,17 +186,18 @@ public class LogTests
         }
         finally
         {
-            File.SetUnixFileMode(locked, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            UnixPermissions.Restore(locked);
             Directory.Delete(locked, recursive: true);
             Directory.Delete(plugin, recursive: true);
         }
     }
 
-    [Fact]
+    [SkippableFact]
     public void AnUnwritableDirectoryStillGivesAWorkingLog()
     {
+        UnixPermissions.SkipUnlessUnix();
         string dir = Directory.CreateTempSubdirectory("ovs-logtest-").FullName;
-        File.SetUnixFileMode(dir, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+        UnixPermissions.MakeReadOnly(dir);
         try
         {
             using var log = Log.OpenSession(Path.Combine(dir, "logs"), "OpenVersus", fallbackDirectory: Path.Combine(dir, "also-locked"));
@@ -126,7 +214,7 @@ public class LogTests
         }
         finally
         {
-            File.SetUnixFileMode(dir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            UnixPermissions.Restore(dir);
             Directory.Delete(dir, recursive: true);
         }
     }

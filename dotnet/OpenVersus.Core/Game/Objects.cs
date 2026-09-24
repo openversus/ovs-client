@@ -1,5 +1,6 @@
 using OpenVersus.Memory;
 using OpenVersus.Native;
+using Microsoft.Extensions.Logging;
 
 namespace OpenVersus.Game;
 
@@ -55,7 +56,7 @@ public sealed class ObjectArray
         Chunks = chunks;
     }
 
-    public static ObjectArray? Open(GameImage image, Log log)
+    public static ObjectArray? Open(GameImage image, ILogger log)
     {
         nint objObjects = image.Address(GUObjectArrayRva) + ObjObjectsOffset;
         if (!CodeWriter.TryRead(objObjects, out nint chunkTable) ||
@@ -145,7 +146,7 @@ public sealed class ObjectArray
 /// validated, otherwise by scanning readable heap regions for objects, as the C++ poller did.
 /// Every dereference is a guarded read.
 /// </summary>
-public sealed class ObjectFinder(GameImage image, Log log, bool tryObjectArray)
+public sealed class ObjectFinder(GameImage image, ILogger log, bool tryObjectArray)
 {
     private readonly Dictionary<string, nint> _classes = new(StringComparer.Ordinal);
     private readonly object _arrayLock = new();

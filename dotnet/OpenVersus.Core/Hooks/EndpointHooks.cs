@@ -3,6 +3,7 @@ using OpenVersus.Game;
 using OpenVersus.Hooking;
 using OpenVersus.Memory;
 using OpenVersus.Net;
+using Microsoft.Extensions.Logging;
 
 namespace OpenVersus.Hooks;
 
@@ -21,7 +22,7 @@ public static unsafe class EndpointHooks
     private static char* s_prodUrlWide;
     private static string s_gameUrl = "";
     private static string s_prodUrl = "";
-    private static Log? s_log;
+    private static ILogger? s_log;
 
     public static bool ApplyGame(HookContext c)
     {

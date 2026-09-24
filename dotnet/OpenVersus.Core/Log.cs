@@ -18,14 +18,19 @@ namespace OpenVersus;
 /// the old file's first line. So the last run's log is always there under its launch time,
 /// whether the game is running or not.
 ///
-/// It is an <see cref="ILogger"/>, so code can take the abstraction and use the standard
-/// extension methods; the level filter is <see cref="MinimumLevel"/>, set from the ini.
+/// It is an <see cref="ILogger"/>, which is what the rest of the client takes; the short verbs
+/// (<c>Info</c>, <c>Warn</c>, <c>Success</c>...) are extension methods in <see cref="LogExtensions"/>,
+/// and the level filter is <see cref="MinimumLevel"/>, set from the ini.
 /// </summary>
 public sealed class Log : ILogger, IDisposable
 {
     private const string StampFormat = "yyyy-MM-dd HH:mm:ss.fff";
     private const string ArchiveStampFormat = "yyyy-MM-dd-HH.mm.ss";
     private const string ClosedMarker = "log closed";
+    /// <summary>Archives younger than this stay as plain text; older ones are compressed.</summary>
+    public static readonly TimeSpan HotArchiveAge = TimeSpan.FromDays(7);
+    /// <summary>zstd level for the cold archives: small files, and it runs once per launch in the background.</summary>
+    public const int ArchiveCompressionLevel = 11;
 
     private readonly BlockingCollection<(LogLevel Level, string? Text, string? Console, ManualResetEventSlim? Flushed)> _queue = new();
     private readonly Thread _writer;
@@ -90,20 +95,30 @@ public sealed class Log : ILogger, IDisposable
         }
 
         var log = new Log(path, name, error) { Notice = notice };
+        if (error == null)
+        {
+            // Off the launch path and below it in priority; nothing it can hit may reach the
+            // game, since an unhandled exception on any thread is a fail-fast under NativeAOT.
+            string archiveDirectory = System.IO.Path.GetDirectoryName(path)!;
+            new Thread(() =>
+            {
+                try
+                {
+                    CompressColdArchives(archiveDirectory, name, DateTime.Now);
+                }
+                catch (Exception e)
+                {
+                    log.Warn($"log retention stopped: {e.Message}");
+                }
+            })
+            { IsBackground = true, Name = "OVS log retention", Priority = ThreadPriority.BelowNormal }.Start();
+        }
+
         AppDomain.CurrentDomain.ProcessExit += (_, _) => log.Close();
         return log;
     }
 
-    public void Trace(string message) => Line(LogLevel.Trace, message);
-    public void Debug(string message) => Line(LogLevel.Debug, message);
-    public void Info(string message) => Line(LogLevel.Information, message);
-    public void Warn(string message) => Line(LogLevel.Warning, message);
-    public void Error(string message) => Line(LogLevel.Error, message);
-    public void Critical(string message) => Line(LogLevel.Critical, message);
-    /// <summary>Information, shown green on the console: the C++ printfSuccess.</summary>
-    public void Success(string message) => Line(LogLevel.Information, message, "\x1b[32m");
-
-    // ILogger: the standard extension methods (LogDebug, LogInformation, ...) land here.
+    // ILogger: the client's own verbs (LogExtensions) and the standard ones (LogInformation, ...) land here.
     public bool IsEnabled(LogLevel level) => level != LogLevel.None && level >= MinimumLevel && !_closed;
     public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
     void ILogger.Log<TState>(LogLevel level, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
@@ -119,7 +134,7 @@ public sealed class Log : ILogger, IDisposable
             message += Environment.NewLine + exception;
         }
 
-        Line(level, message);
+        Line(level, message, eventId.Id == LogEvents.Success.Id ? "\x1b[32m" : null);
     }
 
     /// <summary>
@@ -368,6 +383,68 @@ public sealed class Log : ILogger, IDisposable
         {
             return e;
         }
+    }
+
+    /// <summary>
+    /// Keeps the last <see cref="HotArchiveAge"/> of "&lt;name&gt;_&lt;launch time&gt;.log" archives as
+    /// they are and compresses every older one to "&lt;file&gt;.zst", keeping its timestamp, so the
+    /// directory holds a week of logs anyone can open and a compact history behind them. Age comes
+    /// from the launch time in the file name, or its last write time when the name does not
+    /// parse. Any file that cannot be compressed is left alone. Returns the files compressed.
+    /// </summary>
+    public static List<string> CompressColdArchives(string directory, string name, DateTime now)
+    {
+        var compressed = new List<string>();
+        IEnumerable<string> archives;
+        try
+        {
+            archives = Directory.EnumerateFiles(directory, $"{name}_*.log");
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return compressed;
+        }
+
+        foreach (string archive in archives)
+        {
+            try
+            {
+                string stamp = System.IO.Path.GetFileNameWithoutExtension(archive)[(name.Length + 1)..];
+                if (!DateTime.TryParseExact(stamp, ArchiveStampFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime launch))
+                {
+                    launch = File.GetLastWriteTime(archive);
+                }
+
+                if (now - launch < HotArchiveAge)
+                {
+                    continue;
+                }
+
+                string target = archive + ".zst";
+                if (!File.Exists(target))
+                {
+                    string temp = target + ".tmp";
+                    using (var input = File.OpenRead(archive))
+                    using (var output = File.Create(temp))
+                    using (var zstd = new ZstdSharp.CompressionStream(output, ArchiveCompressionLevel))
+                    {
+                        input.CopyTo(zstd);
+                    }
+
+                    File.SetLastWriteTime(temp, File.GetLastWriteTime(archive));
+                    File.Move(temp, target, overwrite: true);
+                }
+
+                File.Delete(archive);
+                compressed.Add(target);
+            }
+            catch (Exception)
+            {
+                // A file that cannot be read, written or compressed is left for the next launch.
+            }
+        }
+
+        return compressed;
     }
 
     private static string ArchivePath(string path, string name, DateTime launch) =>

@@ -23,9 +23,12 @@
     <ProjectReference Include="../OpenVersus.Core/OpenVersus.Core.csproj" />
   </ItemGroup>
 
-  <!-- Ultimate ASI Loader only picks up *.asi. The file is the same PE as the .dll. -->
+  <!-- Ultimate ASI Loader only picks up *.asi. The file is the same PE as the .dll, named with
+       the version so a release is identifiable by its file name. The loader loads every .asi in
+       the folder, so an install must replace the previous one rather than sit beside it. -->
   <Target Name="CopyAsAsi" AfterTargets="Publish" Condition="$(RuntimeIdentifier.StartsWith('win'))">
-    <Copy SourceFiles="$(PublishDir)$(TargetName).dll" DestinationFiles="$(PublishDir)$(TargetName).asi" />
+    <Copy SourceFiles="$(PublishDir)$(TargetName).dll" DestinationFiles="$(PublishDir)$(TargetName)_$(OvsVersion).asi" />
+    <Message Importance="high" Text="Published $(PublishDir)$(TargetName)_$(OvsVersion).asi" />
   </Target>
 
 </Project>

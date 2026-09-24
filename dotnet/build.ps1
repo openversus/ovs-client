@@ -3,9 +3,9 @@
 Builds, tests and publishes the OpenVersus .NET client on Windows.
 
 .DESCRIPTION
-    dotnet\build.ps1                 build the libraries, run the tests, publish OpenVersus.asi
+    dotnet\build.ps1                 build the libraries, run the tests, publish OpenVersus_<version>.asi
     dotnet\build.ps1 test            build and run the tests only
-    dotnet\build.ps1 publish         publish OpenVersus.asi only
+    dotnet\build.ps1 publish         publish OpenVersus_<version>.asi only
     dotnet\build.ps1 clean           remove every bin\ and obj\
 
 Needs the .NET 10 SDK (https://dotnet.microsoft.com/download) and, for the publish, the
@@ -16,8 +16,8 @@ which NativeAOT uses to link. The tests need only the SDK.
 Publish with trampoline pages read-write-execute for their whole life, as the C++ client did.
 
 .PARAMETER Install
-Copy the published OpenVersus.asi into this directory (the game's plugins folder), keeping
-the one already there as OpenVersus.asi.bak.
+Copy the published OpenVersus_<version>.asi into this directory (the game's plugins folder),
+renaming any OpenVersus*.asi already there to .bak, since the ASI loader would otherwise load both.
 
 .PARAMETER SkipTests
 Do not run the tests in the default command.
@@ -35,7 +35,8 @@ $ErrorActionPreference = "Stop"
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $solution = Join-Path $here "OpenVersus.slnx"
 $project = Join-Path $here "OpenVersus\OpenVersus.csproj"
-$published = Join-Path $here "OpenVersus\bin\Release\net10.0\win-x64\publish\OpenVersus.asi"
+$version = (Get-Content (Join-Path $here "..\VERSION") -Raw).Trim()
+$published = Join-Path $here "OpenVersus\bin\Release\net10.0\win-x64\publish\OpenVersus_$version.asi"
 
 function Say([string]$text) { Write-Host "== $text" -ForegroundColor Cyan }
 function Fail([string]$text) { Write-Error $text; exit 1 }
@@ -64,7 +65,7 @@ function Invoke-Tests {
 }
 
 function Publish-Plugin {
-    Say "publishing OpenVersus.asi (NativeAOT, win-x64$(if ($Rwx) { ', RWX trampolines' }))"
+    Say "publishing OpenVersus_$version.asi (NativeAOT, win-x64$(if ($Rwx) { ', RWX trampolines' }))"
     $properties = @()
     if ($Rwx) { $properties += "-p:RwxTrampolines=true" }
     Invoke-Dotnet publish $project -c Release -r win-x64 --nologo -v quiet @properties
@@ -72,13 +73,12 @@ function Publish-Plugin {
     Say "published $published ($([math]::Round((Get-Item $published).Length / 1MB, 1)) MB)"
     if ($Install) {
         if (-not (Test-Path $Install -PathType Container)) { Fail "$Install is not a directory" }
-        $target = Join-Path $Install "OpenVersus.asi"
-        if (Test-Path $target) {
-            Copy-Item $target "$target.bak" -Force
-            Write-Host "kept the previous plugin as $target.bak"
+        foreach ($old in Get-ChildItem (Join-Path $Install "OpenVersus*.asi") -ErrorAction SilentlyContinue) {
+            Move-Item $old.FullName "$($old.FullName).bak" -Force
+            Write-Host "kept the previous plugin as $($old.FullName).bak"
         }
-        Copy-Item $published $target -Force
-        Say "installed to $target"
+        Copy-Item $published $Install -Force
+        Say "installed to $(Join-Path $Install (Split-Path $published -Leaf))"
     }
 }
 

@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using OpenVersus.Config;
 using OpenVersus.Game;
 using OpenVersus.Hooking;
+using Microsoft.Extensions.Logging;
 
 namespace OpenVersus.Hooks;
 
@@ -13,7 +14,7 @@ namespace OpenVersus.Hooks;
 public static unsafe class StartupNotices
 {
     private static State? s_state;
-    private static Log? s_log;
+    private static ILogger? s_log;
     private static bool s_dialogDone;
     private static bool s_toastDone;
     private static int s_attempts;
@@ -21,7 +22,7 @@ public static unsafe class StartupNotices
     private const int MaxAttempts = 600;
 
     /// <summary>Waits off the game thread for the game instance and window, then runs the job on the game thread.</summary>
-    public static void Run(State state, Log log)
+    public static void Run(State state, ILogger log)
     {
         s_state = state;
         s_log = log;

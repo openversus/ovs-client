@@ -186,13 +186,14 @@ public class IniFileTests : IDisposable
         Assert.Equal("[A]\r\nK = 1\r\n\r\n[B]\r\nJ = 2\r\n", File.ReadAllText(path));
     }
 
-    [Fact]
+    [SkippableFact]
     public void UnwritableFileIsReportedNotThrown()
     {
+        UnixPermissions.SkipUnlessUnix();
         string path = Write("ro.ini", "[A]\nK = 1\n");
         var ini = IniFile.Load(path);
         ini.Set("A", "J", "2");
-        File.SetUnixFileMode(_dir, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+        UnixPermissions.MakeReadOnly(_dir);
         try
         {
             Assert.False(ini.Save());
@@ -200,7 +201,7 @@ public class IniFileTests : IDisposable
         }
         finally
         {
-            File.SetUnixFileMode(_dir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            UnixPermissions.Restore(_dir);
         }
 
         Assert.Equal("[A]\nK = 1\n", File.ReadAllText(path));
@@ -210,11 +211,12 @@ public class IniFileTests : IDisposable
         Assert.Equal("[A]\nK = 1\nJ = 2\n", File.ReadAllText(path));
     }
 
-    [Fact]
+    [SkippableFact]
     public void UnreadableFileLoadsEmptyAndSaysWhy()
     {
+        UnixPermissions.SkipUnlessUnix();
         string path = Write("locked.ini", "[A]\nK = 1\n");
-        File.SetUnixFileMode(path, UnixFileMode.None);
+        UnixPermissions.MakeUnreadable(path);
         try
         {
             var ini = IniFile.Load(path);
@@ -224,7 +226,7 @@ public class IniFileTests : IDisposable
         }
         finally
         {
-            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            UnixPermissions.Restore(path);
         }
     }
 }

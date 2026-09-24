@@ -148,7 +148,7 @@ public sealed class Client
         if (Settings.AutoUpdate)
         {
             Log.Info("[AutoUpdate] Auto-update is enabled. OVS will check for updates automatically and download/apply them when available.");
-            var update = new AutoUpdate(Settings.ServerUrl, _pluginPath, Http, new WinHttpTransport(useSystemProxy: true), Log);
+            var update = new AutoUpdate(Settings.ServerUrl, _pluginPath, Http, new WinHttpTransport(useSystemProxy: true), Log, Log.Close);
             Start("OVS auto-update", update.Run);
         }
         else

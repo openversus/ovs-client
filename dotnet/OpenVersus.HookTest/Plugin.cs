@@ -3,6 +3,7 @@ using OpenVersus;
 using OpenVersus.Hooking;
 using OpenVersus.Memory;
 using OpenVersus.Native;
+using Microsoft.Extensions.Logging;
 
 namespace OpenVersus.HookTest;
 
@@ -55,7 +56,7 @@ public static unsafe class Plugin
     [UnmanagedCallersOnly]
     private static long GuardHook(long x) => HookGuard.Run("guard", x, static x => throw new InvalidOperationException($"deliberate failure for {x}"), 77L);
 
-    private static void Run(Log log)
+    private static void Run(ILogger log)
     {
         byte* image = (byte*)Kernel32.GetModuleHandle(null);
         ReadOnlySpan<byte> bytes = PeImage.ImageInMemory(image);
@@ -104,7 +105,7 @@ public static unsafe class Plugin
         log.Info("done");
     }
 
-    private static void Redirect(Log log, byte* image, ReadOnlySpan<byte> bytes, string pattern, nint hook, out delegate* unmanaged<long, long> original)
+    private static void Redirect(ILogger log, byte* image, ReadOnlySpan<byte> bytes, string pattern, nint hook, out delegate* unmanaged<long, long> original)
     {
         original = null;
         var p = BytePattern.Parse(pattern);

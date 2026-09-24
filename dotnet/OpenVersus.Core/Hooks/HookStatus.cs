@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Logging;
+
 namespace OpenVersus.Hooks;
 
 /// <summary>Which patches and hooks took, for the log and the poller; the C++ HookMetadata::sActiveMods.</summary>
@@ -18,4 +20,4 @@ public sealed class HookStatus
 }
 
 /// <summary>What every hook needs: the image, the pattern resolver, the settings and the log.</summary>
-public sealed record HookContext(Game.GameImage Image, Game.PatternResolver Patterns, Config.Settings Settings, Config.State State, Log Log, HookStatus Status);
+public sealed record HookContext(Game.GameImage Image, Game.PatternResolver Patterns, Config.Settings Settings, Config.State State, ILogger Log, HookStatus Status);

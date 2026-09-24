@@ -1,5 +1,6 @@
 using System.Text.Json;
 using OpenVersus.Game;
+using Microsoft.Extensions.Logging;
 
 namespace OpenVersus.Net;
 
@@ -9,7 +10,7 @@ namespace OpenVersus.Net;
 /// to send the player back to the lobby the way the native timeout would. Anything that
 /// touches the engine is handed to the game thread.
 /// </summary>
-public sealed class NotificationPoller(string serverUrl, IHttpTransport http, ObjectFinder finder, GameImage image, Log log)
+public sealed class NotificationPoller(string serverUrl, IHttpTransport http, ObjectFinder finder, GameImage image, ILogger log)
 {
     // Lives as long as the process; never disposed, since the loop thread may be waiting on it.
     private CancellationTokenSource? _stopping;

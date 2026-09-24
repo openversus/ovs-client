@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using OpenVersus.Game;
 using OpenVersus.Hooking;
 using OpenVersus.Memory;
+using Microsoft.Extensions.Logging;
 
 namespace OpenVersus.Hooks;
 
@@ -12,7 +13,7 @@ namespace OpenVersus.Hooks;
 public static unsafe class UeFunctionHooks
 {
     private static delegate* unmanaged<nint, nint, nint> s_fighterInstanceCtor;
-    private static Log? s_log;
+    private static ILogger? s_log;
 
     public static bool Apply(HookContext c)
     {

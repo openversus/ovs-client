@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using OpenVersus.Hooking;
 using OpenVersus.Native;
+using Microsoft.Extensions.Logging;
 
 namespace OpenVersus.Game;
 
@@ -15,9 +16,9 @@ public static unsafe class GameThread
 {
     private const nuint TimerId = 0x0F5B;
     private static readonly ConcurrentQueue<(string Name, Func<bool> Work, int RetryMs)> s_queue = new();
-    private static Log? s_log;
+    private static ILogger? s_log;
 
-    public static void Attach(Log log) => s_log = log;
+    public static void Attach(ILogger log) => s_log = log;
 
     public static nint Window => User32.FindWindow("UnrealWindow", null);
 

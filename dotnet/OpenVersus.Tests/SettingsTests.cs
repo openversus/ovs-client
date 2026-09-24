@@ -63,14 +63,6 @@ public class SettingsTests
         Assert.False(s.PostMatchFreeze);
     }
 
-    [Fact]
-    public void VersionConstantMatchesTheRepoVersionFile()
-    {
-        string path = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "VERSION");
-        Skip.If(!File.Exists(path), "VERSION file not found");
-        Assert.Equal(OvsVersion.Current, File.ReadAllText(path).Trim());
-    }
-
     private static string RepoFile(string name) => Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", name);
 
     private static string TempCopy(string source)
@@ -168,13 +160,14 @@ public class SettingsTests
         Directory.Delete(dir, recursive: true);
     }
 
-    [Fact]
+    [SkippableFact]
     public void AnUnwritableIniStillLoadsAndWarns()
     {
+        UnixPermissions.SkipUnlessUnix();
         string dir = Directory.CreateTempSubdirectory("ovs-settings-").FullName;
         string path = Path.Combine(dir, Settings.FileName);
         File.WriteAllText(path, "[Settings]\nAutoUpdate = false\n");
-        File.SetUnixFileMode(dir, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+        UnixPermissions.MakeReadOnly(dir);
         var log = new ListLogger();
         try
         {
@@ -185,7 +178,7 @@ public class SettingsTests
         }
         finally
         {
-            File.SetUnixFileMode(dir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            UnixPermissions.Restore(dir);
             Directory.Delete(dir, recursive: true);
         }
     }

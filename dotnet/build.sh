@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Builds, tests and publishes the OpenVersus .NET client from Linux (and maybe macOS).
 #
-#   dotnet/build.sh                 build the host libraries, run the tests, publish OpenVersus.asi
+#   dotnet/build.sh                 build the host libraries, run the tests, publish OpenVersus_<version>.asi
 #   dotnet/build.sh test            build and run the tests only (no Windows toolchain needed)
-#   dotnet/build.sh publish         publish OpenVersus.asi only
+#   dotnet/build.sh publish         publish OpenVersus_<version>.asi only
 #   dotnet/build.sh harness         run the hooking layer end to end under Wine
 #   dotnet/build.sh clean           remove every bin/ and obj/
 #
@@ -13,8 +13,9 @@
 #                      without it the script asks, and refuses when there is no terminal to ask on
 #   --rwx              publish with trampoline pages read-write-execute for their whole life,
 #                      as the C++ client did (default: read-execute except while a stub is written)
-#   --install DIR      copy the published OpenVersus.asi into DIR (the game's plugins folder),
-#                      keeping the one already there as OpenVersus.asi.bak
+#   --install DIR      copy the published OpenVersus_<version>.asi into DIR (the game's plugins
+#                      folder), renaming any OpenVersus*.asi already there to .bak, since the
+#                      ASI loader would otherwise load both
 #   --skip-tests       do not run the tests in the default command
 #
 # Needs the .NET 10 SDK. Publishing a Windows binary from Linux also needs lld-link (package
@@ -26,7 +27,8 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 solution="$here/OpenVersus.slnx"
 project="$here/OpenVersus/OpenVersus.csproj"
-published="$here/OpenVersus/bin/Release/net10.0/win-x64/publish/OpenVersus.asi"
+version=$(tr -d '[:space:]' < "$here/../VERSION")
+published="$here/OpenVersus/bin/Release/net10.0/win-x64/publish/OpenVersus_$version.asi"
 
 command=build
 accept_license=${ACCEPT_VS_BUILD_TOOLS_LICENSE:-false}
@@ -104,7 +106,7 @@ do_test() {
 do_publish() {
     need_cross_toolchain
     confirm_license
-    say "publishing OpenVersus.asi (NativeAOT, win-x64$([ "$rwx" = true ] && echo ', RWX trampolines'))"
+    say "publishing OpenVersus_$version.asi (NativeAOT, win-x64$([ "$rwx" = true ] && echo ', RWX trampolines'))"
     dotnet publish "$project" -c Release -r win-x64 --nologo -v quiet \
         -p:AcceptVSBuildToolsLicense="$accept_license" \
         $([ "$rwx" = true ] && echo "-p:RwxTrampolines=true")
@@ -112,12 +114,13 @@ do_publish() {
     say "published $published ($(du -h "$published" | cut -f1))"
     if [ -n "$install_dir" ]; then
         [ -d "$install_dir" ] || fail "$install_dir is not a directory"
-        if [ -f "$install_dir/OpenVersus.asi" ]; then
-            cp -f "$install_dir/OpenVersus.asi" "$install_dir/OpenVersus.asi.bak"
-            echo "kept the previous plugin as $install_dir/OpenVersus.asi.bak"
-        fi
-        cp -f "$published" "$install_dir/OpenVersus.asi"
-        say "installed to $install_dir/OpenVersus.asi"
+        for old in "$install_dir"/OpenVersus*.asi; do
+            [ -f "$old" ] || continue
+            mv -f "$old" "$old.bak"
+            echo "kept the previous plugin as $old.bak"
+        done
+        cp -f "$published" "$install_dir/"
+        say "installed to $install_dir/$(basename "$published")"
     fi
 }
 

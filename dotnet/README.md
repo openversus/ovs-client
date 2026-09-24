@@ -18,7 +18,7 @@ port of the C++ client at the repository root, built from Linux without Visual S
 Requires the .NET 10 SDK. Two scripts wrap the commands below and check the prerequisites:
 
 ```sh
-dotnet/build.sh                # Linux/macOS: build, test, publish OpenVersus.asi; --help for options
+dotnet/build.sh                # Linux/macOS: build, test, publish OpenVersus_<version>.asi; --help for options
 dotnet\build.ps1               # Windows (PowerShell; build.cmd runs it from cmd or a double-click)
 ```
 
@@ -27,6 +27,9 @@ Both take `test`, `publish` or `clean` as the command, `-Rwx`/`--rwx` for RWX tr
 publish needs the "Desktop development with C++" workload of Visual Studio or its Build Tools; on
 Linux it needs `lld-link` (package `lld`) and `xwin` on `PATH`, and `build.sh harness` runs the
 Wine test too.
+
+The `.NET client tests` workflow runs `build.sh test` and a formatting check on every push that
+touches `dotnet/`, `VERSION` or `sample.ini`.
 
 By hand:
 
@@ -40,7 +43,9 @@ dotnet/wine-host/run.sh                      # the hooking layer, end to end und
 Trampoline pages are read-execute except while a stub is being written. `-p:RwxTrampolines=true`
 on the publish keeps them read-write-execute for their whole life, as the C++ client did.
 
-The published plugin is `dotnet/OpenVersus/bin/Release/net10.0/win-x64/publish/OpenVersus.asi`.
+The published plugin is `dotnet/OpenVersus/bin/Release/net10.0/win-x64/publish/OpenVersus_<version>.asi`,
+named from `VERSION`. Ultimate ASI Loader loads every `.asi` in `plugins`, so a new version must
+replace the old file, not sit beside it; the scripts' `--install` renames what is there to `.bak`.
 It imports only system DLLs and the UCRT api-sets. The first publish downloads the Windows SDK
 sysroot (about 2.4 GB) into `~/.cache/xwin`; `AcceptVSBuildToolsLicense=true` accepts its license.
 
@@ -68,11 +73,21 @@ not a level is logged and falls back the same way. Tags in the file are `TRC DBG
 Per-attempt and game-thread queue lines are Trace; pattern and function resolution is Debug; hooks,
 banners and netstats are Information.
 
+Archives from the last week stay as plain text; older ones are compressed to `.zst` (zstd level
+11, through `ZstdSharp`) on a background thread at launch, keeping their timestamps.
+
 If the `logs` directory cannot be created or written, the log goes to the plugin's own directory
 instead; if that fails too, the client still runs, `Log.FileError` records why, and every line
 still reaches the console mirror. `Log.Notice` says which happened and is the first warning logged.
 
 ## Conventions
+
+- The version is the `VERSION` file at the repository root and nothing else: the build generates
+  `OvsVersion.Current` from it and stamps the assembly with it, and the CI release name reads
+  the same file.
+- Everything takes `ILogger`; the short verbs (`Info`, `Warn`, `Success`, ...) are extension
+  methods in `LogExtensions.cs` that pass the text through verbatim, never as a template. Only
+  `Client` and the plugin entry point hold the concrete `Log`, since they own its lifetime.
 
 - A patch that cannot be made throws `PatchException` out of `Memory/` (`CodeWriter`, `CallSite`,
   `Trampoline`); `Client.ApplyHooks` catches per hook, logs it as that hook's failure and goes on.

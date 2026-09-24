@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using OpenVersus.Hooking;
 using OpenVersus.Native;
+using Microsoft.Extensions.Logging;
 
 namespace OpenVersus.Hooks;
 
@@ -11,9 +12,9 @@ namespace OpenVersus.Hooks;
 public static unsafe class KeyboardHook
 {
     private static nint s_hook;
-    private static Log? s_log;
+    private static ILogger? s_log;
 
-    public static bool Install(Log log, nint module)
+    public static bool Install(ILogger log, nint module)
     {
         s_log = log;
         s_hook = User32.SetWindowsHookEx(User32.WH_KEYBOARD, (nint)(delegate* unmanaged<int, nint, nint, nint>)&Proc, module, Kernel32.GetCurrentThreadId());

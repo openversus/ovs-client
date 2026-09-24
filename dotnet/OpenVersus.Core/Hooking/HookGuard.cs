@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Logging;
+
 namespace OpenVersus.Hooking;
 
 /// <summary>
@@ -13,9 +15,9 @@ public static class HookGuard
     private const int LoggedFailuresPerHook = 5;
     private static readonly Dictionary<string, int> s_failures = new();
     private static readonly object s_lock = new();
-    private static Log? s_log;
+    private static ILogger? s_log;
 
-    public static void Attach(Log log) => s_log = log;
+    public static void Attach(ILogger log) => s_log = log;
 
     public static TResult Run<TState, TResult>(string hook, TState state, Func<TState, TResult> body, TResult fallback)
     {

@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using OpenVersus.Net;
+using Microsoft.Extensions.Logging;
 
 namespace OpenVersus.Identity;
 
@@ -10,7 +11,7 @@ public static class IdentityRegistration
     public static string Body(EnvInfo env) =>
         JsonSerializer.Serialize(new IdentityBody(env.SteamId, env.EpicId, env.HardwareId, OvsVersion.Current), OvsJson.Default.IdentityBody);
 
-    public static void Run(EnvInfo env, string serverUrl, IHttpTransport http, Log log)
+    public static void Run(EnvInfo env, string serverUrl, IHttpTransport http, ILogger log)
     {
         if (string.IsNullOrEmpty(serverUrl))
         {

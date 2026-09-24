@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 using OpenVersus.Native;
 
 namespace OpenVersus.Net;
@@ -9,7 +10,7 @@ namespace OpenVersus.Net;
 /// The C++ did the version check over a raw socket without TLS, which cannot reach an https
 /// server; this goes through the transport, so the check works against production.
 /// </summary>
-public sealed class AutoUpdate(string serverUrl, string pluginPath, IHttpTransport http, IHttpTransport download, Log log)
+public sealed class AutoUpdate(string serverUrl, string pluginPath, IHttpTransport http, IHttpTransport download, ILogger log, Action beforeExit)
 {
     /// <summary>The version response, or null when the text is not that.</summary>
     public static VersionInfo? Parse(string json)
@@ -80,6 +81,15 @@ public sealed class AutoUpdate(string serverUrl, string pluginPath, IHttpTranspo
     /// </summary>
     public static bool IsNewer(string offered, string running) => string.CompareOrdinal(offered.Trim(), running.Trim()) > 0;
 
+    /// <summary>
+    /// Where a downloaded <paramref name="version"/> goes: "OpenVersus_&lt;version&gt;.asi" beside the
+    /// running plugin, whatever that one is called (a plain "OpenVersus.asi" from an earlier
+    /// release included), so the file name says what it is. The running file is renamed to
+    /// ".bak" first, since the ASI loader would otherwise load both.
+    /// </summary>
+    public static string InstallPath(string pluginPath, string version) =>
+        Path.Combine(Path.GetDirectoryName(pluginPath)!, $"{OvsVersion.Name}_{version.Trim()}.asi");
+
     /// <summary>Why <paramref name="body"/> must not be installed as the plugin, or null when it looks like one.</summary>
     public static string? Validate(ReadOnlySpan<byte> body)
     {
@@ -128,11 +138,12 @@ public sealed class AutoUpdate(string serverUrl, string pluginPath, IHttpTranspo
         }
 
         string temp = Path.Combine(Path.GetTempPath(), "OpenVersus_update.asi");
-        string backup = $"{pluginPath}.v{OvsVersion.Current}.bak";
+        string backup = pluginPath + ".bak";
+        string target = InstallPath(pluginPath, info.LatestVersion!);
         try
         {
             File.WriteAllBytes(temp, result.Body);
-            log.Info("[AutoUpdate] Backing up current asi file and installing update...");
+            log.Info($"[AutoUpdate] Backing up {Path.GetFileName(pluginPath)} and installing {Path.GetFileName(target)}...");
             if (File.Exists(backup))
             {
                 File.Delete(backup);
@@ -141,7 +152,7 @@ public sealed class AutoUpdate(string serverUrl, string pluginPath, IHttpTranspo
             File.Move(pluginPath, backup);
             try
             {
-                File.Move(temp, pluginPath);
+                File.Move(temp, target, overwrite: true);
             }
             catch (Exception e)
             {
@@ -157,7 +168,7 @@ public sealed class AutoUpdate(string serverUrl, string pluginPath, IHttpTranspo
         }
         log.Info("[AutoUpdate] New DLL installed! Restarting game...");
         User32.MessageBox(0, "A new version of OpenVersus has been released and an update has been applied. The game will now close; please relaunch the game to play.", "Game restarting", User32.MB_ICONINFORMATION);
-        log.Close(); // TerminateProcess gives no exit moment, so the log is archived here
+        beforeExit(); // TerminateProcess gives no exit moment, so the log is closed and archived here
         Firmware.TerminateProcess(Kernel32.GetCurrentProcess(), 0);
     }
 }

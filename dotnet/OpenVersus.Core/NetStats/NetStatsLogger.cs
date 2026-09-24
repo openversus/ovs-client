@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using OpenVersus.Game;
 using OpenVersus.Memory;
+using Microsoft.Extensions.Logging;
 
 namespace OpenVersus.NetStats;
 
@@ -10,7 +11,7 @@ namespace OpenVersus.NetStats;
 /// NETSTATS line is written per second; when the match ends locally, a summary. See
 /// HANDOFF-netstats. Opt-in through [Features] NetStats.
 /// </summary>
-public sealed class NetStatsLogger(ObjectFinder finder, Log log)
+public sealed class NetStatsLogger(ObjectFinder finder, ILogger log)
 {
     // Lives as long as the process; never disposed, since the loop thread may be waiting on it.
     private readonly CancellationTokenSource _stopping = new();

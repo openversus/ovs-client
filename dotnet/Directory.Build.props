@@ -1,4 +1,18 @@
 <Project>
+  <!-- The one version number for the whole repository lives in VERSION at the repository root.
+       It becomes OvsVersion.Current (generated into OpenVersus.Core at build time) and the
+       assembly's version, so the client, the update check and the release name cannot drift. -->
+  <PropertyGroup>
+    <OvsVersionFile>$(MSBuildThisFileDirectory)../VERSION</OvsVersionFile>
+    <OvsVersion Condition="Exists('$(OvsVersionFile)')">$([System.IO.File]::ReadAllText('$(OvsVersionFile)').Trim())</OvsVersion>
+    <Version Condition="'$(OvsVersion)' != ''">$(OvsVersion)</Version>
+    <InformationalVersion Condition="'$(OvsVersion)' != ''">$(OvsVersion)</InformationalVersion>
+  </PropertyGroup>
+
+  <Target Name="RequireVersionFile" BeforeTargets="BeforeBuild">
+    <Error Condition="'$(OvsVersion)' == ''" Text="VERSION file not found at $(OvsVersionFile); the dotnet tree must be built inside the repository." />
+  </Target>
+
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>

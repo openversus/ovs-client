@@ -9,10 +9,24 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.12" />
+    <PackageReference Include="ZstdSharp.Port" Version="0.8.8" />
   </ItemGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="OpenVersus.Tests" />
   </ItemGroup>
+
+  <!-- OvsVersion.Current, from the VERSION file (see Directory.Build.props). -->
+  <Target Name="GenerateOvsVersion" BeforeTargets="CoreCompile">
+    <PropertyGroup>
+      <OvsVersionSource>$(IntermediateOutputPath)OvsVersion.g.cs</OvsVersionSource>
+    </PropertyGroup>
+    <WriteLinesToFile File="$(OvsVersionSource)" Overwrite="true" WriteOnlyWhenDifferent="true"
+      Lines="// Generated from the repository's VERSION file at build time. Do not edit.;namespace OpenVersus%3B;public static partial class OvsVersion;{;    /// &lt;summary&gt;The client version, from the VERSION file at the repository root.&lt;/summary&gt;;    public const string Current = &quot;$(OvsVersion)&quot;%3B;}" />
+    <ItemGroup>
+      <Compile Include="$(OvsVersionSource)" />
+      <FileWrites Include="$(OvsVersionSource)" />
+    </ItemGroup>
+  </Target>
 
 </Project>

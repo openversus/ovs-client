@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using OpenVersus.Native;
+using Microsoft.Extensions.Logging;
 
 namespace OpenVersus.Identity;
 
@@ -12,7 +13,7 @@ public static unsafe class SteamId
 {
     private static readonly string[] s_moduleNames = ["steam_api64.dll", "steamclient64.dll", "steamclient.dll", "steam_api.dll", "gameoverlayrenderer64.dll"];
 
-    public static string Resolve(Log log)
+    public static string Resolve(ILogger log)
     {
         nint module = 0;
         for (int i = 0; i < 60 && module == 0; i++)
@@ -74,7 +75,7 @@ public static unsafe class SteamId
     }
 
     /// <summary>The MostRecent user in loginusers.vdf, from the Proton paths, the home paths, then the Steam Deck defaults.</summary>
-    private static string FromLoginUsers(Log log)
+    private static string FromLoginUsers(ILogger log)
     {
         var candidates = new List<string>();
         string? compat = Environment.GetEnvironmentVariable("STEAM_COMPAT_CLIENT_INSTALL_PATH");
