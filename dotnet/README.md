@@ -75,9 +75,17 @@ banners and netstats are Information.
 
 With `[Features] NetStats=true` the per-second `NETSTATS` lines go to `logs/NetStats.log`, one
 file per match: it opens when a session starts playing and closes at the summary, which archives
-it as `NetStats_<match start time>.log` with the same retention as the main log. The main log
-gets only the session start and end, the match log open and close, and the `NETSTATS-SUMMARY`
-line. Anything that used to grep the main log for `NETSTATS` reads that file now.
+it as `NetStats_<match start time>_<match id>[_with_<teammates>]_vs_<opponents>.log` with the same
+retention as the main log. The names come from the player data each fighter pawn carries and the
+id from the gameplay-config subsystem (both confirmed on the live game), read at the first playing
+sample and, while incomplete, again once a second for ten seconds; a log that never got a
+description keeps the plain stamp, and at Debug level the main log lists what each reading saw
+(every pointer followed, checked for being an object). A closed match log stays on disk as
+`NetStats.log` and is not archived a second time by the next open. The main
+log gets only the session start and end, the match log open and close, and the `NETSTATS-SUMMARY`
+line. Anything that used to grep the main log for `NETSTATS` reads that file now. Between matches
+the session is looked up through the object array every five seconds, and every sample asks the
+array whether the session object is still listed, so a freed session is never sampled.
 
 Archives from the last week stay as plain text; older ones are compressed to `.zst` (zstd level
 11, through `ZstdSharp`) on a background thread at launch, keeping their timestamps.

@@ -463,6 +463,18 @@ public sealed class Log : ILogger, IDisposable
     private static string ArchivePath(string path, string name, DateTime launch, string suffix = "") =>
         System.IO.Path.Combine(System.IO.Path.GetDirectoryName(path)!, $"{name}_{launch.ToString(ArchiveStampFormat, CultureInfo.InvariantCulture)}{suffix}.log");
 
+    /// <summary>Whether the file's last line is the closed marker, read from its tail.</summary>
+    private static bool EndsWithClosedMarker(string path)
+    {
+        using var file = File.OpenRead(path);
+        int tail = (int)Math.Min(256, file.Length);
+        file.Seek(-tail, SeekOrigin.End);
+        var bytes = new byte[tail];
+        file.ReadExactly(bytes);
+        string text = System.Text.Encoding.UTF8.GetString(bytes).TrimEnd('\r', '\n', ' ');
+        return text.EndsWith(ClosedMarker, StringComparison.Ordinal);
+    }
+
     private static void Archive(string path, string target)
     {
         if (!File.Exists(target))
@@ -471,12 +483,17 @@ public sealed class Log : ILogger, IDisposable
         }
     }
 
-    /// <summary>The previous run's file, if it was never archived (its process ended without a Close).</summary>
+    /// <summary>
+    /// The previous run's file, if it was never archived (its process ended without a Close). A
+    /// file that ends with the closed marker was archived by its Close and is left alone: a match
+    /// log stays on disk after it closes, and archiving it again under its first line's time gave
+    /// two copies of every match a second apart (2026-09-24).
+    /// </summary>
     private static void ArchiveLeftover(string path, string name)
     {
         try
         {
-            if (!File.Exists(path) || new FileInfo(path).Length == 0)
+            if (!File.Exists(path) || new FileInfo(path).Length == 0 || EndsWithClosedMarker(path))
             {
                 return;
             }

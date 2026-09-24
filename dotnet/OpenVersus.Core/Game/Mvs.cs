@@ -33,23 +33,38 @@ public static class Mvs
     // AMvsPreMatchGameState: its state machine, and the machine's current state.
     public const int PreMatchStateMachine = 0x320;
     public const int StateMachineCurrentState = 0x58;
-    // APfgFixedPawn and APawn: which player a pawn is, and its player state (CXXHeaderDump).
+    // APfgFixedPawn: which player a pawn is (CXXHeaderDump; read 0 and 1 off the two pawns of a
+    // live 1v1 on 2026-09-24).
     public const int PawnPlayerIndex = 0x354;
-    public const int PawnPlayerState = 0x2C0;
-    // APlayerState
-    public const int PlayerStateName = 0x398;          // FString PlayerNamePrivate
-    // UMatchPlayerData_C: one per player per match, from the matchmaking side.
-    public const int MatchPlayerDataUsername = 0x50;   // FString
-    public const int MatchPlayerDataMatchId = 0x60;    // FString
-    public const int MatchPlayerDataPlayerIndex = 0x94;
-    public const int MatchPlayerDataTeamIndex = 0x98;
-    public const int MatchPlayerDataPlayerState = 0xA0;
+    // AMvsFixedCharacter (every fighter pawn): the FGameplayPlayerData it was spawned with.
+    // CXXHeaderDump, confirmed on the live game 2026-09-24: both pawns read the two players'
+    // account ids, usernames, teams and indexes, and PlayerIndex here agreed with PawnPlayerIndex.
+    // The MatchPlayerData_C objects the dump also offers do not exist during a match (only the
+    // class default object does), and remote pawns have no player state; this struct is the source.
+    public const int FixedCharacterGameplayPlayerData = 0x4E0;
+    public const int GameplayPlayerDataAccountId = 0x00;   // FString
+    public const int GameplayPlayerDataUsername = 0x10;    // FString
+    public const int GameplayPlayerDataTeamIndex = 0x98;
+    public const int GameplayPlayerDataPlayerIndex = 0x9C;
+    public const int GameplayPlayerDataSize = 0x158;
+    // UMvsGameplayConfig (a game-instance subsystem): the match the client was sent into.
+    // CXXHeaderDump, confirmed live 2026-09-24: a 24-hex-digit id, the cluster name, and the
+    // same two players at +0x70 (TArray<FGameplayPlayerData>).
+    public const int GameplayConfigContainerMatchId = 0x50; // FString
+    public const int GameplayConfigCluster = 0x60;          // FString
+    public const int GameplayConfigPlayers = 0x70;          // TArray<FGameplayPlayerData>
     // APfgFixedGameStateBase
     public const int GameStateNetcodeSession = 0x4A0;
     public const int GameStateResimFrames = 0x524;
 
     // UObject header, as the C++ poller read it.
     public const int ObjectVTable = 0x00;
+    /// <summary>
+    /// int32, the object's slot in the object array. UE4SS MemberVariableLayout says 0xC, and the
+    /// live check of 2026-09-24 read 0 and 65536 there for the first objects of chunks 0 and 1
+    /// (structs/FUObjectArray.md in the RE archive), which is what a liveness check needs.
+    /// </summary>
+    public const int ObjectInternalIndex = 0x0C;
     public const int ObjectClassPrivate = 0x18;
     public const int ObjectNamePrivate = 0x20;
     public const int ObjectOuterPrivate = 0x28;

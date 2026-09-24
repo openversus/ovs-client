@@ -143,6 +143,7 @@ public sealed class FakeGame
         _nextObject += ObjectSize;
         Memory.Write(address + Mvs.ObjectVTable, (long)vtable);
         Memory.Write(address + 8, flags);
+        Memory.Write(address + Mvs.ObjectInternalIndex, _count);
         Memory.Write(address + Mvs.ObjectClassPrivate, (long)classPrivate);
         Memory.Write(address + Mvs.ObjectNamePrivate, fname.Index);
         Memory.Write(address + Mvs.ObjectNamePrivate + 4, fname.Number);
@@ -246,6 +247,27 @@ public sealed class FakeGame
         Memory.Write(property + Reflection.FPropertyFlags, flags);
         Memory.Write(property + Reflection.FPropertyOffset, offset);
         return property;
+    }
+
+    /// <summary>
+    /// The game freed the object: its slot in the array is cleared and the count stays, as the
+    /// engine's free list does. The bytes at the address are left as they were, which is what a
+    /// stale pointer sees until the allocator hands the memory to something else.
+    /// </summary>
+    public void RemoveObject(nint address)
+    {
+        for (int i = 0; i < _count; i++)
+        {
+            nint slot = _chunk + (nint)i * ObjectArray.ItemSize;
+            Memory.TryRead(slot, out nint at);
+            if (at == address)
+            {
+                Memory.Write(slot, 0L);
+                return;
+            }
+        }
+
+        throw new ArgumentException($"0x{address:X} is not in the object array");
     }
 
     public ObjectFinder Finder() => new(Image, Memory, Names, Log, tryObjectArray: true);

@@ -53,6 +53,43 @@ public class ObjectFinderTests
         Assert.Contains(stray.Log.Lines, l => l.Contains("no vtable in the image"));
     }
 
+    /// <summary>
+    /// Liveness through the array: an object names its own slot, so two reads say whether the
+    /// engine still lists it. A freed object keeps its bytes and loses its slot. If the index
+    /// does not name the slot, the check is switched off and says so, and the array stays usable.
+    /// </summary>
+    [Fact]
+    public void AFreedObjectIsNotLiveAndAnUntrustedIndexTurnsTheCheckOff()
+    {
+        var game = new FakeGame();
+        nint uclass = game.AddClass("PfgNetcodeSession");
+        nint session = game.AddInstance(uclass, "Session");
+        var finder = game.Finder();
+        Assert.Equal(session, finder.FindInstanceOfClass(uclass));
+        Assert.True(finder.UsesObjectArray);
+        Assert.True(finder.IsLive(session));
+        Assert.True(finder.IsLive(game.ClassClass));
+
+        game.RemoveObject(session);
+        Assert.True(ObjectHeader.TryRead(game.Memory, session, out var header), "a freed object's bytes still read");
+        Assert.Equal(uclass, header.ClassPrivate);
+        Assert.False(finder.IsLive(session));
+        Assert.Equal(0, finder.FindInstanceOfClass(uclass));
+        Assert.DoesNotContain(game.Log.Lines, l => l.Contains("liveness checks through the array are off"));
+
+        // The same game with an object whose index does not name its slot.
+        var odd = new FakeGame();
+        nint oddClass = odd.AddClass("PfgNetcodeSession");
+        nint oddSession = odd.AddInstance(oddClass, "Session");
+        odd.Memory.Write(odd.ClassClass + Mvs.ObjectInternalIndex, 7);
+        var oddFinder = odd.Finder();
+        Assert.Equal(oddSession, oddFinder.FindInstanceOfClass(oddClass));
+        Assert.True(oddFinder.UsesObjectArray);
+        Assert.Contains(odd.Log.Lines, l => l.Contains("slot 0 has internal index 7; liveness checks through the array are off"));
+        odd.RemoveObject(oddSession);
+        Assert.True(oddFinder.IsLive(oddSession), "without a trusted index the check cannot say no");
+    }
+
     [Fact]
     public void TheChunkTablePointerIsDecodedWithTheBuildsKey()
     {

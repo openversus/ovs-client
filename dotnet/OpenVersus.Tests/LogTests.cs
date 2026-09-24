@@ -34,6 +34,22 @@ public class LogTests
                 Assert.True(File.Exists(archive), "this run not archived on Close");
                 Assert.Equal(File.ReadAllText(running), File.ReadAllText(archive));
             }
+
+            // A file that ends with the closed marker was archived by its Close; the next session
+            // must not archive it again under its first line's time (a match log stays on disk
+            // between matches, and its first line is written a second after it opens).
+            Assert.Equal(2, Directory.GetFiles(dir, "OpenVersus_*.log").Length);
+            DateTime closedRun = DateTime.Now.AddHours(-2);
+            string closedStamp = closedRun.ToString("yyyy-MM-dd HH:mm:ss.fff", System.Globalization.CultureInfo.InvariantCulture);
+            File.WriteAllText(running, $"{closedStamp} [NFO] NETSTATS player=1\n{closedStamp} [NFO] log closed\n");
+            using (var next = Log.OpenSession(dir, "OpenVersus"))
+            {
+                next.Info("next");
+                Assert.True(next.Flush());
+                Assert.False(File.Exists(Path.Combine(dir, $"OpenVersus_{closedRun:yyyy-MM-dd-HH.mm.ss}.log")), "a closed log was archived again");
+                Assert.Equal(2, Directory.GetFiles(dir, "OpenVersus_*.log").Length);
+                Assert.DoesNotContain("NETSTATS", File.ReadAllText(running));
+            }
         }
         finally
         {

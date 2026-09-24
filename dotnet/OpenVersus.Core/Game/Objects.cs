@@ -63,6 +63,7 @@ public sealed class ObjectArray
     private readonly nint _chunkTable;
     private int _count;
     private int _chunks;
+    private bool _indexTrusted = true;
 
     private ObjectArray(IMemory memory, nint global, nint chunkTable, int count, int chunks)
     {
@@ -167,9 +168,31 @@ public sealed class ObjectArray
             return false;
         }
 
+        // The internal index is what makes a liveness check O(1); if it does not name the slot the
+        // object sits in, the check is switched off rather than the array.
+        for (int i = 0; i < Math.Min(array.Count, 64); i++)
+        {
+            nint obj = array[i];
+            if (obj != 0 && memory.TryRead(obj + Mvs.ObjectInternalIndex, out int index) && index != i)
+            {
+                log.Warn($"object array: entry 0x{obj:X} in slot {i} has internal index {index}; liveness checks through the array are off");
+                array._indexTrusted = false;
+                break;
+            }
+        }
+
         log.Info($"object array at 0x{global:X}: {array.Count} objects in {array.Chunks} chunks");
         return true;
     }
+
+    /// <summary>
+    /// Whether the array still lists <paramref name="obj"/> in the slot the object names as its
+    /// own: two guarded reads, no walk. An object the engine has freed leaves its slot while its
+    /// bytes stay readable, which is what a stale pointer would otherwise keep sampling. Always
+    /// true when the internal index could not be validated.
+    /// </summary>
+    public bool Contains(nint obj) =>
+        !_indexTrusted || (_memory.TryRead(obj + Mvs.ObjectInternalIndex, out int index) && index >= 0 && this[index] == obj);
 
     public nint this[int index]
     {
@@ -228,7 +251,8 @@ public sealed class ObjectFinder(GameImage image, IMemory memory, IGameNames nam
 {
     private readonly Dictionary<string, nint> _classes = new(StringComparer.Ordinal);
 
-    /// <summary>The memory and names this finder reads, for code that follows what it found.</summary>
+    /// <summary>The image, memory and names this finder reads, for code that follows what it found.</summary>
+    public GameImage Image => image;
     public IMemory Memory => memory;
     public IGameNames Names => names;
     private readonly object _arrayLock = new();
@@ -244,6 +268,9 @@ public sealed class ObjectFinder(GameImage image, IMemory memory, IGameNames nam
     private static readonly string[] ClassClassNames = ["Class", "BlueprintGeneratedClass", "WidgetBlueprintGeneratedClass"];
 
     public bool UsesObjectArray => _array != null;
+
+    /// <summary>Whether <paramref name="obj"/> is still in the object array; true when there is no array to ask (the heap scan cannot tell).</summary>
+    public bool IsLive(nint obj) => _array is not { } array || array.Contains(obj);
 
     /// <summary>
     /// The object array, opened on first use rather than at plugin load: the plugin loads before

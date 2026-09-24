@@ -166,17 +166,24 @@ public sealed class Client
             // opens a fresh NetStats.log and closing it archives it under the match's start time.
             string logDirectory = Path.GetDirectoryName(Log.Path)!;
             string fallback = Directory;
-            var stats = new NetStatsLogger(Objects, Log, info =>
+            var stats = new NetStatsLogger(Objects, Log, openMatchLog: _ =>
             {
                 var matchLog = Log.OpenSession(logDirectory, "NetStats", fallbackDirectory: fallback);
                 matchLog.MinimumLevel = LogLevel.Information;
-                matchLog.ArchiveSuffix = info.FileSuffix;
                 if (matchLog.Notice != null)
                 {
                     Log.Warn(matchLog.Notice);
                 }
 
                 return matchLog;
+            }, nameMatchLog: (matchLog, info) =>
+            {
+                // The name is applied when the log is archived (closed), so a description read
+                // seconds into the match still names the file.
+                if (matchLog is Log session)
+                {
+                    session.ArchiveSuffix = info.FileSuffix;
+                }
             });
             stats.Start();
             _shutdown.Add(stats.Stop);
