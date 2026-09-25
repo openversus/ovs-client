@@ -8,7 +8,9 @@ namespace OpenVersus;
 /// </summary>
 public static partial class OvsVersion
 {
+    /// <summary>The client's name, for message box captions and the log.</summary>
     public const string Name = "OpenVersus";
+    /// <summary>The debug console's window title.</summary>
     public const string ConsoleTitle = "OpenVersus Debug Console";
     /// <summary>The C++ default for both server URLs when the key is missing from the ini.</summary>
     public const string DefaultServerUrl = "https://prod.openversus.org/";

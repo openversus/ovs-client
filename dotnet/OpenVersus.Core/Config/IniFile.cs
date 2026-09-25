@@ -43,6 +43,7 @@ public sealed class IniFile
     private readonly byte[] _preamble;
     private bool _dirty;
 
+    /// <summary>The file this document reads from and saves to.</summary>
     public string Path { get; }
 
     /// <summary>Why the file could not be read, in which case this is an empty document, as the
@@ -123,11 +124,13 @@ public sealed class IniFile
         return index < 0 ? null : Unquote(_lines[index].Value.Trim());
     }
 
+    /// <summary>The value of a key, or <paramref name="defaultValue"/> when the section or key is missing.</summary>
     public string Get(string section, string key, string defaultValue) => Get(section, key) ?? defaultValue;
 
     /// <summary>A boolean, or the default when the key is missing or is not a spelling <see cref="TryParseBool"/> accepts.</summary>
     public bool GetBool(string section, string key, bool defaultValue) => TryParseBool(Get(section, key), out bool value) ? value : defaultValue;
 
+    /// <summary>A whole number, or <paramref name="defaultValue"/> when the key is missing or is not plain decimal digits.</summary>
     public ulong GetUInt64(string section, string key, ulong defaultValue) =>
         ulong.TryParse(Get(section, key), NumberStyles.None, CultureInfo.InvariantCulture, out ulong value) ? value : defaultValue;
 

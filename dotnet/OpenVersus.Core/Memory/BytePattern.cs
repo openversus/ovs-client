@@ -8,6 +8,7 @@ namespace OpenVersus.Memory;
 /// </summary>
 public sealed class BytePattern
 {
+    /// <summary>The bytes to match; 0 at a wildcard.</summary>
     public byte[] Bytes { get; }
     /// <summary>0xFF where the byte must equal <see cref="Bytes"/>, 0 for a wildcard, as in the C++.</summary>
     public byte[] Mask { get; }
@@ -15,8 +16,10 @@ public sealed class BytePattern
     public string Text { get; }
     /// <summary>The longest run of fixed bytes; the scanner searches for it first.</summary>
     public int AnchorStart { get; }
+    /// <summary>The length of the run at <see cref="AnchorStart"/>.</summary>
     public int AnchorLength { get; }
 
+    /// <summary>The pattern's length in bytes, wildcards included.</summary>
     public int Length => Bytes.Length;
 
     private BytePattern(byte[] bytes, byte[] mask, string text)
@@ -44,6 +47,7 @@ public sealed class BytePattern
         }
     }
 
+    /// <summary>Parses <paramref name="text"/>; throws a <see cref="FormatException"/> when it is empty or has no fixed bytes.</summary>
     public static BytePattern Parse(string text)
     {
         var bytes = new List<byte>();
@@ -100,6 +104,7 @@ public sealed class BytePattern
         _ => null,
     };
 
+    /// <summary>Whether the pattern matches <paramref name="haystack"/> at offset <paramref name="at"/>; false when it would run past either end.</summary>
     public bool MatchesAt(ReadOnlySpan<byte> haystack, int at)
     {
         if (at < 0 || at + Bytes.Length > haystack.Length)
@@ -118,5 +123,6 @@ public sealed class BytePattern
         return true;
     }
 
+    /// <summary>The pattern as given.</summary>
     public override string ToString() => Text;
 }

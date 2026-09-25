@@ -9,9 +9,11 @@ namespace OpenVersus.Memory;
 /// </summary>
 public interface IMemory
 {
+    /// <summary>Fills <paramref name="into"/> from <paramref name="address"/>; false when any of the range cannot be read.</summary>
     bool TryRead(nint address, Span<byte> into);
 }
 
+/// <summary>Typed reads on any <see cref="IMemory"/>.</summary>
 public static class MemoryReads
 {
     /// <summary>One unmanaged value at <paramref name="address"/>, or default and false.</summary>
@@ -29,12 +31,14 @@ public static class MemoryReads
 /// </summary>
 public sealed class ProcessMemory : IMemory
 {
+    /// <summary>The only instance.</summary>
     public static ProcessMemory Instance { get; } = new();
 
     private ProcessMemory()
     {
     }
 
+    /// <inheritdoc/>
     public bool TryRead(nint address, Span<byte> into) =>
         Kernel32.ReadProcessMemory(Kernel32.GetCurrentProcess(), address, into, (nuint)into.Length, out nuint read) && read == (nuint)into.Length;
 }

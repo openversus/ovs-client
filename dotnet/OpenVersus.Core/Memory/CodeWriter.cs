@@ -54,6 +54,7 @@ public static unsafe class CodeWriter
         }
     }
 
+    /// <summary>An unguarded copy of <paramref name="length"/> bytes at <paramref name="address"/>, for memory known to be mapped, such as the image.</summary>
     public static byte[] Read(nint address, int length) => new ReadOnlySpan<byte>((void*)address, length).ToArray();
 
     /// <summary>
@@ -62,5 +63,6 @@ public static unsafe class CodeWriter
     /// </summary>
     public static bool TryRead(nint address, Span<byte> into) => ProcessMemory.Instance.TryRead(address, into);
 
+    /// <summary>One unmanaged value through <see cref="ProcessMemory"/>, or default and false. Never throws.</summary>
     public static bool TryRead<T>(nint address, out T value) where T : unmanaged => ProcessMemory.Instance.TryRead(address, out value);
 }

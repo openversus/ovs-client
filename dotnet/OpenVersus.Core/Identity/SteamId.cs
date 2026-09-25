@@ -13,6 +13,7 @@ public static unsafe class SteamId
 {
     private static readonly string[] s_moduleNames = ["steam_api64.dll", "steamclient64.dll", "steamclient.dll", "steam_api.dll", "gameoverlayrenderer64.dll"];
 
+    /// <summary>The Steam id as decimal text, or empty when neither the API nor loginusers.vdf gives one.</summary>
     public static string Resolve(ILogger log)
     {
         nint module = 0;

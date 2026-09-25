@@ -25,15 +25,25 @@ public static unsafe class SunsetPatch
 
     /// <summary>How many times the game has called the sunset check, when counting is on.</summary>
     public static long Calls => Interlocked.Read(ref s_calls);
+    /// <summary>True when <see cref="Apply"/> put the call counter in place of the plain return.</summary>
     public static bool Counting { get; private set; }
     /// <summary>The function's start RVA, from .pdata, once Apply has run.</summary>
     public static uint FunctionRva { get; private set; }
 
+    /// <summary>The <see cref="GameFunctions"/> key for the MSVC thread-safe static init header the check calls. Registered for the log only.</summary>
     public const string InitThreadHeaderName = "Init_thread_header";
+    /// <summary>The <see cref="GameFunctions"/> key for the matching init footer. Registered for the log only.</summary>
     public const string InitThreadFooterName = "Init_thread_footer";
+    /// <summary>The <see cref="GameFunctions"/> key for the FDateTime constructor that builds the sunset date. Registered for the log only.</summary>
     public const string FDateTimeName = "FDateTime::FDateTime";
+    /// <summary>The <see cref="GameFunctions"/> key for the sunset date itself, a static FDateTime: data, not a function.</summary>
     public const string SunsetDateName = "kSunsetDate";
 
+    /// <summary>
+    /// Makes the check return false on both paths and records its start RVA for <see cref="SunsetCallersPatch"/>.
+    /// With <paramref name="count"/>, the return goes through a counter that <see cref="Calls"/> reads.
+    /// False when the pattern is missing; throws a <see cref="PatchException"/> when the bytes are not the expected ones.
+    /// </summary>
     public static bool Apply(HookContext c, bool count = false)
     {
         c.Log.Info("==Override Sunset Function==");

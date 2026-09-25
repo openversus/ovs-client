@@ -1,5 +1,12 @@
 namespace OpenVersus.Memory;
 
+/// <summary>One entry of a PE section table.</summary>
+/// <param name="Name">The section name, such as .text, without its padding.</param>
+/// <param name="Rva">Where the section is mapped, relative to the image base.</param>
+/// <param name="VirtualSize">Its size when mapped.</param>
+/// <param name="RawOffset">Where its data starts in the file.</param>
+/// <param name="RawSize">The size of its data in the file.</param>
+/// <param name="Characteristics">The IMAGE_SCN_* flags.</param>
 public readonly record struct PeSection(string Name, uint Rva, uint VirtualSize, uint RawOffset, uint RawSize, uint Characteristics);
 
 /// <summary>Reads what this needs out of a PE image: the section table and the mapped size.</summary>
@@ -39,12 +46,14 @@ public static unsafe class PeImage
         return lfanew;
     }
 
+    /// <summary>SizeOfImage from the optional header: the mapped image's size. Throws a <see cref="FormatException"/> when <paramref name="headers"/> are not a PE's.</summary>
     public static uint SizeOfImage(ReadOnlySpan<byte> headers)
     {
         int lfanew = NtHeaders(headers);
         return BitConverter.ToUInt32(headers[(lfanew + 24 + 56)..]);
     }
 
+    /// <summary>The section table. Throws a <see cref="FormatException"/> when <paramref name="headers"/> are not a PE's.</summary>
     public static List<PeSection> Sections(ReadOnlySpan<byte> headers)
     {
         int lfanew = NtHeaders(headers);
@@ -173,8 +182,10 @@ public static unsafe class PeImage
         return mapped;
     }
 
+    /// <summary>Whether the section is marked executable.</summary>
     public static bool IsExecutable(this PeSection s) => (s.Characteristics & IMAGE_SCN_MEM_EXECUTE) != 0;
 
+    /// <summary>Whether the section is initialized data that is readable but neither writable nor executable, such as .rdata.</summary>
     public static bool IsReadOnlyData(this PeSection s) =>
         (s.Characteristics & IMAGE_SCN_CNT_INITIALIZED_DATA) != 0 &&
         (s.Characteristics & IMAGE_SCN_MEM_READ) != 0 &&

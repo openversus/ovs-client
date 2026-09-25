@@ -9,6 +9,10 @@ namespace OpenVersus.Hooks;
 /// </summary>
 public static class SigCheckPatch
 {
+    /// <summary>
+    /// Turns the tail jump into a ret. False when the pattern is missing; throws a
+    /// <see cref="PatchException"/> when the byte there is not a jmp.
+    /// </summary>
     public static bool Apply(HookContext c)
     {
         c.Log.Info("==DisableSignatureCheck==");

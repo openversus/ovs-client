@@ -15,6 +15,11 @@ public static unsafe class UeFunctionHooks
     private static delegate* unmanaged<nint, nint, nint> s_fighterInstanceCtor;
     private static ILogger? s_log;
 
+    /// <summary>
+    /// Registers the engine functions and redirects the game-instance constructor's tail jump so each
+    /// instance is recorded (<see cref="GameUi.RecordFighterGameInstance"/>). False when the FText,
+    /// CFName, WCFName or FighterInstance pattern is missing; whatever was registered before that stays.
+    /// </summary>
     public static bool Apply(HookContext c)
     {
         s_log = c.Log;

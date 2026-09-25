@@ -5,11 +5,20 @@ using Microsoft.Extensions.Logging;
 namespace OpenVersus.Game;
 
 /// <summary>The first 0x30 bytes of a UObject, as this build lays them out (UE4SS MemberVariableLayout).</summary>
+/// <param name="Address">Where the object is.</param>
+/// <param name="VTable">Its vtable pointer, at <see cref="Mvs.ObjectVTable"/>.</param>
+/// <param name="Flags">Its EObjectFlags, at +0x08.</param>
+/// <param name="ClassPrivate">Its class, at <see cref="Mvs.ObjectClassPrivate"/>.</param>
+/// <param name="Name">Its FName, at <see cref="Mvs.ObjectNamePrivate"/>.</param>
+/// <param name="Outer">Its outer, at <see cref="Mvs.ObjectOuterPrivate"/>.</param>
 public readonly record struct ObjectHeader(nint Address, nint VTable, uint Flags, nint ClassPrivate, FName Name, nint Outer)
 {
+    /// <summary>EObjectFlags RF_ClassDefaultObject: the object is its class's default object.</summary>
     public const uint RF_ClassDefaultObject = 0x10;
+    /// <summary>Whether this is a class default object rather than an instance.</summary>
     public bool IsDefaultObject => (Flags & RF_ClassDefaultObject) != 0;
 
+    /// <summary>Reads the header at <paramref name="address"/>; false, with <paramref name="header"/> zeroed, when the 0x30 bytes are not readable.</summary>
     public static bool TryRead(IMemory memory, nint address, out ObjectHeader header)
     {
         Span<byte> raw = stackalloc byte[0x30];
@@ -22,6 +31,7 @@ public readonly record struct ObjectHeader(nint Address, nint VTable, uint Flags
         return true;
     }
 
+    /// <summary>Decodes a header from <paramref name="raw"/>, bytes already read from <paramref name="address"/>. No check that they are an object.</summary>
     public static ObjectHeader FromBytes(nint address, ReadOnlySpan<byte> raw) => new(
         address,
         (nint)BitConverter.ToInt64(raw[Mvs.ObjectVTable..]),
@@ -44,6 +54,7 @@ public readonly record struct ObjectHeader(nint Address, nint VTable, uint Flags
 /// </summary>
 public sealed class ObjectArray
 {
+    /// <summary>The RVA of GUObjectArray in the final build.</summary>
     public const uint GUObjectArrayRva = 0x081C5090;
     /// <summary>int32 NumElements.</summary>
     internal const int NumElementsOffset = 0xA0;
@@ -88,6 +99,7 @@ public sealed class ObjectArray
         }
     }
 
+    /// <summary>Chunks in use, re-read each time like <see cref="Count"/>.</summary>
     public int Chunks
     {
         get
@@ -101,6 +113,12 @@ public sealed class ObjectArray
         }
     }
 
+    /// <summary>
+    /// Opens the array at <see cref="GUObjectArrayRva"/> and validates it: the header must look like a
+    /// chunked array, and the first objects must have a vtable in the image and, once names can be
+    /// asked, a name that resolves. Null, with the reason and the raw header bytes logged, when anything
+    /// disagrees.
+    /// </summary>
     public static ObjectArray? Open(GameImage image, IMemory memory, IGameNames names, ILogger log)
     {
         nint global = image.Address(GUObjectArrayRva);
@@ -194,6 +212,7 @@ public sealed class ObjectArray
     public bool Contains(nint obj) =>
         !_indexTrusted || (_memory.TryRead(obj + Mvs.ObjectInternalIndex, out int index) && index >= 0 && this[index] == obj);
 
+    /// <summary>The object in slot <paramref name="index"/>, or 0 when the slot is empty, out of range or unreadable.</summary>
     public nint this[int index]
     {
         get
@@ -251,9 +270,11 @@ public sealed class ObjectFinder(GameImage image, IMemory memory, IGameNames nam
 {
     private readonly Dictionary<string, nint> _classes = new(StringComparer.Ordinal);
 
-    /// <summary>The image, memory and names this finder reads, for code that follows what it found.</summary>
+    /// <summary>The image this finder reads, for code that follows what it found.</summary>
     public GameImage Image => image;
+    /// <summary>The memory this finder reads.</summary>
     public IMemory Memory => memory;
+    /// <summary>The name table this finder asks.</summary>
     public IGameNames Names => names;
     private readonly object _arrayLock = new();
     private ObjectArray? _array;
@@ -267,6 +288,7 @@ public sealed class ObjectFinder(GameImage image, IMemory memory, IGameNames nam
     /// <summary>What a class object's own class is called: native, editor-made, and editor-made widget.</summary>
     private static readonly string[] ClassClassNames = ["Class", "BlueprintGeneratedClass", "WidgetBlueprintGeneratedClass"];
 
+    /// <summary>Whether the object array has been opened; false means lookups scan the heap.</summary>
     public bool UsesObjectArray => _array != null;
 
     /// <summary>Whether <paramref name="obj"/> is still in the object array; true when there is no array to ask (the heap scan cannot tell).</summary>
@@ -377,6 +399,10 @@ public sealed class ObjectFinder(GameImage image, IMemory memory, IGameNames nam
         }
     }
 
+    /// <summary>
+    /// Whether <paramref name="uclass"/> is <paramref name="ancestor"/> or derives from it, following
+    /// the super-struct chain for at most 20 levels. False when a link cannot be read.
+    /// </summary>
     public static bool Inherits(IMemory memory, nint uclass, nint ancestor)
     {
         for (int depth = 0; depth < 20 && uclass != 0; depth++)
@@ -466,6 +492,11 @@ public sealed class ObjectFinder(GameImage image, IMemory memory, IGameNames nam
 /// </summary>
 public static class HeapScanner
 {
+    /// <summary>
+    /// Every eight-byte-aligned spot in committed read-only or read-write regions outside
+    /// <paramref name="image"/> whose first qword points into the image. Regions under 256 bytes or
+    /// over 256 MB are skipped. Not every hit is an object; callers filter by name and class.
+    /// </summary>
     public static IEnumerable<ObjectHeader> Objects(GameImage image)
     {
         Kernel32.GetSystemInfo(out var si);

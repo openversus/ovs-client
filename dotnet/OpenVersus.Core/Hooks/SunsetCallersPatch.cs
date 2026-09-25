@@ -12,8 +12,13 @@ namespace OpenVersus.Hooks;
 /// </summary>
 public static class SunsetCallersPatch
 {
+    /// <summary>The number of sites the toolkit found in the final build (145 calls, one tail jump). The log compares this run's count with it; nothing depends on the two matching.</summary>
     public const int ExpectedSites = 146;
 
+    /// <summary>
+    /// Patches every site found. Needs <see cref="SunsetPatch.FunctionRva"/>, so it runs after
+    /// <see cref="SunsetPatch.Apply"/>. True only when every site found was patched.
+    /// </summary>
     public static bool Apply(HookContext c)
     {
         c.Log.Info("==Sunset Callers==");

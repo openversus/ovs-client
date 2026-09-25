@@ -8,13 +8,24 @@ namespace OpenVersus.Game;
 /// </summary>
 public static unsafe class GameUi
 {
+    /// <summary>The <see cref="GameFunctions"/> key for the function that returns the game instance's UMvsFrontendManager.</summary>
     public const string GetFrontendManagerName = "GetFrontendManager";
+    /// <summary>The <see cref="GameFunctions"/> key for UMvsFrontendManager::AddDialog, which opens a dialog.</summary>
     public const string AddDialogName = "UMvsFrontendManager::AddDialog";
+    /// <summary>
+    /// The <see cref="GameFunctions"/> key for the FMvsDialogParameters constructor. Resolved and logged, not
+    /// called: the parameters are built here instead (<see cref="FMvsDialogParameters.Empty"/>).
+    /// </summary>
     public const string DialogParametersCtorName = "FMvsDialogParameters::FMvsDialogParameters";
+    /// <summary>The <see cref="GameFunctions"/> key for the function that binds a dialog button's delegate, which <see cref="AssignCallbackToButton"/> calls.</summary>
     public const string DialogCallbackSetterName = "SingleParamDialogCallbackSetter";
+    /// <summary>The <see cref="GameFunctions"/> key for the game's quit callback, bound to the refund dialog's Disagree button.</summary>
     public const string QuitGameName = "QuitGame";
+    /// <summary>The <see cref="GameFunctions"/> key for UMvsNotificationManager::Get, which takes the game instance.</summary>
     public const string GetNotificationManagerName = "UMvsNotificationManager::Get";
+    /// <summary>The <see cref="GameFunctions"/> key for UMvsNotificationManager::RequestShowNotification, which shows a toast.</summary>
     public const string RequestShowNotificationName = "UMvsNotificationManager::RequestShowNotification";
+    /// <summary>The <see cref="GameFunctions"/> key for the UFighterGameInstance constructor, whose tail jump is redirected to record each instance.</summary>
     public const string FighterGameInstanceCtorName = "UFighterGameInstance::UFighterGameInstance";
 
     private static nint s_fighterGameInstance;
@@ -57,6 +68,7 @@ public static unsafe class GameUi
         return (frontend, widget);
     }
 
+    /// <summary>The game instance's UMvsNotificationManager, or 0 while the getter or the instance is not known.</summary>
     public static nint NotificationManager()
     {
         Engine.Require("NotificationManager");

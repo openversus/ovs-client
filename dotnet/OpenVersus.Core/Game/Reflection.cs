@@ -3,17 +3,31 @@ using OpenVersus.Memory;
 namespace OpenVersus.Game;
 
 /// <summary>One parameter of a reflected function, from its FProperty.</summary>
+/// <param name="Name">The parameter's name.</param>
+/// <param name="Type">Its property class, such as IntProperty.</param>
+/// <param name="Offset">Where it sits in the parameter block.</param>
+/// <param name="Size">The size of one element.</param>
+/// <param name="ArrayDim">The element count; 1 for anything but a fixed array.</param>
+/// <param name="Flags">Its EPropertyFlags.</param>
 public sealed record ReflectedParameter(string Name, string Type, int Offset, int Size, int ArrayDim, ulong Flags)
 {
+    /// <summary>EPropertyFlags: the parameter is const.</summary>
     public const ulong CPF_ConstParm = 0x2;
+    /// <summary>EPropertyFlags: the property is a function parameter rather than a local.</summary>
     public const ulong CPF_Parm = 0x80;
+    /// <summary>EPropertyFlags: an out parameter.</summary>
     public const ulong CPF_OutParm = 0x100;
+    /// <summary>EPropertyFlags: the function's return value.</summary>
     public const ulong CPF_ReturnParm = 0x400;
+    /// <summary>EPropertyFlags: passed by reference.</summary>
     public const ulong CPF_ReferenceParm = 0x8000000;
 
+    /// <summary>Whether this is the function's return value.</summary>
     public bool IsReturn => (Flags & CPF_ReturnParm) != 0;
+    /// <summary>Whether it is an out parameter.</summary>
     public bool IsOut => (Flags & CPF_OutParm) != 0;
 
+    /// <summary>Direction, type, name, offset in the parameter block and size, for the log.</summary>
     public override string ToString() => $"{(IsReturn ? "return " : IsOut ? "out " : "")}{Type} {Name} @+0x{Offset:X} ({Size}{(ArrayDim > 1 ? $"x{ArrayDim}" : "")})";
 }
 
@@ -38,6 +52,10 @@ public static class Reflection
     internal const int FPropertyFlags = 0x40;
     internal const int FPropertyOffset = 0x4C;
 
+    /// <summary>
+    /// Reads <paramref name="ufunction"/>'s flags, parameter block size and FProperty chain. A field
+    /// that cannot be read comes back as zero, and the chain is followed for at most 64 fields.
+    /// </summary>
     public static ReflectedSignature Describe(IMemory memory, IGameNames names, nint ufunction, string className, string functionName, nint ownerClass)
     {
         memory.TryRead(ufunction + UFunctionFunctionFlags, out uint functionFlags);

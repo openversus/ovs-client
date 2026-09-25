@@ -16,12 +16,19 @@ public static class LogEvents
 /// </summary>
 public static class LogExtensions
 {
+    /// <summary>Logs <paramref name="message"/> at Trace.</summary>
     public static void Trace(this ILogger log, string message) => Write(log, LogLevel.Trace, default, message);
+    /// <summary>Logs <paramref name="message"/> at Debug.</summary>
     public static void Debug(this ILogger log, string message) => Write(log, LogLevel.Debug, default, message);
+    /// <summary>Logs <paramref name="message"/> at Information.</summary>
     public static void Info(this ILogger log, string message) => Write(log, LogLevel.Information, default, message);
+    /// <summary>Logs <paramref name="message"/> at Warning.</summary>
     public static void Warn(this ILogger log, string message) => Write(log, LogLevel.Warning, default, message);
+    /// <summary>Logs <paramref name="message"/> at Error.</summary>
     public static void Error(this ILogger log, string message) => Write(log, LogLevel.Error, default, message);
+    /// <summary>Logs <paramref name="message"/> at Critical.</summary>
     public static void Critical(this ILogger log, string message) => Write(log, LogLevel.Critical, default, message);
+    /// <summary>Logs <paramref name="message"/> at Information with <see cref="LogEvents.Success"/>, which the console shows in green.</summary>
     public static void Success(this ILogger log, string message) => Write(log, LogLevel.Information, LogEvents.Success, message);
 
     private static void Write(ILogger log, LogLevel level, EventId eventId, string message) =>

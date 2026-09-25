@@ -17,8 +17,10 @@ public static class HookGuard
     private static readonly object s_lock = new();
     private static ILogger? s_log;
 
+    /// <summary>Sets the logger failures go to; until then they are only counted.</summary>
     public static void Attach(ILogger log) => s_log = log;
 
+    /// <summary>Runs <paramref name="body"/> on <paramref name="state"/>; on an exception, reports it under <paramref name="hook"/> and returns <paramref name="fallback"/>.</summary>
     public static TResult Run<TState, TResult>(string hook, TState state, Func<TState, TResult> body, TResult fallback)
     {
         try
@@ -32,6 +34,7 @@ public static class HookGuard
         }
     }
 
+    /// <summary>Runs <paramref name="body"/> on <paramref name="state"/>; an exception is reported under <paramref name="hook"/> and goes no further.</summary>
     public static void Run<TState>(string hook, TState state, Action<TState> body)
     {
         try
@@ -44,7 +47,7 @@ public static class HookGuard
         }
     }
 
-    /// <summary>How many times each hook has failed so far, for the shutdown summary.</summary>
+    /// <summary>How many times each hook has failed so far, for the heartbeat.</summary>
     public static IReadOnlyDictionary<string, int> Failures
     {
         get

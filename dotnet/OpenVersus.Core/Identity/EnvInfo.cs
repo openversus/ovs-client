@@ -13,17 +13,28 @@ namespace OpenVersus.Identity;
 /// </summary>
 public sealed class EnvInfo
 {
+    /// <summary>The SteamID environment variable, or "Unknown". <see cref="IdentityRegistration.Run"/> fills it in from <see cref="Identity.SteamId.Resolve"/> when the environment did not carry it.</summary>
     public string SteamId { get; set; } = "Unknown";
+    /// <summary>The SteamGameId environment variable, or "Unknown".</summary>
     public string GameId { get; } = "Unknown";
+    /// <summary>The SteamAppId environment variable, or "Unknown".</summary>
     public string AppId { get; } = "Unknown";
+    /// <summary>The Epic account id, from the name of a file in the Epic launcher's saved data, or "Unknown".</summary>
     public string EpicId { get; } = "Unknown";
+    /// <summary>cpuid leaf 0; all zero where cpuid is not available.</summary>
     public (int Eax, int Ebx, int Ecx, int Edx) CpuLeaf0 { get; }
+    /// <summary>cpuid leaf 1; all zero where cpuid is not available.</summary>
     public (int Eax, int Ebx, int Ecx, int Edx) CpuLeaf1 { get; }
+    /// <summary>The baseboard serial from the SMBIOS table, or "Unknown".</summary>
     public string MotherboardSerial { get; }
+    /// <summary>The fingerprint: SHA-256 of <see cref="FingerprintText"/>, as lowercase hex.</summary>
     public string HardwareId { get; }
+    /// <summary>Whether a Steam id is known.</summary>
     public bool IsSteam { get; set; }
+    /// <summary>Whether an Epic id is known.</summary>
     public bool IsEpic { get; }
 
+    /// <summary>Collects everything from the environment, cpuid, the firmware table and the Epic launcher's files. Nothing here fails: what cannot be read is "Unknown" or zero.</summary>
     public EnvInfo()
     {
         SteamId = Env("SteamID");
@@ -45,9 +56,11 @@ public sealed class EnvInfo
     public static string FingerprintText((int Eax, int Ebx, int Ecx, int Edx) leaf0, (int Eax, int Ebx, int Ecx, int Edx) leaf1, string serial) =>
         $"{leaf0.Eax}|{leaf0.Ebx}|{leaf0.Ecx}|{leaf0.Edx}|{(uint)leaf1.Eax:X8}|{serial}";
 
+    /// <summary>SHA-256 of the fingerprint text, as lowercase hex.</summary>
     public static string ComputeHardwareId((int, int, int, int) leaf0, (int, int, int, int) leaf1, string serial) =>
         Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(FingerprintText(leaf0, leaf1, serial))));
 
+    /// <summary>Every field on its own line for the debug log, with the hardware id shortened.</summary>
     public string Print() =>
         $"[OVS] SteamID    : {SteamId}\n[OVS] GameID     : {GameId}\n[OVS] AppID      : {AppId}\n[OVS] EpicID     : {EpicId}\n" +
         $"[OVS] CpuLeaf0   : {CpuLeaf0.Eax}\n[OVS] CpuLeaf1   : 0x{(uint)CpuLeaf1.Eax:X8}  (family/model/stepping)\n" +

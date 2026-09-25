@@ -13,7 +13,9 @@ namespace OpenVersus.Hooks;
 /// </summary>
 public static unsafe class EndpointHooks
 {
+    /// <summary>The <see cref="GameFunctions"/> key for the game's function that stores the game-server endpoint; its call is redirected.</summary>
     public const string GetEndpointKeyValueName = "GetEndpointKeyValue";
+    /// <summary>The <see cref="GameFunctions"/> key for the game's function that stores the prod endpoint into an FString; its call is redirected.</summary>
     public const string SetFStringValueName = "SetFStringValue";
 
     private static delegate* unmanaged<nint, byte*, nint> s_getEndpointKeyValue;
@@ -24,6 +26,11 @@ public static unsafe class EndpointHooks
     private static string s_prodUrl = "";
     private static ILogger? s_log;
 
+    /// <summary>
+    /// Redirects the call that stores the game-server endpoint so it stores <c>[Server.Game] ServerUrl</c>
+    /// exactly as configured, trailing slash included. False when the URL is empty or the
+    /// EndpointLoader pattern is missing; a URL that does not parse is logged and used anyway.
+    /// </summary>
     public static bool ApplyGame(HookContext c)
     {
         s_log = c.Log;
@@ -57,6 +64,11 @@ public static unsafe class EndpointHooks
         return true;
     }
 
+    /// <summary>
+    /// Redirects the call that stores the prod endpoint so it stores <c>[Server.Prod] ServerUrl</c> with
+    /// exactly one trailing slash. False when the URL is empty or the ProdEndpointLoader pattern is
+    /// missing; a URL that does not parse is logged and used anyway.
+    /// </summary>
     public static bool ApplyProd(HookContext c)
     {
         s_log = c.Log;

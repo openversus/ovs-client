@@ -5,10 +5,17 @@ using Microsoft.Extensions.Logging;
 namespace OpenVersus.Game;
 
 /// <summary>Where one named pattern from the ini was found, or that it was not.</summary>
+/// <param name="Name">The ini key the pattern was found under.</param>
+/// <param name="Text">The pattern as written in the ini.</param>
+/// <param name="Address">Where it matched; 0 when it did not.</param>
+/// <param name="FromCache">Whether the address came from the pattern cache rather than a scan.</param>
 public readonly record struct PatternHit(string Name, string Text, nint Address, bool FromCache)
 {
+    /// <summary>True when an address was found.</summary>
     public bool Found => Address != 0;
+    /// <summary>A hit for a pattern that is blank, does not parse, or matched nothing.</summary>
     public static PatternHit Missing(string name, string text) => new(name, text, 0, false);
+    /// <summary>The address, or 0 when the pattern was not found.</summary>
     public static implicit operator nint(PatternHit hit) => hit.Address;
 }
 
@@ -19,11 +26,17 @@ public readonly record struct PatternHit(string Name, string Text, nint Address,
 /// </summary>
 public sealed class PatternResolver(GameImage image, PatternCache cache, Settings settings, ILogger log)
 {
+    /// <summary>The image the patterns are searched in.</summary>
     public GameImage Image { get; } = image;
 
     /// <summary>Finds the pattern the ini keeps under <paramref name="name"/>.</summary>
     public PatternHit Find(string name) => Find(name, settings.Pattern(name));
 
+    /// <summary>
+    /// Finds <paramref name="text"/>, logging under <paramref name="name"/>: the cached RVA if the pattern
+    /// still matches there, otherwise the first match in the image, which is then cached. A blank or
+    /// unparsable pattern, or no match at all, is logged as an error and returns a missing hit.
+    /// </summary>
     public PatternHit Find(string name, string text)
     {
         if (string.IsNullOrWhiteSpace(text))

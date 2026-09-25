@@ -6,6 +6,11 @@ namespace OpenVersus.Hooks;
 /// <summary>Resolves what the dialog helpers need. Nothing is patched; the C++ DialogHooks.</summary>
 public static class DialogHooks
 {
+    /// <summary>
+    /// Registers the dialog functions. False, with the reason logged, when the UE functions are not
+    /// resolved or the Dialog or DialogCallback pattern is missing; a missing DialogParams or
+    /// QuitGameCallback pattern loses only that function.
+    /// </summary>
     public static bool Apply(HookContext c)
     {
         c.Log.Info("==Dialog Funcs==");

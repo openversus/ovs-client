@@ -1,5 +1,6 @@
 namespace OpenVersus.Memory;
 
+/// <summary>Searches bytes for a <see cref="BytePattern"/>.</summary>
 public static class PatternScanner
 {
     /// <summary>

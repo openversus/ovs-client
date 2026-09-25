@@ -39,7 +39,9 @@ public sealed class Log : ILogger, IDisposable
     private readonly string? _name;
     private volatile bool _closed;
 
+    /// <summary>The running log file, truncated at each launch.</summary>
     public string Path { get; }
+    /// <summary>When this log was opened; its archived copy is named after it.</summary>
     public DateTime LaunchTime { get; } = DateTime.Now;
 
     /// <summary>Why the file at <see cref="Path"/> could not be created or written, in which case
@@ -124,7 +126,9 @@ public sealed class Log : ILogger, IDisposable
     }
 
     // ILogger: the client's own verbs (LogExtensions) and the standard ones (LogInformation, ...) land here.
+    /// <inheritdoc/>
     public bool IsEnabled(LogLevel level) => level != LogLevel.None && level >= MinimumLevel && !_closed;
+    /// <summary>Scopes are not supported; always null.</summary>
     public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
     void ILogger.Log<TState>(LogLevel level, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
     {
@@ -192,6 +196,10 @@ public sealed class Log : ILogger, IDisposable
         }
     }
 
+    /// <summary>
+    /// Queues one line for the file and the console, stamped and tagged with its level. <paramref name="color"/>
+    /// is an ANSI sequence for the message on the console only. Nothing is queued below <see cref="MinimumLevel"/> or after <see cref="Close"/>.
+    /// </summary>
     public void Line(LogLevel level, string message, string? color = null)
     {
         if (!IsEnabled(level))
@@ -365,6 +373,7 @@ public sealed class Log : ILogger, IDisposable
         }
     }
 
+    /// <summary>The same as <see cref="Close"/>.</summary>
     public void Dispose() => Close();
 
     /// <summary>Creates the directory, archives a leftover file and truncates; the error if any of that fails.</summary>

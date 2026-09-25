@@ -21,15 +21,25 @@ public sealed class Client
 {
     private static readonly string[] s_gameProcessNames = ["MultiVersus-Win64-Shipping.exe", "MultiVersus.exe", "OVS.exe"];
 
+    /// <summary>The plugin's log.</summary>
     public Log Log { get; }
+    /// <summary>The plugin's folder, where the ini, state and cache files live.</summary>
     public string Directory { get; }
+    /// <summary>OpenVersus.ini, as read by <see cref="Initialize"/>.</summary>
     public Settings Settings { get; private set; } = null!;
+    /// <summary>OVSState.ini, as read by <see cref="Initialize"/>.</summary>
     public State State { get; private set; } = null!;
+    /// <summary>Which patches and hooks took.</summary>
     public HookStatus Status { get; } = new();
+    /// <summary>The game executable.</summary>
     public GameImage Image { get; private set; } = null!;
+    /// <summary>Finds the ini's patterns in <see cref="Image"/>.</summary>
     public PatternResolver Patterns { get; private set; } = null!;
+    /// <summary>Finds the game's objects, for the poller and netstats.</summary>
     public ObjectFinder Objects { get; private set; } = null!;
+    /// <summary>The player's identity and hardware fingerprint, collected during <see cref="Initialize"/>.</summary>
     public EnvInfo? Env { get; private set; }
+    /// <summary>The HTTP transport for the server; a host may replace it before <see cref="Initialize"/>.</summary>
     public IHttpTransport Http { get; set; } = new WinHttpTransport();
 
     private readonly string _pluginPath;
@@ -37,6 +47,7 @@ public sealed class Client
     private readonly nint _module;
     private readonly List<Action> _shutdown = [];
 
+    /// <summary>A client for the plugin at <paramref name="pluginPath"/>, loaded as <paramref name="module"/>. Nothing runs until <see cref="Initialize"/>.</summary>
     public Client(Log log, string pluginPath, nint module)
     {
         Log = log;
@@ -45,6 +56,10 @@ public sealed class Client
         _module = module;
     }
 
+    /// <summary>
+    /// Reads the settings, applies every patch and hook they enable and starts the background work.
+    /// Each hook's failure is logged and the rest still apply, so this returns true.
+    /// </summary>
     public bool Initialize()
     {
         Log.Info($"On Attach Initialize ({OvsVersion.Name} {OvsVersion.Current})");
@@ -367,6 +382,8 @@ public static class Wine
         }
     });
 
+    /// <summary>Whether this process runs under Wine or Proton.</summary>
     public static bool IsWine => s_version.Value != null;
+    /// <summary>The Wine version, or null when not under Wine.</summary>
     public static string? Version => s_version.Value;
 }

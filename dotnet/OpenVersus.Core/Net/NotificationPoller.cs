@@ -16,6 +16,10 @@ public sealed class NotificationPoller(string serverUrl, IHttpTransport http, Ob
     // Lives as long as the process; never disposed, since the loop thread may be waiting on it.
     private CancellationTokenSource? _stopping;
 
+    /// <summary>
+    /// Starts polling on a background thread, after an eight-second wait for the hooks. Does nothing
+    /// when it is already running or the server URL does not parse.
+    /// </summary>
     public void Start()
     {
         if (_stopping != null)
@@ -34,6 +38,7 @@ public sealed class NotificationPoller(string serverUrl, IHttpTransport http, Ob
         log.Info("[NotifPoller] Started");
     }
 
+    /// <summary>Tells the polling thread to stop.</summary>
     public void Stop() => _stopping?.Cancel();
 
     private void Loop(Uri url, CancellationToken stopping)
@@ -118,6 +123,10 @@ public sealed class NotificationPoller(string serverUrl, IHttpTransport http, Ob
         return list;
     }
 
+    /// <summary>
+    /// The notifications in a poll response. Items without a type, items that do not parse, and a
+    /// response that is not a JSON array are skipped.
+    /// </summary>
     public static List<Notification> Parse(string json) => Parse(json, out _);
 
     private void Dispatch(Notification n)

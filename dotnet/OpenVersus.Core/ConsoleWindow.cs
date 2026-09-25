@@ -7,8 +7,13 @@ public static unsafe class ConsoleWindow
 {
     private static nint s_handle;
 
+    /// <summary>Whether the console has been created.</summary>
     public static bool IsOpen => s_handle != 0;
 
+    /// <summary>
+    /// Opens the console (UTF-8, ANSI colors on), routes <paramref name="log"/>'s console output to it
+    /// and prints the banner. True when it is open, including when it already was.
+    /// </summary>
     public static bool Create(Log log)
     {
         if (s_handle != 0)
@@ -36,6 +41,7 @@ public static unsafe class ConsoleWindow
         return true;
     }
 
+    /// <summary>Writes <paramref name="text"/> as it is, escape sequences included; nothing when the console is not open.</summary>
     public static void Write(string text)
     {
         if (s_handle == 0)

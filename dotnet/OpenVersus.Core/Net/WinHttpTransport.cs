@@ -3,10 +3,18 @@ using OpenVersus.Native;
 
 namespace OpenVersus.Net;
 
+/// <summary>
+/// <see cref="IHttpTransport"/> on WinHTTP, one session per request. Connects directly unless
+/// <paramref name="useSystemProxy"/> asks for the proxy configured for WinHTTP.
+/// </summary>
+/// <param name="agent">The User-Agent.</param>
+/// <param name="useSystemProxy">Whether to use the WinHTTP proxy setting.</param>
 public sealed class WinHttpTransport(string agent = "OVS/1.0", bool useSystemProxy = false) : IHttpTransport
 {
+    /// <inheritdoc/>
     public HttpResult Get(Uri url, TimeSpan timeout) => Send(url, "GET", null, default, timeout);
 
+    /// <inheritdoc/>
     public HttpResult Post(Uri url, string contentType, ReadOnlySpan<byte> body, TimeSpan timeout) =>
         Send(url, "POST", $"Content-Type: {contentType}\r\n", body, timeout);
 

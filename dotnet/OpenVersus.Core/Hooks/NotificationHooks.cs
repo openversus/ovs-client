@@ -5,6 +5,11 @@ namespace OpenVersus.Hooks;
 /// <summary>Resolves the notification manager and its request function; the C++ NotificationHooks.</summary>
 public static class NotificationHooks
 {
+    /// <summary>
+    /// Registers the notification functions. The manager getter is registered from its fixed RVA
+    /// first, so it is there even when this returns false (UE functions not resolved, or the
+    /// Notifications pattern missing); a pattern hit then replaces it.
+    /// </summary>
     public static bool Apply(HookContext c)
     {
         // The C++ set the manager getter from a fixed address first, so a failed pattern still

@@ -14,6 +14,10 @@ public static unsafe class KeyboardHook
     private static nint s_hook;
     private static ILogger? s_log;
 
+    /// <summary>
+    /// Installs the hook for the calling thread, with <paramref name="module"/> as the plugin's own
+    /// module. False, logged, when Windows refuses it.
+    /// </summary>
     public static bool Install(ILogger log, nint module)
     {
         s_log = log;
@@ -26,6 +30,7 @@ public static unsafe class KeyboardHook
         return true;
     }
 
+    /// <summary>Removes the hook if it is installed.</summary>
     public static void Remove()
     {
         if (s_hook != 0)

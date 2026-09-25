@@ -32,7 +32,7 @@ public sealed unsafe class Trampoline
         _left = size;
     }
 
-    /// <summary>The page holding this trampoline; every address in it is within rel32 reach of <paramref name="address"/>.</summary>
+    /// <summary>The start of the page; <see cref="Near"/> hands it out only for code within rel32 reach of it.</summary>
     public nint Base { get; private init; }
 
     /// <summary>A trampoline page usable from code at <paramref name="address"/>, allocating one if none fits.</summary>

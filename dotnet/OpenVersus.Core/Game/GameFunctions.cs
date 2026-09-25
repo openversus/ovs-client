@@ -17,6 +17,7 @@ public static class GameFunctions
     /// <summary>UMvsNotificationManager getter in the final build, used if its pattern fails.</summary>
     public const uint GetNotificationManagerRva = 0x028B1D60;
 
+    /// <summary>Adds <paramref name="function"/> under its name, replacing any earlier function of that name, and returns it.</summary>
     public static GameFunction Register(GameFunction function)
     {
         lock (s_lock)
@@ -27,6 +28,7 @@ public static class GameFunctions
         return function;
     }
 
+    /// <summary>Registers a function found in native code, with <paramref name="nativeDeclaration"/> as its signature.</summary>
     public static GameFunction Register(string name, nint address, FunctionSource source, string origin, string nativeDeclaration, GameImage? image = null) =>
         Register(new GameFunction
         {
@@ -42,9 +44,11 @@ public static class GameFunctions
     public static GameFunction FromCallSite(string name, nint instruction, string origin, string nativeDeclaration, GameImage image) =>
         Register(name, CallSite.Destination(instruction), FunctionSource.CallSite, origin, nativeDeclaration, image);
 
+    /// <summary>The function at <paramref name="rva"/> in <paramref name="image"/>, registered under <paramref name="name"/>.</summary>
     public static GameFunction FromRva(string name, uint rva, string nativeDeclaration, GameImage image) =>
         Register(name, image.Address(rva), FunctionSource.Rva, $"rva 0x{rva:X}", nativeDeclaration, image);
 
+    /// <summary>The function registered under <paramref name="name"/>, or null.</summary>
     public static GameFunction? Find(string name)
     {
         lock (s_lock)
@@ -56,6 +60,7 @@ public static class GameFunctions
     /// <summary>The address by name, or 0. For code that would rather not branch on a null.</summary>
     public static nint Address(string name) => Find(name)?.Address ?? 0;
 
+    /// <summary>A snapshot of every registered function, ordered by name.</summary>
     public static IReadOnlyList<GameFunction> All
     {
         get

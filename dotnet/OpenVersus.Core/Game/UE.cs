@@ -2,10 +2,13 @@ using System.Runtime.InteropServices;
 
 namespace OpenVersus.Game;
 
+/// <summary>An FName as the engine passes it by value: an entry in the name table and an instance number.</summary>
 [StructLayout(LayoutKind.Sequential)]
 public struct FName
 {
+    /// <summary>The name's entry in the name table. 0 is None, which is also what a failed lookup returns.</summary>
     public int Index;
+    /// <summary>The instance suffix, stored as the displayed number plus one; 0 means no suffix.</summary>
     public int Number;
 }
 
@@ -13,10 +16,14 @@ public struct FName
 [StructLayout(LayoutKind.Sequential)]
 public unsafe struct FString
 {
+    /// <summary>The characters, terminator included; null when the string was never allocated.</summary>
     public char* Data;
+    /// <summary>Characters in use, terminator included; 0 when empty.</summary>
     public int Count;
+    /// <summary>Characters allocated.</summary>
     public int Max;
 
+    /// <summary>The text without its terminator; empty when there is none.</summary>
     public override string ToString() => Data == null || Count <= 0 ? "" : new string(Data, 0, Count - 1);
 }
 
@@ -24,7 +31,9 @@ public unsafe struct FString
 [StructLayout(LayoutKind.Sequential)]
 public unsafe struct FText
 {
+    /// <summary>The text data the shared reference points at.</summary>
     public nint TextData;
+    /// <summary>The rest of the 24 bytes: the shared reference's controller and the flags. Never touched here.</summary>
     public fixed byte Pad[0x10];
 }
 
@@ -32,16 +41,23 @@ public unsafe struct FText
 [StructLayout(LayoutKind.Sequential)]
 public struct TArrayHeader
 {
+    /// <summary>The elements.</summary>
     public nint Data;
+    /// <summary>Elements in use.</summary>
     public int Count;
+    /// <summary>Elements allocated.</summary>
     public int Max;
 }
 
+/// <summary>One bound delegate, as an entry of a multicast delegate's invocation list.</summary>
 [StructLayout(LayoutKind.Sequential)]
 public struct FDelegateBase
 {
+    /// <summary>Where the delegate object lives; its first qword is the object's vtable (see <see cref="GameUi.AssignCallbackToButton"/>).</summary>
     public nint DelegateAllocator;
+    /// <summary>The size of the delegate object.</summary>
     public int DelegateSize;
+    /// <summary>Padding to the next entry.</summary>
     public int Pad;
 }
 
@@ -49,14 +65,23 @@ public struct FDelegateBase
 [StructLayout(LayoutKind.Sequential)]
 public struct TMulticastDelegateBase
 {
+    /// <summary>The bound delegates, each an <see cref="FDelegateBase"/>.</summary>
     public TArrayHeader InvocationList;
+    /// <summary>Engine bookkeeping for compacting the list; not used here.</summary>
     public int CompactionThreshold;
+    /// <summary>The engine's lock count while it broadcasts; not used here.</summary>
     public int InvocationListLockCount;
 }
 
+/// <summary>What the FName constructor does with a name the table does not have yet.</summary>
 public enum EFindName
 {
-    Find, Add, Replace
+    /// <summary>Look it up only; a missing name comes back as Index 0.</summary>
+    Find,
+    /// <summary>Add it when it is missing.</summary>
+    Add,
+    /// <summary>Add it when it is missing, and replace the stored casing when it is not.</summary>
+    Replace,
 }
 
 /// <summary>
@@ -66,14 +91,25 @@ public enum EFindName
 /// </summary>
 public static unsafe class UE
 {
+    /// <summary>The <see cref="GameFunctions"/> key for FName::ToString.</summary>
     public const string FNameToStringName = "FName::ToString";
+    /// <summary>The <see cref="GameFunctions"/> key for the narrow FName constructor, which <see cref="FindName"/> calls.</summary>
     public const string FNameCtorCharName = "FName::FName(char*)";
+    /// <summary>The <see cref="GameFunctions"/> key for the wide FName constructor, which <see cref="MakeName"/> calls.</summary>
     public const string FNameCtorWideName = "FName::FName(wchar_t*)";
+    /// <summary>The <see cref="GameFunctions"/> key for FText::FromString. Not called; its address is how FText::GetEmpty is found.</summary>
     public const string FTextFromStringName = "FText::FromString";
+    /// <summary>The <see cref="GameFunctions"/> key for FText::FromName, which <see cref="MakeText"/> calls.</summary>
     public const string FTextFromNameName = "FText::FromName";
+    /// <summary>The <see cref="GameFunctions"/> key for FText::GetEmpty, which <see cref="EmptyText"/> calls.</summary>
     public const string FTextGetEmptyName = "FText::GetEmpty";
+    /// <summary>The <see cref="GameFunctions"/> key for UObject::ProcessEvent.</summary>
     public const string ProcessEventName = "UObject::ProcessEvent";
 
+    /// <summary>
+    /// True once the wide FName constructor, FText::FromName and FText::GetEmpty have addresses.
+    /// It says nothing about whether the engine may be called yet; that is <see cref="Engine.IsUp"/>.
+    /// </summary>
     public static bool Ready =>
         GameFunctions.Address(FNameCtorWideName) != 0 && GameFunctions.Address(FTextFromNameName) != 0 && GameFunctions.Address(FTextGetEmptyName) != 0;
 

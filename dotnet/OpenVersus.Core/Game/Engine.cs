@@ -11,11 +11,13 @@ namespace OpenVersus.Game;
 /// </summary>
 public static class Engine
 {
+    /// <summary>How long the game instance must have existed, in milliseconds, before the engine counts as up.</summary>
     public const int SettleMs = 3000;
 
     /// <summary>Tests replace the readiness check; null in the plugin.</summary>
     internal static Func<bool>? ReadyOverride { get; set; }
 
+    /// <summary>True once a UFighterGameInstance has existed for <see cref="SettleMs"/>.</summary>
     public static bool IsUp => ReadyOverride?.Invoke() ?? (GameUi.FighterGameInstance != 0 && Environment.TickCount64 - GameUi.FighterGameInstanceTick >= SettleMs);
 
     /// <summary>Throws unless the engine is up, naming the caller, so a call made too early is a logged refusal instead of a crash.</summary>

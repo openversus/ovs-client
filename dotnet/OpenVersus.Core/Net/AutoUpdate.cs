@@ -25,6 +25,11 @@ public sealed class AutoUpdate(string serverUrl, string pluginPath, IHttpTranspo
         }
     }
 
+    /// <summary>
+    /// After five seconds, asks the server for the latest version and, when the offer is newer than
+    /// this client, installs it and closes the game. Every failure is logged and leaves the running
+    /// client as it is.
+    /// </summary>
     public void Run()
     {
         Thread.Sleep(5000); // let the game settle before checking

@@ -18,8 +18,10 @@ public static unsafe class GameThread
     private static readonly ConcurrentQueue<(string Name, Func<bool> Work, int RetryMs)> s_queue = new();
     private static ILogger? s_log;
 
+    /// <summary>Sets the logger the queue reports to; until then it logs nothing.</summary>
     public static void Attach(ILogger log) => s_log = log;
 
+    /// <summary>The game's main window (class UnrealWindow), or 0 before it exists. Its message pump runs the queued work.</summary>
     public static nint Window => User32.FindWindow("UnrealWindow", null);
 
     /// <summary>Queues <paramref name="work"/> to run once; false if the game window does not exist yet.</summary>

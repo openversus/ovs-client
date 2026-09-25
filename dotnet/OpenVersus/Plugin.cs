@@ -4,6 +4,7 @@ using OpenVersus.Native;
 
 namespace OpenVersus;
 
+/// <summary>The .asi's only export. Everything else lives in OpenVersus.Core.</summary>
 public static unsafe class Plugin
 {
     private static Client? s_client;

@@ -6,8 +6,11 @@ namespace OpenVersus.Game;
 /// <summary>The host executable as mapped in this process.</summary>
 public sealed unsafe class GameImage
 {
+    /// <summary>Where the image is mapped.</summary>
     public nint Base { get; }
+    /// <summary>SizeOfImage from the PE headers.</summary>
     public int Size { get; }
+    /// <summary>The PE section table.</summary>
     public IReadOnlyList<PeSection> Sections { get; }
 
     private GameImage(nint @base)
@@ -26,15 +29,19 @@ public sealed unsafe class GameImage
         Sections = sections;
     }
 
+    /// <summary>The executable this process was started from.</summary>
     public static GameImage Host() => new(Kernel32.GetModuleHandle(null));
 
     /// <summary>Base to SizeOfImage: what the C++ pattern scan covered.</summary>
     public ReadOnlySpan<byte> Bytes => new((void*)Base, Size);
 
+    /// <summary>The address of <paramref name="rva"/> in this image.</summary>
     public nint Address(uint rva) => Base + (nint)rva;
 
+    /// <paramref name="address"/> relative to <see cref="Base"/>; throws <see cref="OverflowException"/> when it is below the base or more than 4 GB past it.
     public uint Rva(nint address) => checked((uint)(address - Base));
 
+    /// <summary>Whether <paramref name="address"/> lies between <see cref="Base"/> and the end of the image.</summary>
     public bool Contains(nint address) => address >= Base && address < Base + Size;
 
     /// <summary>

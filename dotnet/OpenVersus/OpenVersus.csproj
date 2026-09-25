@@ -16,6 +16,10 @@
     <XWinCache Condition="'$(XWinCache)' == ''">$(HOME)/.cache/xwin/</XWinCache>
   </PropertyGroup>
 
+  <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
+    <DocumentationFile>bin\Release\net10.0\OpenVersus.xml</DocumentationFile>
+  </PropertyGroup>
+
   <ItemGroup>
     <!-- Lets `dotnet publish -r win-x64` link on Linux with lld-link and an xwin sysroot.
          Only active for win-* RIDs on a Linux host. -->

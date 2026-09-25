@@ -7,10 +7,14 @@ namespace OpenVersus.Memory;
 /// </summary>
 public static unsafe class CallSite
 {
+    /// <summary>The opcode of a rel32 call.</summary>
     public const byte CallOpcode = 0xE8;
+    /// <summary>The opcode of a rel32 jmp.</summary>
     public const byte JumpOpcode = 0xE9;
+    /// <summary>The length of a rel32 call or jmp.</summary>
     public const int Length = 5;
 
+    /// <summary>The 32-bit displacement at <paramref name="displacementOffset"/> into the instruction.</summary>
     public static int ReadRel32(nint instruction, int displacementOffset = 1) => *(int*)(instruction + displacementOffset);
 
     /// <summary>

@@ -12,6 +12,10 @@ public static class PostMatchFreezePatch
     private static readonly byte[] s_expected = [0x0F, 0x86, 0xFB, 0x01, 0x00, 0x00];
     private static readonly byte[] s_nops = [0x90, 0x90, 0x90, 0x90, 0x90, 0x90];
 
+    /// <summary>
+    /// Replaces the early return with NOPs. False when the pattern is missing; throws a
+    /// <see cref="PatchException"/> when the bytes there are not the expected jbe.
+    /// </summary>
     public static bool Apply(HookContext c)
     {
         c.Log.Info("==PostMatchFreeze==");

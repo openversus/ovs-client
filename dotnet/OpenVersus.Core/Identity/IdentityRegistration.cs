@@ -8,9 +8,14 @@ namespace OpenVersus.Identity;
 /// <summary>POSTs the player's identity to /api/identify. Runs on its own thread so launch never waits for it.</summary>
 public static class IdentityRegistration
 {
+    /// <summary>The JSON body: Steam id, Epic id, hardware id and client version.</summary>
     public static string Body(EnvInfo env) =>
         JsonSerializer.Serialize(new IdentityBody(env.SteamId, env.EpicId, env.HardwareId, OvsVersion.Current), OvsJson.Default.IdentityBody);
 
+    /// <summary>
+    /// Resolves the Steam id if the environment lacked it, which can take up to a minute, then POSTs
+    /// the identity. Failures are logged; nothing is retried.
+    /// </summary>
     public static void Run(EnvInfo env, string serverUrl, IHttpTransport http, ILogger log)
     {
         if (string.IsNullOrEmpty(serverUrl))

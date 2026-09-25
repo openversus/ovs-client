@@ -10,6 +10,9 @@ namespace OpenVersus.NetStats;
 /// as far as they could be read. A 1v1 has one opponent; a 2v2 one teammate and two opponents; a
 /// free-for-all puts every player on a team of their own, so all are opponents.
 /// </summary>
+/// <param name="MatchId">The match id; empty when it could not be read.</param>
+/// <param name="Teammates">The local player's teammates' names.</param>
+/// <param name="Opponents">The opponents' names.</param>
 public sealed record MatchInfo(string MatchId, IReadOnlyList<string> Teammates, IReadOnlyList<string> Opponents)
 {
     /// <summary>Nothing could be read: no id and nobody else.</summary>
@@ -34,6 +37,7 @@ public sealed record MatchInfo(string MatchId, IReadOnlyList<string> Teammates, 
         }
     }
 
+    /// <summary>"match id with teammates vs opponents", with ? for what is not known, for the log.</summary>
     public override string ToString() =>
         $"match {(MatchId.Length > 0 ? MatchId : "?")}{(Teammates.Count > 0 ? " with " + string.Join(", ", Teammates) : "")} vs {(Opponents.Count > 0 ? string.Join(", ", Opponents) : "?")}";
 }
@@ -76,6 +80,7 @@ public sealed class NetStatsLogger(ObjectFinder finder, ILogger log, Func<MatchI
     // Lives as long as the process; never disposed, since the loop thread may be waiting on it.
     private readonly CancellationTokenSource _stopping = new();
 
+    /// <summary>Starts the sampling thread.</summary>
     public void Start()
     {
         CancellationToken token = _stopping.Token;
@@ -83,6 +88,7 @@ public sealed class NetStatsLogger(ObjectFinder finder, ILogger log, Func<MatchI
         log.Info("[NetStats] enabled; sampling at 60 Hz while a session is playing, one NetStats log per match");
     }
 
+    /// <summary>Tells the sampling thread to stop.</summary>
     public void Stop() => _stopping.Cancel();
 
     /// <summary>The counters for one session. A match starts at the first playing sample and ends at the summary.</summary>
