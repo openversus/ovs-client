@@ -131,26 +131,18 @@ public sealed class IniFile
     public string? Get(string section, string key)
     {
         int index = FindKey(section, key);
-        return index < 0 ? null : Unquote(_lines[index].Value.Trim());
+        return index < 0 ? null : ConfigFile.Unquote(_lines[index].Value.Trim());
     }
 
     /// <summary>The value of a key, or <paramref name="defaultValue"/> when the section or key is missing.</summary>
     public string Get(string section, string key, string defaultValue) => Get(section, key) ?? defaultValue;
 
-    /// <summary>A boolean, or the default when the key is missing or is not a spelling <see cref="TryParseBool"/> accepts.</summary>
-    public bool GetBool(string section, string key, bool defaultValue) => TryParseBool(Get(section, key), out bool value) ? value : defaultValue;
+    /// <summary>A boolean, or the default when the key is missing or is not a spelling <see cref="ConfigFile.TryParseBool"/> accepts.</summary>
+    public bool GetBool(string section, string key, bool defaultValue) => ConfigFile.TryParseBool(Get(section, key), out bool value) ? value : defaultValue;
 
     /// <summary>A whole number, or <paramref name="defaultValue"/> when the key is missing or is not plain decimal digits.</summary>
     public ulong GetUInt64(string section, string key, ulong defaultValue) =>
         ulong.TryParse(Get(section, key), NumberStyles.None, CultureInfo.InvariantCulture, out ulong value) ? value : defaultValue;
-
-    /// <summary>"true"/"false", "on"/"off" and "1"/"0", in any case and with surrounding whitespace; nothing else.</summary>
-    public static bool TryParseBool(string? text, out bool value)
-    {
-        string trimmed = text?.Trim() ?? "";
-        value = trimmed.Equals("true", StringComparison.OrdinalIgnoreCase) || trimmed.Equals("on", StringComparison.OrdinalIgnoreCase) || trimmed == "1";
-        return value || trimmed.Equals("false", StringComparison.OrdinalIgnoreCase) || trimmed.Equals("off", StringComparison.OrdinalIgnoreCase) || trimmed == "0";
-    }
 
     /// <summary>
     /// Sets a value. An existing key keeps its line and spacing and only the value changes; a
@@ -162,7 +154,7 @@ public sealed class IniFile
         if (index >= 0)
         {
             Line line = _lines[index];
-            if (Unquote(line.Value.Trim()) != value)
+            if (ConfigFile.Unquote(line.Value.Trim()) != value)
             {
                 line.Value = value;
                 _dirty = true;
@@ -232,7 +224,7 @@ public sealed class IniFile
         _preamble.CopyTo(bytes, 0);
         body.CopyTo(bytes, _preamble.Length);
 
-        SaveError = WriteAtomically(Path, bytes);
+        SaveError = ConfigFile.WriteAtomically(Path, bytes);
         if (SaveError != null)
         {
             return false;
@@ -242,30 +234,6 @@ public sealed class IniFile
         return true;
     }
 
-    /// <summary>Writes through a temporary file beside <paramref name="path"/>, so a failed write
-    /// never leaves half a file. Returns why it failed, or null.</summary>
-    internal static Exception? WriteAtomically(string path, byte[] bytes)
-    {
-        string temp = path + ".tmp";
-        try
-        {
-            File.WriteAllBytes(temp, bytes);
-            File.Move(temp, path, overwrite: true);
-            return null;
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-        {
-            try
-            {
-                File.Delete(temp);
-            }
-            catch (Exception cleanup) when (cleanup is IOException or UnauthorizedAccessException)
-            {
-            }
-
-            return e;
-        }
-    }
 
     /// <summary>The text as it would be saved, for tests.</summary>
     public override string ToString() => string.Join(_newLine, _lines.Select(l => l.ToString())) + (_finalNewLine && _lines.Count > 0 ? _newLine : "");
@@ -309,9 +277,6 @@ public sealed class IniFile
         return new Line(Kind.Other, text);
     }
 
-    /// <summary>The value without one pair of matching surrounding quotes, as the profile API read it.</summary>
-    internal static string Unquote(string value) =>
-        value.Length >= 2 && (value[0] == '"' || value[0] == '\'') && value[^1] == value[0] ? value[1..^1] : value;
 
     private int FindSection(string section)
     {

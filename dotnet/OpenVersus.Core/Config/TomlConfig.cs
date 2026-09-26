@@ -288,7 +288,7 @@ public sealed class TomlConfig
         }
 
         byte[] body = Encoding.UTF8.GetBytes(text);
-        SaveError = IniFile.WriteAtomically(Path, [.. _preamble, .. body]);
+        SaveError = ConfigFile.WriteAtomically(Path, [.. _preamble, .. body]);
         if (SaveError != null)
         {
             return false;
@@ -457,7 +457,7 @@ public sealed class TomlConfig
 
     private static ValueSyntax Literal(SettingKind kind, string value)
     {
-        if (kind == SettingKind.Bool && IniFile.TryParseBool(value, out bool b))
+        if (kind == SettingKind.Bool && ConfigFile.TryParseBool(value, out bool b))
         {
             return new BooleanValueSyntax(b);
         }

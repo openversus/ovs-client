@@ -111,6 +111,26 @@ public class SettingsTests
         Directory.Delete(dir, recursive: true);
     }
 
+    /// <summary>Every row and table has its comment, and the commented default parses back to every
+    /// default with nothing unknown in it.</summary>
+    [Fact]
+    public void TheDefaultFileExplainsEverySettingAndReadsBackAsTheDefaults()
+    {
+        Assert.All(Settings.Table, def => Assert.True(DefaultConfig.Comments.ContainsKey(def), $"no comment for {def}"));
+        Assert.All(Settings.Table.Select(d => d.Section).Distinct(), section => Assert.True(DefaultConfig.Sections.ContainsKey(section), $"no banner for [{section}]"));
+        Assert.Equal(Settings.Table.Count, DefaultConfig.Comments.Count);
+
+        string dir = NewDir();
+        var log = new ListLogger();
+        Settings.Load(dir, log);
+        var toml = TomlConfig.Load(Path.Combine(dir, Settings.FileName));
+        Assert.Empty(toml.Errors);
+        Assert.All(Settings.Table, def => Assert.Equal(def.Default, toml.Get(def.Section, def.Key)));
+        Assert.Equal(Settings.Table.Count, toml.Keys().Count());
+        Assert.DoesNotContain(log.Lines, l => l.Contains("is not a setting") || l.Contains("is not true/false"));
+        Directory.Delete(dir, recursive: true);
+    }
+
     [Fact]
     public void BadValuesAreWarnedAboutAndLeftOnDisk()
     {
@@ -157,6 +177,24 @@ public class SettingsTests
         Assert.Contains(log.Lines, l => l.Contains("[Settings] LogSize is no longer used") && l.Contains("no size to cap"));
         Assert.Contains(log.Lines, l => l.Contains("[Settings] MadeUp is not a setting this version knows"));
         Assert.DoesNotContain(log.Lines, l => l.Contains("LogSize is not a setting"));
+        Directory.Delete(dir, recursive: true);
+    }
+
+    /// <summary>LogLevel takes a number, bare or quoted, or a quoted name, through a real file.</summary>
+    [Theory]
+    [InlineData("3", Microsoft.Extensions.Logging.LogLevel.Warning)]
+    [InlineData("\"3\"", Microsoft.Extensions.Logging.LogLevel.Warning)]
+    [InlineData("\"debug\"", Microsoft.Extensions.Logging.LogLevel.Debug)]
+    [InlineData("48549848", Microsoft.Extensions.Logging.LogLevel.None)]
+    [InlineData("0", Microsoft.Extensions.Logging.LogLevel.Information)]
+    public void LogLevelTakesANumberOrAName(string literal, Microsoft.Extensions.Logging.LogLevel expected)
+    {
+        string dir = NewDir();
+        File.WriteAllText(Path.Combine(dir, Settings.FileName), $"[Settings]\nLogLevel = {literal}\n");
+
+        var s = Settings.Load(dir);
+        Assert.Null(s.Problem);
+        Assert.Equal(expected, Log.ResolveLevel(s.LogLevel, s.Debug));
         Directory.Delete(dir, recursive: true);
     }
 

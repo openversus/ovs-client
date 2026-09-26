@@ -38,8 +38,9 @@ matches with netstats on and the post-match freeze patch. Never tested on macOS.
 - `OpenVersus/`: the `.asi` itself, which is only the `InitializeASI` export (`Plugin.cs`).
 - `OpenVersus.Core/`: everything else, so the tests and the Wine harness can share it.
   - `Client.cs`: startup, in the C++ client's order: settings, console, hooks, background work.
-  - `Config/`: the TOML files (`TomlConfig`: `Settings`, `State`, `PatternCache`), the conversion
-    from the old settings ini (`SettingsMigration`), and the reader for the old ini files (`IniFile`).
+  - `Config/`: the TOML files (`TomlConfig`: `Settings`, `State`, `PatternCache`), what every
+    config file shares (`ConfigFile`), the conversion from the old settings ini
+    (`SettingsMigration`), and the reader for the old ini files (`IniFile`).
   - `Game/`: the game's structures and offsets (`Mvs`, `UE`), the function registry
     (`GameFunctions`), the object array and finder (`Objects`), reflection, dialogs and toasts
     (`GameUi`), the game-thread queue (`GameThread`) and the engine-ready gate (`Engine`).
@@ -167,8 +168,10 @@ any case. A value that does not parse is logged as a warning, read as its defaul
 disk. A file that is not valid TOML is logged with the line and column where it broke, every
 setting takes its default, and the file is left alone. When the settings cannot be used (a TOML
 mistake, an unreadable file, an ini that would not convert), a toast after "OpenVersus Loaded" says
-so. A missing `OpenVersus.toml` is written from `Settings.Table` in its order, with CRLF line
-endings, and `[Settings.Debug]` just above the servers. `sample.toml` is a checked-in copy of that
+so. A missing `OpenVersus.toml` (or the defaults after an ini that would not
+convert) is `Config/DefaultConfig.cs`: every row in `Settings.Table` order grouped by table, with
+CRLF line endings, `[Settings.Debug]` just above the servers, and a comment above every setting
+and table; a test fails if a row has no comment. Converted and merged files get no comments. `sample.toml` is a checked-in copy of that
 file: the plugin never writes it, and a test holds the two to the same bytes, so after changing a
 row, regenerate it by copying the `OpenVersus.toml` the plugin writes into an empty folder.
 
@@ -196,7 +199,9 @@ deleted once that is on disk. `PatternsCache.toml` names the exe (`Exe`, the top
 .text hash) and client version (`Client`) it is for at its top, with pattern text to RVA under
 `[Patterns]`; a file for another exe or client, or one that does not parse, starts over. The old
 `PatternsCache.cache` is deleted: it was only a cache. `Config/IniFile.cs` remains only to read the
-old ini files for these conversions.
+old ini files for these conversions; what the TOML side shares with it (boolean spellings, quote
+stripping, the atomic write) is in `Config/ConfigFile.cs`, so dropping ini support one day is
+`IniFile.cs`, `SettingsMigration.cs` and their tests.
 
 What each key does is documented on its row in `Config/Settings.cs` (`Settings.Rows`). Compared
 with the C++ client:
@@ -218,10 +223,10 @@ The game's sunset-date check is called thousands of times a minute. `[Patches] S
 (default on) makes the function itself return false with two byte patches. Two more switches,
 both off by default:
 
-- `[Patches] SunsetCallers=true` finds every direct call and tail jump to the function through
+- `[Patches] SunsetCallers = true` finds every direct call and tail jump to the function through
   `.pdata` and a `.text` scan, and turns each into "return false" in place, so the function is
   never entered. The log reports the count found (146 in the final build).
-- `[Settings.Debug] CountSunsetCalls=true` routes the function's comparison path through a
+- `[Settings.Debug] CountSunsetCalls = true` routes the function's comparison path through a
   counter, and the heartbeat line each minute reports how many calls the last minute saw. With
   both switches on, that number must be zero.
 
@@ -240,9 +245,11 @@ still reaches the console. `Log.Notice` says which happened and is the first war
 ### Levels
 
 `Log` is a `Microsoft.Extensions.Logging.ILogger` with its own writer (file plus console). The
-minimum level comes from `[Settings] LogLevel`: a name (`trace`, `debug`, `info`, `warn`, `error`,
-`critical`, `none`, or the usual aliases such as `verbose`, `all`, `err`, `quiet`) or a number
-(1 debug to 6 none; a number past 6 means 6). `0`, which existing files carry, means "decide from
+minimum level comes from `[Settings] LogLevel`: a name in quotes (`"trace"`, `"debug"`, `"info"`,
+`"warn"`, `"error"`, `"critical"`, `"none"`, or the usual aliases such as `"verbose"`, `"all"`,
+`"err"`, `"quiet"`) or a number, bare or quoted (1 debug to 6 none; a number past 6 means 6). The
+value is tried as a number first, then as a name. An unquoted name (`LogLevel = debug`) is not
+valid TOML, so the whole file falls back to defaults. `0`, which converted files carry, means "decide from
 `[Settings.Debug] DebugLogging`": Debug when it is on, Information when it is off. A name that is
 not a level is logged and falls back the same way. Tags in the file are `TRC DBG NFO WRN ERR CRT`.
 Per-attempt and game-thread queue lines are Trace; pattern and function resolution is Debug; hooks,
@@ -250,7 +257,7 @@ banners and netstats are Information.
 
 ### Netstats
 
-With `[Features] NetStats=true` the per-second `NETSTATS` lines go to `logs/NetStats.log`, one file
+With `[Features] NetStats = true` the per-second `NETSTATS` lines go to `logs/NetStats.log`, one file
 per match: it opens when a session starts playing and closes at the summary, which archives it as
 `NetStats_<match start time>_<match id>[_with_<teammates>]_vs_<opponents>.log` with the same
 retention as the main log. The names come from the player data each fighter pawn carries and the
@@ -303,12 +310,12 @@ never sampled.
 ## Testing against the game
 
 `build.sh --install <game>/plugins` (or `-Install` on Windows) publishes and installs the plugin,
-keeping the previous one as a `.bak`. With `DebugLogging=true` or `LogLevel=debug`,
+keeping the previous one as a `.bak`. With `DebugLogging = true` or `LogLevel = "debug"`,
 `logs/OpenVersus.log` lists every pattern, the address of every function it resolved, and the
 hooks that took; when something fails to resolve, try comparing those addresses with the C++ build's
 console output.
 
-Set `AutoUpdate=false` while testing. The update check works against https (the C++ one never
+Set `AutoUpdate = false` while testing. The update check works against https (the C++ one never
 could) and installs whatever the server offers when it is newer than `VERSION`, which would replace
 the build under test.
 

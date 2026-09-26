@@ -147,7 +147,7 @@ public sealed class Log : ILogger, IDisposable
     }
 
     /// <summary>
-    /// The minimum level from the ini: the LogLevel key by name (trace, debug, info, warn,
+    /// The minimum level from the settings: the LogLevel key by name (trace, debug, info, warn,
     /// error, critical, none, plus the usual aliases such as verbose and all) or number (1 debug
     /// .. 6 none; 0 means not set), else Debug when DebugLogging is on and Information when it is
     /// off, which is what the two settings meant before levels existed. A number past the end of

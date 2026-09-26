@@ -81,7 +81,7 @@ internal static class SettingsMigration
                 SettingDef? row = Settings.Row(section, line.Name);
                 string? expected = IsServerUrl(row) ? OvsVersion.DefaultServerUrl : ini.Get(section, line.Name);
                 string? actual = converted.Get(section, line.Name);
-                bool same = row?.Kind == SettingKind.Bool && IniFile.TryParseBool(expected, out bool a) && IniFile.TryParseBool(actual, out bool b)
+                bool same = row?.Kind == SettingKind.Bool && ConfigFile.TryParseBool(expected, out bool a) && ConfigFile.TryParseBool(actual, out bool b)
                     ? a == b
                     : expected == actual;
                 if (!same)
@@ -159,7 +159,7 @@ internal static class SettingsMigration
 
     /// <summary>Whether two texts are the same value of <paramref name="row"/>: as booleans for a boolean row.</summary>
     private static bool Same(SettingDef row, string a, string b) =>
-        row.Kind == SettingKind.Bool && IniFile.TryParseBool(a, out bool x) && IniFile.TryParseBool(b, out bool y) ? x == y : a == b;
+        row.Kind == SettingKind.Bool && ConfigFile.TryParseBool(a, out bool x) && ConfigFile.TryParseBool(b, out bool y) ? x == y : a == b;
 
     private static bool IsServerUrl(SettingDef? row) => row == Settings.Rows.ServerUrl || row == Settings.Rows.ProdServerUrl;
 
@@ -197,7 +197,7 @@ internal static class SettingsMigration
 
         SettingDef? row = section == null ? null : Settings.Row(section, line.Name!);
         string key = row?.Key ?? (section == null ? null : Settings.Retired(section, line.Name!)?.Key) ?? line.Name!;
-        string value = IniFile.Unquote(line.Value.Trim());
+        string value = ConfigFile.Unquote(line.Value.Trim());
 
         string literal;
         if (IsServerUrl(row))
@@ -208,7 +208,7 @@ internal static class SettingsMigration
                 log?.LogInformation("[Settings] {Row} was {Old}; the converted file has {New}", row, value, OvsVersion.DefaultServerUrl);
             }
         }
-        else if (row?.Kind == SettingKind.Bool && IniFile.TryParseBool(value, out bool b))
+        else if (row?.Kind == SettingKind.Bool && ConfigFile.TryParseBool(value, out bool b))
         {
             literal = b ? "true" : "false";
         }

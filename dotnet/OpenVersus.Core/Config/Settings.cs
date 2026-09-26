@@ -53,7 +53,7 @@ public sealed record RetiredSetting(string Section, string Key, string Reason);
 /// Nothing already in the file is rewritten: the player's values, spacing, blank lines and
 /// comments stay as they are, and a value that does not parse is logged and read as its default
 /// rather than replaced. A file that is not valid TOML is logged with where it broke, read as all
-/// defaults, and left alone. A legacy OpenVersus.ini with no OpenVersus.toml beside it is
+/// defaults, and left alone. A new file is <see cref="DefaultConfig"/>, every setting commented. A legacy OpenVersus.ini with no OpenVersus.toml beside it is
 /// converted once (<see cref="SettingsMigration"/>) and deleted.
 /// The table is the C++ OVSDefaultSettingsArray in its order, with the rows this port adds at
 /// the end of their sections and [Settings.Debug] moved down to just above the servers; the typed
@@ -248,7 +248,7 @@ public sealed class Settings
         }
         else
         {
-            toml = TomlConfig.Load(path);
+            toml = TomlConfig.FromText(DefaultConfig.Text(), path);
         }
 
         if (toml.LoadError != null)
@@ -376,7 +376,7 @@ public sealed class Settings
             log?.LogWarning("[Settings] Could not convert {Legacy} ({Failure}), so the new {File} starts from defaults. The old file was:{NewLine}{Text}",
                 legacyPath, failure, FileName, Environment.NewLine, ini.ToString());
             problem = new("Settings reset to defaults", $"Your old {LegacyFileName} could not be converted; see logs/OpenVersus.log");
-            return TomlConfig.Load(path);
+            return TomlConfig.FromText(DefaultConfig.Text(), path);
         }
 
         log?.LogInformation("[Settings] Converted {Legacy} to {File}", legacyPath, FileName);
@@ -400,7 +400,7 @@ public sealed class Settings
     {
         switch (def.Kind)
         {
-            case SettingKind.Bool when !IniFile.TryParseBool(value, out _):
+            case SettingKind.Bool when !ConfigFile.TryParseBool(value, out _):
                 log?.LogWarning("[Settings] [{Section}] {Key} = \"{Value}\" is not true/false, on/off or 1/0; using {Default}", def.Section, def.Key, value, def.Default);
                 return def.Default;
             case SettingKind.Int when !ulong.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out _):
@@ -412,7 +412,7 @@ public sealed class Settings
     }
 
     private string Get(SettingDef def) => _values[def];
-    private bool GetBool(SettingDef def) => IniFile.TryParseBool(_values[def], out bool value) && value;
+    private bool GetBool(SettingDef def) => ConfigFile.TryParseBool(_values[def], out bool value) && value;
     private ulong GetInt(SettingDef def) => ulong.Parse(_values[def], NumberStyles.None, CultureInfo.InvariantCulture);
 
     /// <summary>The byte pattern under <paramref name="key"/> in whichever [Patterns*] section holds it.</summary>

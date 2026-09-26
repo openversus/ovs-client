@@ -65,7 +65,7 @@ public sealed class State
     /// <summary>Reads the file; returns this instance.</summary>
     public State Load()
     {
-        PaidModWarned = IniFile.TryParseBool(_toml.Get("FirstRun", "PaidModWarned"), out bool warned) && warned;
+        PaidModWarned = ConfigFile.TryParseBool(_toml.Get("FirstRun", "PaidModWarned"), out bool warned) && warned;
         return this;
     }
 

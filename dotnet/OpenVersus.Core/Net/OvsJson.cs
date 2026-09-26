@@ -60,7 +60,7 @@ public sealed class LenientBoolConverter : JsonConverter<bool>
             case JsonTokenType.Number:
                 return reader.TryGetInt64(out long n) && n == 1;
             case JsonTokenType.String:
-                return IniFile.TryParseBool(reader.GetString(), out bool value) && value;
+                return ConfigFile.TryParseBool(reader.GetString(), out bool value) && value;
             case JsonTokenType.StartObject or JsonTokenType.StartArray:
                 // A nested value must be consumed whole, or the reader is left inside it.
                 reader.Skip();
