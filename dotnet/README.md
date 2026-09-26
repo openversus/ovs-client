@@ -150,7 +150,9 @@ offered version) and never the zip's loader or `OpenVersus.toml`. Before anythin
 against the release's `<download_url>.sha256`: a mismatch, a missing `.sha256`, or one that cannot be
 fetched or read, means no install this launch. A missing one counts as a mismatch because every
 release the updater could install (only newer ones are) comes from this pipeline, which always
-publishes them.
+publishes them. Last, the plugin itself decides: the version built into it
+(its version resource, read without loading it) must be newer than the running client and must be
+the version the server offered, so a mislabeled offer can never make a client reinstall itself.
 
 ## How it maps to the C++ client
 

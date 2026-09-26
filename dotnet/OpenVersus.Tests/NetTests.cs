@@ -179,6 +179,19 @@ public class NetTests
         return pe;
     }
 
+    /// <summary>The version the fake server offers: far enough ahead that the running client is always older.</summary>
+    private const string Offered = "2099.01.01.01";
+
+    /// <summary>A plugin that passes <see cref="AutoUpdate.Validate"/> and carries <paramref name="version"/>
+    /// in its version resource, marked so it can be told apart.</summary>
+    private static byte[] Versioned(byte mark, string version = Offered)
+    {
+        var plugin = new byte[20000];
+        DuplicatePluginsTests.PeWithVersion(Version.Parse(version)).CopyTo(plugin, 0);
+        plugin[^1] = mark;
+        return plugin;
+    }
+
     private static byte[] Zip(params (string Name, byte[] Body)[] entries)
     {
         var stream = new MemoryStream();
@@ -258,7 +271,7 @@ public class NetTests
 
     private static (byte[]? Plugin, ListLogger Log, FakeHttp Http) FetchWith(HttpResult? checksum, byte[]? body = null, string url = AsiUrl)
     {
-        body ??= Plugin(7);
+        body ??= Versioned(7);
         var results = new Dictionary<string, HttpResult> { [url] = Served(body) };
         if (checksum != null)
         {
@@ -268,7 +281,7 @@ public class NetTests
         var http = new FakeHttp(results);
         var log = new ListLogger();
         var update = new AutoUpdate("https://prod.openversus.org/", "OpenVersus_2026.09.25.06.asi", ".", http, http, log, () => { });
-        byte[]? plugin = update.Fetch(new VersionInfo("2026.10.01.01", url, false, ""));
+        byte[]? plugin = update.Fetch(new VersionInfo(Offered, url, false, ""));
         return (plugin, log, http);
     }
 
@@ -290,7 +303,7 @@ public class NetTests
     [Fact]
     public void AMatchingChecksumInstalls()
     {
-        byte[] body = Plugin(10);
+        byte[] body = Versioned(10);
         var (plugin, log, http) = FetchWith(Served(System.Text.Encoding.UTF8.GetBytes(Sha256Line(body, "OpenVersus_2026.10.01.01.asi"))), body);
         Assert.Equal(body, plugin);
         Assert.Equal([AsiUrl, AsiUrl + ".sha256"], http.Requested);
@@ -300,7 +313,7 @@ public class NetTests
     [Fact]
     public void AMismatchedChecksumDoesNotInstall()
     {
-        var (plugin, log, _) = FetchWith(Served(System.Text.Encoding.UTF8.GetBytes(Sha256Line(Plugin(11), "OpenVersus_2026.10.01.01.asi"))), Plugin(12));
+        var (plugin, log, _) = FetchWith(Served(System.Text.Encoding.UTF8.GetBytes(Sha256Line(Versioned(11), "OpenVersus_2026.10.01.01.asi"))), Versioned(12));
         Assert.Null(plugin);
         Assert.Contains(log.Lines, l => l.Contains("Not installing the download") && l.Contains("but the release says"));
     }
@@ -330,11 +343,35 @@ public class NetTests
     public void AZipIsCheckedAgainstTheZipsChecksum()
     {
         const string zipUrl = "https://github.com/openversus/ovs-client/releases/download/2026.10.01.01/OpenVersus_v2026.10.01.01.zip";
-        byte[] zip = Zip(("plugins/OpenVersus_2026.10.01.01.asi", Plugin(13)));
+        byte[] zip = Zip(("plugins/OpenVersus_2026.10.01.01.asi", Versioned(13)));
         var (plugin, _, _) = FetchWith(Served(System.Text.Encoding.UTF8.GetBytes(Sha256Line(zip, "OpenVersus_v2026.10.01.01.zip"))), zip, zipUrl);
-        Assert.Equal(Plugin(13), plugin);
+        Assert.Equal(Versioned(13), plugin);
 
-        var (refused, _, _) = FetchWith(Served(System.Text.Encoding.UTF8.GetBytes(Sha256Line(Plugin(13), "OpenVersus_v2026.10.01.01.zip"))), zip, zipUrl);
+        var (refused, _, _) = FetchWith(Served(System.Text.Encoding.UTF8.GetBytes(Sha256Line(Versioned(13), "OpenVersus_v2026.10.01.01.zip"))), zip, zipUrl);
         Assert.Null(refused);
+    }
+
+    /// <summary>The version built into the download decides, not the server's label.</summary>
+    [Fact]
+    public void OnlyANewerBuildThatIsWhatWasOfferedInstalls()
+    {
+        const string running = "2026.09.25.12";
+        Assert.Null(AutoUpdate.VersionProblem(Versioned(1, "2026.12.31.01"), "2026.12.31.01", running));
+        Assert.Contains("not newer than this client (2026.9.25.12)", AutoUpdate.VersionProblem(Versioned(1, "2026.09.25.12"), "2026.12.31.01", running));
+        Assert.Contains("not newer", AutoUpdate.VersionProblem(Versioned(1, "2026.04.08.14"), "2026.04.08.14", running));
+        Assert.Contains("but the server offered 2027.01.01.01", AutoUpdate.VersionProblem(Versioned(1, "2026.12.31.01"), "2027.01.01.01", running));
+        Assert.Contains("no version resource", AutoUpdate.VersionProblem(Plugin(1), "2026.12.31.01", running));
+    }
+
+    /// <summary>What happened with the mock server: an offer labeled newer whose file is the running build.
+    /// It downloads, the checksum matches, and it is still not installed.</summary>
+    [Fact]
+    public void AMislabeledOfferOfTheRunningBuildIsNotInstalled()
+    {
+        byte[] same = Versioned(14, OvsVersion.Current);
+        var (plugin, log, _) = FetchWith(Served(System.Text.Encoding.UTF8.GetBytes(Sha256Line(same, "OpenVersus_2026.10.01.01.asi"))), same);
+        Assert.Null(plugin);
+        Assert.Contains(log.Lines, l => l.Contains("SHA-256 matches"));
+        Assert.Contains(log.Lines, l => l.Contains("Not installing the download: it is version") && l.Contains("not newer than this client"));
     }
 }

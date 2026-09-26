@@ -216,8 +216,37 @@ public sealed class AutoUpdate(string serverUrl, string pluginPath, string insta
     }
 
     /// <summary>
+    /// Why <paramref name="plugin"/> must not replace the running client, judged by the version
+    /// built into it (<see cref="DuplicatePlugins.EmbeddedVersion"/>) rather than by what the server
+    /// says: it must have one, it must be newer than <paramref name="running"/>, and it must be the
+    /// <paramref name="offered"/> version. Null when it may be installed. Without this a server that
+    /// mislabels a release would have the client reinstall itself on every launch.
+    /// </summary>
+    public static string? VersionProblem(ReadOnlySpan<byte> plugin, string offered, string running)
+    {
+        Version? inside = DuplicatePlugins.EmbeddedVersion(plugin);
+        if (inside == null)
+        {
+            return "it has no version resource, so its version is unknown";
+        }
+
+        if (Version.TryParse(running.Trim(), out Version? current) && inside <= current)
+        {
+            return $"it is version {inside}, which is not newer than this client ({current})";
+        }
+
+        if (!Version.TryParse(offered.Trim(), out Version? label) || inside != label)
+        {
+            return $"it is version {inside}, but the server offered {offered.Trim()}";
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Downloads the offered version and returns the plugin to install: checked against the
-    /// release's <c>.sha256</c> and taken out of a zip if it is one. Null, with the reason logged,
+    /// release's <c>.sha256</c>, taken out of a zip if it is one, and checked for being the newer
+    /// version it claims to be (<see cref="VersionProblem"/>). Null, with the reason logged,
     /// when there is nothing to install this time.
     /// </summary>
     internal byte[]? Fetch(VersionInfo info)
@@ -266,7 +295,13 @@ public sealed class AutoUpdate(string serverUrl, string pluginPath, string insta
             return null;
         }
 
-        log.Info($"[AutoUpdate] Installing {source} ({plugin.Length} bytes)");
+        if (VersionProblem(plugin, info.LatestVersion!, OvsVersion.Current) is { } wrongVersion)
+        {
+            log.Warn($"[AutoUpdate] Not installing the download: {wrongVersion}");
+            return null;
+        }
+
+        log.Info($"[AutoUpdate] Installing {source} ({plugin.Length} bytes, version {DuplicatePlugins.EmbeddedVersion(plugin)})");
         return plugin;
     }
 
