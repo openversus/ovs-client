@@ -30,17 +30,25 @@ a player's `OpenVersus.ini` becomes `OpenVersus.toml` on the first launch, `OVSS
 `OVSState.toml`, and `PatternsCache.cache` is replaced by `PatternsCache.toml` (see
 [Settings](#settings-1)).
 
-**Status (2026-09-25).** Verified in the game on Windows, Linux (Proton) and Steam Deck, including
-matches with netstats on and the post-match freeze patch. Never tested on macOS.
+**Status (2026-09-26).** Verified in the game on Windows, Linux (Proton) and Steam Deck, including
+matches with netstats on and the post-match freeze patch. Also verified in the game: the C++
+client updating itself to this one (from a legacy plain-http `ServerUrl`), which then moved into
+`plugins/OpenVersus/` and converted the ini; and the updater refusing an offer whose built-in
+version was not newer. Never tested on macOS.
 
 ## Layout
 
-- `OpenVersus/`: the `.asi` itself, which is only the `InitializeASI` export (`Plugin.cs`).
+- `OpenVersus/`: the `.asi` itself: the `InitializeASI` export the loader calls, and
+  `OpenVersusInfo` (`Plugin.cs`).
 - `OpenVersus.Core/`: everything else, so the tests and the Wine harness can share it.
-  - `Client.cs`: startup, in the C++ client's order: settings, console, hooks, background work.
-  - `Config/`: the TOML files (`TomlConfig`: `Settings`, `State`, `PatternCache`), what every
-    config file shares (`ConfigFile`), the conversion from the old settings ini
-    (`SettingsMigration`), and the reader for the old ini files (`IniFile`).
+  - `Client.cs`: startup: other copies retired, the move into `plugins/OpenVersus/`, then the C++
+    client's order: settings, console, hooks, background work.
+  - `DuplicatePlugins.cs`, `Layout.cs`, `LoaderConfig.cs`: other copies of the plugin, where the
+    mod lives, and what Ultimate ASI Loader will load (see [Where it lives](#where-it-lives)).
+  - `Config/`: the TOML files (`TomlConfig`: `Settings`, `State`, `PatternCache`), the commented
+    default settings file (`DefaultConfig`), what every config file shares (`ConfigFile`), the
+    conversion from the old settings ini (`SettingsMigration`), and the reader for the old ini
+    files (`IniFile`).
   - `Game/`: the game's structures and offsets (`Mvs`, `UE`), the function registry
     (`GameFunctions`), the object array and finder (`Objects`), reflection, dialogs and toasts
     (`GameUi`), the game-thread queue (`GameThread`) and the engine-ready gate (`Engine`).
@@ -96,9 +104,11 @@ dotnet/wine-host/run.sh                      # the hooking layer, end to end und
 ```
 
 The published plugin is `dotnet/OpenVersus/bin/Release/net10.0/win-x64/publish/OpenVersus_<version>.asi`,
-named from the `VERSION` file in the repo. [Ultimate ASI Loader](https://github.com/ThirteenAG/Ultimate-ASI-Loader) loads every `.asi` in its current directory, and every `.asi` recursively from the `plugins` subdirectory, so a new version must
-replace the old file, **not** sit beside it. The plugin imports only system DLLs (`KERNEL32`,
-`ADVAPI32`, `bcrypt`, `ole32`) and the UCRT api-sets.
+named from the `VERSION` file. [Ultimate ASI Loader](https://github.com/ThirteenAG/Ultimate-ASI-Loader)
+loads every `.asi` in the game's folder and, by default, every `.asi` under `scripts/` and
+`plugins/`, subfolders included, so two versions side by side would both load; the plugin retires
+extra copies itself (see [Other copies of the plugin](#other-copies-of-the-plugin)). The plugin
+imports only system DLLs (`KERNEL32`, `ADVAPI32`, `bcrypt`, `ole32`) and the UCRT api-sets.
 
 Trampoline pages are read-execute except while a stub is being written. `-p:RwxTrampolines=true`
 on the publish (the scripts' `--rwx`) keeps them read-write-execute for their whole life, as the
@@ -144,15 +154,17 @@ The tag must equal `VERSION` (a `v` prefix does not match). A suffix, as in `202
 publishes a prerelease; remove a test release with `gh release delete <tag> --cleanup-tag`. The
 release holds `OpenVersus_v<tag>.zip` (the install), `OpenVersus_<version>.asi` (the plugin alone,
 which is what the server's `download_url` should point the auto-updater at), a `.sha256` beside
-each, and `SHA256SUMS`. The server offers a release's `.asi` asset and falls back to its zip when there is
-none; the updater handles both, installing only the one `.asi` in a zip (or the one named for the
-offered version) and never the zip's loader or `OpenVersus.toml`. Before anything is installed, the download is checked
-against the release's `<download_url>.sha256`: a mismatch, a missing `.sha256`, or one that cannot be
+each, and `SHA256SUMS`.
+
+The server offers a release's `.asi` asset and falls back to its zip when there is none; the
+updater handles both, installing only the one `.asi` in a zip (or the one named for the offered
+version) and nothing else from it. Before anything is installed, the download is checked against
+the release's `<download_url>.sha256`: a mismatch, a missing `.sha256`, or one that cannot be
 fetched or read, means no install this launch. A missing one counts as a mismatch because every
 release the updater could install (only newer ones are) comes from this pipeline, which always
-publishes them. Last, the plugin itself decides: the version built into it
-(its version resource, read without loading it) must be newer than the running client and must be
-the version the server offered, so a mislabeled offer can never make a client reinstall itself.
+publishes them. Last, the plugin itself decides: the version built into it (its version resource,
+read without loading it) must be newer than the running client and must be the version the server
+offered, so a mislabeled offer can never make a client reinstall itself.
 
 ## How it maps to the C++ client
 
@@ -183,9 +195,10 @@ mistake, an unreadable file, an ini that would not convert), a toast after "Open
 so. A missing `OpenVersus.toml` (or the defaults after an ini that would not
 convert) is `Config/DefaultConfig.cs`: every row in `Settings.Table` order grouped by table, with
 CRLF line endings, `[Settings.Debug]` just above the servers, and a comment above every setting
-and table; a test fails if a row has no comment. Converted and merged files get no comments. `sample.toml` is a checked-in copy of that
-file: the plugin never writes it, and a test holds the two to the same bytes, so after changing a
-row, regenerate it by copying the `OpenVersus.toml` the plugin writes into an empty folder.
+and table; a test fails if a row has no comment. Converted and merged files get no comments.
+`sample.toml` is a checked-in copy of that file: the plugin never writes it, and a test holds the
+two to the same bytes, so after changing a row, regenerate it by copying the `OpenVersus.toml` the
+plugin writes into an empty folder.
 
 A legacy `OpenVersus.ini` with no `OpenVersus.toml` beside it is converted once
 (`Config/SettingsMigration.cs`), line for line: `;` comments become `#`, names take the spelling
@@ -197,8 +210,8 @@ value. A repeated section or key, or a line that is neither, was never read by t
 becomes a comment. The result is checked against the ini reader, key by key, before anything is
 written. If it checks out, the TOML is written and the ini deleted; if it does not, the log keeps
 the ini's text, the TOML starts from defaults, and the ini is still deleted. The ini is deleted only
-once the TOML is on disk. When both files exist (a new release, which ships `OpenVersus.toml`,
-extracted over an install that never converted), the ini is merged into the TOML
+once the TOML is on disk. When both files exist (an old ini left beside a TOML, say from a C++
+install restored over a converted one), the ini is merged into the TOML
 (`SettingsMigration.Merge`): a row's value is taken only where the TOML is missing it or still has
 the default, so nothing changed in the TOML is overwritten; any other key only where the TOML
 lacks it; `ServerUrl` never. Each value taken is logged, with a warning that sums them up, and the
@@ -261,17 +274,17 @@ minimum level comes from `[Settings] LogLevel`: a name in quotes (`"trace"`, `"d
 `"warn"`, `"error"`, `"critical"`, `"none"`, or the usual aliases such as `"verbose"`, `"all"`,
 `"err"`, `"quiet"`) or a number, bare or quoted (1 debug to 6 none; a number past 6 means 6). The
 value is tried as a number first, then as a name. An unquoted name (`LogLevel = debug`) is not
-valid TOML, so the whole file falls back to defaults. `0`, which converted files carry, means "decide from
-`[Settings.Debug] DebugLogging`": Debug when it is on, Information when it is off. A name that is
-not a level is logged and falls back the same way. Tags in the file are `TRC DBG NFO WRN ERR CRT`.
+valid TOML, so the whole file falls back to defaults. `0`, which converted files carry, means
+"decide from `[Settings.Debug] DebugLogging`": Debug when it is on, Information when it is off. A
+name that is not a level is logged and falls back the same way. Tags in the file are `TRC DBG NFO WRN ERR CRT`.
 Per-attempt and game-thread queue lines are Trace; pattern and function resolution is Debug; hooks,
 banners and netstats are Information.
 
 ### Netstats
 
-With `[Features] NetStats = true` the per-second `NETSTATS` lines go to `logs/NetStats.log`, one file
-per match: it opens when a session starts playing and closes at the summary, which archives it as
-`NetStats_<match start time>_<match id>[_with_<teammates>]_vs_<opponents>.log` with the same
+With `[Features] NetStats = true` the per-second `NETSTATS` lines go to `logs/NetStats.log`, one
+file per match: it opens when a session starts playing and closes at the summary, which archives
+it as `NetStats_<match start time>_<match id>[_with_<teammates>]_vs_<opponents>.log` with the same
 retention as the main log. The names come from the player data each fighter pawn carries and the
 id from the gameplay-config subsystem (both confirmed on the live game), read at the first playing
 sample and, while incomplete, again once a second for ten seconds. A log that never got a
@@ -287,9 +300,9 @@ never sampled.
 
 ## Conventions
 
-- The version is the `VERSION` file at the repository root and nothing else: the build generates
-  `OvsVersion.Current` from it, stamps the assembly with it and names the plugin for it, and
-  `release.yml` refuses a tag that differs from it.
+- The version is `dotnet/VERSION` and nothing else (the repository root's `VERSION` links to it):
+  the build generates `OvsVersion.Current` from it, stamps the assembly and version resource with
+  it and names the plugin for it, and `release.yml` refuses a tag that differs from it.
 - Formatting is `dotnet/.editorconfig`, applied with `dotnet format`: four spaces, Allman braces,
   one statement per line. Braces on every control-flow body (IDE0011) is an error in the build;
   a one-line auto-property or single-expression `=>` is fine.
@@ -363,8 +376,8 @@ read from the file's bytes without loading it (loading a copy would run its code
 client patches the game from `DllMain`; a copy that crashed while loading would crash the game
 before anything was renamed, every launch). A file without a version resource, like the C++
 client, counts as oldest, and a tie goes to the running copy. Every other copy, the running one
-included if it lost, is renamed to `.bak`. Then the game closes with a message saying what was renamed,
-without patching anything, since another copy may already have patched it this launch.
+included if it lost, is renamed to `.bak`. Then the game closes with a message saying what was
+renamed, without patching anything, since another copy may already have patched it this launch.
 
 ## Testing against the game
 
@@ -375,8 +388,11 @@ hooks that took; when something fails to resolve, try comparing those addresses 
 console output.
 
 Set `AutoUpdate = false` while testing. The update check works against https (the C++ one never
-could) and installs whatever the server offers when it is newer than `VERSION`, which would replace
-the build under test.
+could) and installs any newer release the server offers, which would replace the build under test.
+To test the updater itself without GitHub, point `[Server.Game] ServerUrl` at a local server that
+answers `GET /ovs/client-version` with `latest_version` and `download_url` and serves the `.asi`
+and its `.sha256`; the offered file must really be newer (its version resource decides), or it is
+refused.
 
 The Wine harness (`build.sh harness` or `wine-host/run.sh`) checks the hooking layer without the
 game: the host calls three assembly sites before and after loading the test plugin, which
