@@ -84,27 +84,35 @@ jobs:
           done
 
       - name: The artifact must be present
+        id: artifact
         run: |
           set -euo pipefail
           names=$(gh api "repos/$REPO/actions/runs/${{ steps.build.outputs.run }}/artifacts" \
                     --jq '.artifacts[] | select(.expired == false) | .name')
           echo "$names"
-          grep -q -- '-windows-x64$' <<<"$names" || { echo "::error::build run ${{ steps.build.outputs.run }} has no unexpired windows-x64 artifact"; exit 1; }
+          name=$(grep -- '-windows-x64$' <<<"$names" || true)
+          [ -n "$name" ] || { echo "::error::build run ${{ steps.build.outputs.run }} has no unexpired windows-x64 artifact"; exit 1; }
+          [ "$(wc -l <<<"$name")" -eq 1 ] || { echo "::error::build run ${{ steps.build.outputs.run }} has more than one windows-x64 artifact"; exit 1; }
+          echo "name=$name" >> "$GITHUB_OUTPUT"
 
+      # By name, into a directory of our own: download-artifact extracts a named artifact straight
+      # into path. Downloading "all" does not reliably add a directory per artifact (v8 said it
+      # would and then extracted into path anyway, which broke the 2026.09.25.07 release).
       - name: Download the artifact
         uses: actions/download-artifact@v8
         with:
+          name: ${{ steps.artifact.outputs.name }}
           run-id: ${{ steps.build.outputs.run }}
           github-token: ${{ github.token }}
-          path: artifacts
+          path: artifacts/install
 
       - name: Package
         run: |
           set -euo pipefail
           label="${{ steps.version.outputs.label }}"
           base="${{ steps.version.outputs.base }}"
-          dir=$(find artifacts -maxdepth 1 -type d -name '*-windows-x64' | head -1)
-          [ -n "$dir" ] || { echo "::error::no windows-x64 artifact directory"; exit 1; }
+          dir=artifacts/install
+          [ -d "$dir/plugins" ] || { echo "::error::the downloaded artifact has no plugins directory"; ls -R artifacts; exit 1; }
           # Ties the tag to the binary: the build names the plugin for the VERSION it read.
           asi="$dir/plugins/OpenVersus_$base.asi"
           [ -f "$asi" ] || { echo "::error::the artifact has no plugins/OpenVersus_$base.asi"; ls -R "$dir"; exit 1; }
