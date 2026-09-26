@@ -24,12 +24,12 @@
   </ItemGroup>
 
   <!-- OvsVersion.Current, from the VERSION file (see Directory.Build.props). -->
-  <Target Name="GenerateOvsVersion" BeforeTargets="CoreCompile">
+  <Target Name="GenerateOvsVersion" BeforeTargets="CoreCompile" DependsOnTargets="AddSourceRevisionToInformationalVersion;AddBuildDateToInformationalVersion">
     <PropertyGroup>
       <OvsVersionSource>$(IntermediateOutputPath)OvsVersion.g.cs</OvsVersionSource>
     </PropertyGroup>
     <WriteLinesToFile File="$(OvsVersionSource)" Overwrite="true" WriteOnlyWhenDifferent="true"
-      Lines="// Generated from the repository's VERSION file at build time. Do not edit.;namespace OpenVersus%3B;public static partial class OvsVersion;{;    /// &lt;summary&gt;The client version, from the VERSION file at the repository root.&lt;/summary&gt;;    public const string Current = &quot;$(OvsVersion)&quot;%3B;}" />
+      Lines="// Generated from the repository's VERSION file at build time. Do not edit.;namespace OpenVersus%3B;public static partial class OvsVersion;{;    /// &lt;summary&gt;The client version, from the VERSION file at the repository root.&lt;/summary&gt;;    public const string Current = &quot;$(OvsVersion)&quot;%3B;    /// &lt;summary&gt;The product version in the version resource: the version, the commit and the build date.&lt;/summary&gt;;    public const string Informational = &quot;$(InformationalVersion)&quot;%3B;    /// &lt;summary&gt;The copyright line in the version resource.&lt;/summary&gt;;    public const string Copyright = &quot;$(Copyright)&quot;%3B;}" />
     <ItemGroup>
       <Compile Include="$(OvsVersionSource)" />
       <FileWrites Include="$(OvsVersionSource)" />

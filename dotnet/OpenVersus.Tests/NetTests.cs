@@ -106,12 +106,10 @@ public class NetTests
     public void OnlyALaterVersionIsAnUpdate(string offered, string running, bool expected) => Assert.Equal(expected, AutoUpdate.IsNewer(offered, running));
 
     [Fact]
-    public void AnUpdateInstallsUnderTheNewVersionsName()
+    public void AnUpdateInstallsUnderTheNewVersionsNameWhereTheClientSays()
     {
-        string plugins = Path.Combine(Path.GetTempPath(), "plugins");
-        Assert.Equal(Path.Combine(plugins, "OpenVersus_2026.10.01.01.asi"), AutoUpdate.InstallPath(Path.Combine(plugins, "OpenVersus_2026.09.24.02.asi"), " 2026.10.01.01 "));
-        // A plain OpenVersus.asi from an earlier release moves to the versioned name too.
-        Assert.Equal(Path.Combine(plugins, "OpenVersus_2026.10.01.01.asi"), AutoUpdate.InstallPath(Path.Combine(plugins, "OpenVersus.asi"), "2026.10.01.01"));
+        string home = Path.Combine(Path.GetTempPath(), "plugins", "OpenVersus");
+        Assert.Equal(Path.Combine(home, "OpenVersus_2026.10.01.01.asi"), AutoUpdate.InstallPath(home, " 2026.10.01.01 "));
     }
 
     [Fact]
@@ -269,7 +267,7 @@ public class NetTests
 
         var http = new FakeHttp(results);
         var log = new ListLogger();
-        var update = new AutoUpdate("https://prod.openversus.org/", "OpenVersus_2026.09.25.06.asi", http, http, log, () => { });
+        var update = new AutoUpdate("https://prod.openversus.org/", "OpenVersus_2026.09.25.06.asi", ".", http, http, log, () => { });
         byte[]? plugin = update.Fetch(new VersionInfo("2026.10.01.01", url, false, ""));
         return (plugin, log, http);
     }

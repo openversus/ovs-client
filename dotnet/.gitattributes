@@ -1,3 +1,5 @@
-# Byte-exact files: tests compare them with CRLF line endings, so no checkout may convert them.
+# Files that must keep their CRLF line endings, so no checkout may convert them: tests compare
+# sample.toml and the fixtures byte for byte, and players open the readme in Notepad.
 sample.toml -text
+release-readme.txt -text
 OpenVersus.Tests/Fixtures/** -text

@@ -13,9 +13,9 @@
 #                      without it the script asks, and refuses when there is no terminal to ask on
 #   --rwx              publish with trampoline pages read-write-execute for their whole life,
 #                      as the C++ client did (default: read-execute except while a stub is written)
-#   --install DIR      copy the published OpenVersus_<version>.asi into DIR (the game's plugins
-#                      folder), renaming any OpenVersus*.asi already there to .bak, since the
-#                      ASI loader would otherwise load both
+#   --install DIR      copy the published OpenVersus_<version>.asi into DIR/OpenVersus (DIR is the
+#                      game's plugins folder), renaming any OpenVersus*.asi in DIR or DIR/OpenVersus
+#                      to .bak, since the ASI loader would otherwise load both
 #   --skip-tests       do not run the tests in the default command
 #
 # Needs the .NET 10 SDK. Publishing a Windows binary from Linux also needs lld-link (package
@@ -114,13 +114,15 @@ do_publish() {
     say "published $published ($(du -h "$published" | cut -f1))"
     if [ -n "$install_dir" ]; then
         [ -d "$install_dir" ] || fail "$install_dir is not a directory"
-        for old in "$install_dir"/OpenVersus*.asi; do
+        home="$install_dir/OpenVersus"
+        mkdir -p "$home"
+        for old in "$install_dir"/OpenVersus*.asi "$home"/OpenVersus*.asi; do
             [ -f "$old" ] || continue
             mv -f "$old" "$old.bak"
             echo "kept the previous plugin as $old.bak"
         done
-        cp -f "$published" "$install_dir/"
-        say "installed to $install_dir/$(basename "$published")"
+        cp -f "$published" "$home/"
+        say "installed to $home/$(basename "$published")"
     fi
 }
 

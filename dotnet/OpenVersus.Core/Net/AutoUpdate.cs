@@ -18,7 +18,7 @@ namespace OpenVersus.Net;
 /// The C++ did the version check over a raw socket without TLS, which cannot reach an https
 /// server; this goes through the transport, so the check works against production.
 /// </summary>
-public sealed class AutoUpdate(string serverUrl, string pluginPath, IHttpTransport http, IHttpTransport download, ILogger log, Action beforeExit)
+public sealed class AutoUpdate(string serverUrl, string pluginPath, string installDirectory, IHttpTransport http, IHttpTransport download, ILogger log, Action beforeExit)
 {
     /// <summary>The version response, or null when the text is not that.</summary>
     public static VersionInfo? Parse(string json)
@@ -95,13 +95,14 @@ public sealed class AutoUpdate(string serverUrl, string pluginPath, IHttpTranspo
     public static bool IsNewer(string offered, string running) => string.CompareOrdinal(offered.Trim(), running.Trim()) > 0;
 
     /// <summary>
-    /// Where a downloaded <paramref name="version"/> goes: "OpenVersus_&lt;version&gt;.asi" beside the
-    /// running plugin, whatever that one is called (a plain "OpenVersus.asi" from an earlier
-    /// release included), so the file name says what it is. The running file is renamed to
-    /// ".bak" first, since the ASI loader would otherwise load both.
+    /// Where a downloaded <paramref name="version"/> goes: "OpenVersus_&lt;version&gt;.asi" in
+    /// <paramref name="installDirectory"/>, which the client sets to plugins/OpenVersus/ when the
+    /// loader loads that folder and to the plugin's own folder otherwise, so an update never lands
+    /// where it would not be loaded. Whatever the running plugin is called (a plain "OpenVersus.asi"
+    /// included), it is renamed to ".bak" first, since the ASI loader would otherwise load both.
     /// </summary>
-    public static string InstallPath(string pluginPath, string version) =>
-        Path.Combine(Path.GetDirectoryName(pluginPath)!, $"{OvsVersion.Name}_{version.Trim()}.asi");
+    public static string InstallPath(string installDirectory, string version) =>
+        Path.Combine(installDirectory, $"{OvsVersion.Name}_{version.Trim()}.asi");
 
     /// <summary>Why <paramref name="body"/> must not be installed as the plugin, or null when it looks like one.</summary>
     public static string? Validate(ReadOnlySpan<byte> body)
@@ -279,10 +280,12 @@ public sealed class AutoUpdate(string serverUrl, string pluginPath, IHttpTranspo
 
         string temp = Path.Combine(Path.GetTempPath(), "OpenVersus_update.asi");
         string backup = pluginPath + ".bak";
-        string target = InstallPath(pluginPath, info.LatestVersion!);
+        string target = InstallPath(installDirectory, info.LatestVersion!);
         try
         {
             File.WriteAllBytes(temp, plugin);
+            // Before the running plugin is renamed, so a failure here leaves the install as it was.
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
             log.Info($"[AutoUpdate] Backing up {Path.GetFileName(pluginPath)} and installing {Path.GetFileName(target)}...");
             if (File.Exists(backup))
             {

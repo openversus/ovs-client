@@ -73,7 +73,7 @@ dotnet\build.ps1               # Windows (PowerShell; build.cmd runs it from cmd
 | `publish` | `publish` | publish the plugin only |
 | `harness` | | run the Wine harness |
 | `clean` | `clean` | remove every `bin/` and `obj/` directory |
-| `--install DIR` | `-Install DIR` | copy the plugin into `DIR` (the game's `plugins` folder), renaming any `OpenVersus*.asi` already there to `.bak` |
+| `--install DIR` | `-Install DIR` | copy the plugin into `DIR/OpenVersus` (`DIR` is the game's `plugins` folder), renaming any `OpenVersus*.asi` in either to `.bak` |
 | `--rwx` | `-Rwx` | read-write-execute trampolines (see below) |
 | `--skip-tests` | `-SkipTests` | skip the tests in the default command |
 | `--accept-license` | | accept the Visual Studio Build Tools license for the Windows SDK sysroot |
@@ -118,11 +118,15 @@ as it ships:
 ```
 xinput1_3.dll                      Ultimate ASI Loader, pinned by digest
 LICENSE_Ultimate_ASI_Loader.txt
-plugins/OpenVersus_<version>.asi
-plugins/OpenVersus.toml            from dotnet/sample.toml
-plugins/LICENSE.txt
-plugins/VERSION.txt
+readme.txt                         from dotnet/release-readme.txt
+plugins/OpenVersus/OpenVersus_<version>.asi
+plugins/OpenVersus/sample_config.toml   dotnet/sample.toml under a note that it is a sample
+plugins/OpenVersus/LICENSE.txt
+plugins/OpenVersus/VERSION.txt
 ```
+
+The zip ships no `OpenVersus.toml`: the plugin writes it on first launch (the same text as
+`sample.toml`), so extracting a release over an install never replaces a player's settings.
 
 The loader's `xinput1_3` build is only published under upstream's moving `x64-latest` release, so
 when upstream replaces it the build fails with a message naming `LOADER_SHA256`: check the new
@@ -312,6 +316,53 @@ never sampled.
 - What stays C-shaped is what must: `[UnmanagedCallersOnly]` hooks and the static state they
   need, function-pointer casts, sequential-layout structs mirroring the game, `nint` arithmetic,
   and Win32 names in `Native/`.
+
+## What the binary says about itself
+
+The version resource (Windows shows it under Properties > Details) carries the product name,
+description, `Copyright (c) 2026 Christopher Conley, Tuggernuts`, the file version from `VERSION`,
+and a product version of `<VERSION>+<commit>.<build date, UTC>`, all set in
+`Directory.Build.props`. The same text is in `OvsVersion` (`Current`, `Informational`,
+`Copyright`), and the export `OpenVersusInfo` returns it as a NUL-terminated UTF-8 JSON object
+(`name`, `version`, `productVersion`, `copyright`) for tools that load the plugin on purpose.
+Loading it runs nothing: the plugin does no work until the ASI loader calls `InitializeASI`.
+
+## Where it lives
+
+The mod lives in its own folder, `plugins/OpenVersus/`, which the ASI loader loads like the rest
+of `plugins/`. Everything the plugin writes (settings, state, pattern cache, logs) goes beside it.
+Earlier versions lived loose in `plugins/`, so a plugin running from a folder named `OpenVersus`
+takes over what they left one folder up (`Layout.cs`): an `OpenVersus.toml` or `OVSState.toml`
+there is moved in when the mod's folder has none; an `OpenVersus.ini` or `OVSState.ini` there is
+converted, or merged into an existing TOML, by the same rules as one in the mod's folder; old
+pattern caches are deleted. A `logs` folder is never moved: the C++ client wrote none, and
+`plugins/logs` may belong to another mod.
+
+Every launch, right after the duplicate check, a plugin running from anywhere other than
+`plugins/OpenVersus/` beside the game executable moves itself there, with its settings, state and
+cache files (`Layout.MoveInto`), and carries on from the new folder; this launch's log stays where
+it was opened, and no logs are moved. It does so only when Ultimate ASI Loader would load that
+folder (`LoaderConfig.cs`): the loader reads `[GlobalSets]` from `<its name>.ini`, `global.ini`,
+`scripts\global.ini`, `plugins\global.ini` and `update\global.ini` beside it, each overriding the
+last, and loads folders under `plugins/` when `LoadPlugins` and `LoadRecursively` are on, their
+default with no settings at all. When either is off, the plugin stays where it is and says why in
+the log. Updates install into the same folder the move would use, so they never land where the
+loader would not look. If the plugin cannot be moved, nothing is, and it runs where it is.
+
+## Other copies of the plugin
+
+Ultimate ASI Loader loads every `.asi` it finds, so a new release extracted over an old one (the
+C++ client's `OpenVersus.asi`, or an older `OpenVersus_<version>.asi`) would run two clients
+patching the same code. The first thing `Client.Initialize` does is search the plugin's folder
+and the game executable's folder, subfolders included, for any other `OpenVersus*.asi`
+(`DuplicatePlugins.cs`). The newest copy by the version built into it stays, whatever the file is
+called: the fixed file version in its version resource, which the build stamps from `VERSION`,
+read from the file's bytes without loading it (loading a copy would run its code, and the C++
+client patches the game from `DllMain`; a copy that crashed while loading would crash the game
+before anything was renamed, every launch). A file without a version resource, like the C++
+client, counts as oldest, and a tie goes to the running copy. Every other copy, the running one
+included if it lost, is renamed to `.bak`. Then the game closes with a message saying what was renamed,
+without patching anything, since another copy may already have patched it this launch.
 
 ## Testing against the game
 

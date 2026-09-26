@@ -225,12 +225,24 @@ public sealed class Settings
     /// <summary>
     /// Reads <see cref="FileName"/> in <paramref name="directory"/>, converting a legacy
     /// <see cref="LegacyFileName"/> first when that is all there is, and adds the missing rows to
-    /// the file with their defaults.
+    /// the file with their defaults. With <paramref name="oldHome"/> (<see cref="Layout.OldHome"/>),
+    /// an OpenVersus.toml there is moved in, and an OpenVersus.ini there is used when
+    /// <paramref name="directory"/> has none.
     /// </summary>
-    public static Settings Load(string directory, ILogger? log = null)
+    public static Settings Load(string directory, ILogger? log = null, string? oldHome = null)
     {
         string path = System.IO.Path.Combine(directory, FileName);
+        if (Layout.TakeOver(oldHome, directory, FileName) is { } moved)
+        {
+            log?.LogInformation("[Settings] {Moved}", moved);
+        }
+
+        // An ini in the mod's own folder first, else one left in plugins/ by an earlier layout.
         string legacyPath = System.IO.Path.Combine(directory, LegacyFileName);
+        if (!File.Exists(legacyPath) && oldHome != null)
+        {
+            legacyPath = System.IO.Path.Combine(oldHome, LegacyFileName);
+        }
         bool retireLegacy = false;
         SettingsProblem? problem = null;
         TomlConfig toml;

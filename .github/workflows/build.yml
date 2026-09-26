@@ -1,12 +1,15 @@
 # Builds the .NET client: tests, the formatting check, and the NativeAOT plugin,
 # cross-compiled on Linux with lld-link and an xwin Windows SDK sysroot.
 #
-# The artifact is the install exactly as it ships: plugins/ holding OpenVersus_<version>.asi,
-# OpenVersus.toml (from dotnet/sample.toml), LICENSE.txt and VERSION.txt, beside the ASI loader as
-# xinput1_3.dll and its license. release.yml publishes the artifact of the build that already
-# ran for a tagged commit rather than building it again, so every commit that may be tagged
-# must get a build of its own: there is no path filter here, and no cancel-in-progress (a
-# build canceled by the next push would leave its commit with nothing to release).
+# The artifact is the install exactly as it ships: plugins/OpenVersus/ holding
+# OpenVersus_<version>.asi, sample_config.toml (dotnet/sample.toml under a note that it is a
+# sample; the mod writes its own OpenVersus.toml on first launch, so extracting a release never
+# replaces a player's settings), LICENSE.txt and VERSION.txt, beside the ASI loader as
+# xinput1_3.dll, its license, and readme.txt (from dotnet/release-readme.txt). release.yml
+# publishes the artifact of the build that already ran for a tagged commit rather than building
+# it again, so every commit that may be tagged must get a build of its own: there is no path
+# filter here, and no cancel-in-progress (a build canceled by the next push would leave its
+# commit with nothing to release).
 name: build
 
 on:
@@ -123,11 +126,17 @@ jobs:
           set -euo pipefail
           version=$(tr -d '[:space:]' < VERSION)
           asi="dotnet/OpenVersus/bin/Release/net10.0/win-x64/publish/OpenVersus_$version.asi"
-          rm -rf dist && mkdir -p dist/plugins
-          cp "$asi" dist/plugins/
-          cp dotnet/sample.toml dist/plugins/OpenVersus.toml
-          cp LICENSE dist/plugins/LICENSE.txt
-          cp VERSION dist/plugins/VERSION.txt
+          home=dist/plugins/OpenVersus
+          rm -rf dist && mkdir -p "$home"
+          cp "$asi" "$home/"
+          { printf '%s\r\n' \
+              "# A sample of the settings, for reference: the mod reads OpenVersus.toml in this folder," \
+              "# which it writes on its first launch with these same defaults and comments." \
+              "#"
+            cat dotnet/sample.toml; } > "$home/sample_config.toml"
+          cp dotnet/release-readme.txt dist/readme.txt
+          cp LICENSE "$home/LICENSE.txt"
+          cp VERSION "$home/VERSION.txt"
           curl -fsSL -o "$RUNNER_TEMP/loader.zip" "$LOADER_URL"
           echo "$LOADER_SHA256  $RUNNER_TEMP/loader.zip" | sha256sum -c - \
             || { echo "::error::the ASI loader at $LOADER_URL has changed; check the new one and update LOADER_SHA256 in build.yml"; exit 1; }
@@ -138,10 +147,10 @@ jobs:
         run: |
           set -euo pipefail
           version=$(tr -d '[:space:]' < VERSION)
-          expected=$(printf '%s\n' LICENSE_Ultimate_ASI_Loader.txt plugins/LICENSE.txt plugins/OpenVersus.toml "plugins/OpenVersus_$version.asi" plugins/VERSION.txt xinput1_3.dll | sort)
+          expected=$(printf '%s\n' LICENSE_Ultimate_ASI_Loader.txt plugins/OpenVersus/LICENSE.txt plugins/OpenVersus/sample_config.toml "plugins/OpenVersus/OpenVersus_$version.asi" plugins/OpenVersus/VERSION.txt readme.txt xinput1_3.dll | sort)
           actual=$(cd dist && find . -type f | sed 's|^\./||' | sort)
           [ "$actual" = "$expected" ] || { echo "::error::dist does not hold exactly the release files"; diff <(echo "$expected") <(echo "$actual") || true; exit 1; }
-          for pe in "dist/plugins/OpenVersus_$version.asi" dist/xinput1_3.dll; do
+          for pe in "dist/plugins/OpenVersus/OpenVersus_$version.asi" dist/xinput1_3.dll; do
             [ "$(head -c 2 "$pe")" = "MZ" ] || { echo "::error::$pe is not a PE file"; exit 1; }
           done
           ( cd dist && find . -type f -exec ls -l {} + ) | tee -a "$GITHUB_STEP_SUMMARY"

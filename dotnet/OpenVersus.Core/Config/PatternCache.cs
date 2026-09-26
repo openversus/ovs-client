@@ -23,17 +23,28 @@ public sealed class PatternCache
 
     /// <summary>
     /// Opens the cache in <paramref name="directory"/> for <paramref name="textHash"/> and
-    /// <paramref name="version"/>. A hash of 0 (no .text section found) turns the cache off.
+    /// <paramref name="version"/>. A hash of 0 (no .text section found) turns the cache off. Old
+    /// caches here and in <paramref name="oldHome"/> (<see cref="Layout.OldHome"/>) are deleted.
     /// </summary>
-    public PatternCache(string directory, ulong textHash, string version)
+    public PatternCache(string directory, ulong textHash, string version, string? oldHome = null)
     {
         string path = Path.Combine(directory, FileName);
-        try
+        // Old caches, here or loose in plugins/ from an earlier layout, are only caches.
+        string?[] stale = [Path.Combine(directory, LegacyFileName),
+            oldHome == null ? null : Path.Combine(oldHome, LegacyFileName),
+            oldHome == null ? null : Path.Combine(oldHome, FileName)];
+        foreach (string? file in stale)
         {
-            File.Delete(Path.Combine(directory, LegacyFileName));
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-        {
+            try
+            {
+                if (file != null)
+                {
+                    File.Delete(file);
+                }
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+            }
         }
 
         string exe = ((uint)(textHash >> 32)).ToString("X8", CultureInfo.InvariantCulture);

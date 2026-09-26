@@ -9,6 +9,25 @@
     <InformationalVersion Condition="'$(OvsVersion)' != ''">$(OvsVersion)</InformationalVersion>
   </PropertyGroup>
 
+  <!-- The rest of the version resource (Windows shows it under Properties > Details), and the
+       same text in OvsVersion (Informational, Copyright) for the OpenVersusInfo export. The build
+       date goes on the product version after the commit the SDK appends: 2026.09.25.08+<sha>.<date>. -->
+  <PropertyGroup>
+    <Product>OpenVersus</Product>
+    <Company>OpenVersus</Company>
+    <AssemblyTitle>OpenVersus: It's better than Parsec</AssemblyTitle>
+    <Description>We're so back.</Description>
+    <Copyright>Copyright (c) 2026 Christopher Conley, Tuggernuts</Copyright>
+    <OvsBuildDate>$([System.DateTime]::UtcNow.ToString('yyyyMMdd'))</OvsBuildDate>
+  </PropertyGroup>
+
+  <Target Name="AddBuildDateToInformationalVersion" AfterTargets="AddSourceRevisionToInformationalVersion">
+    <PropertyGroup>
+      <InformationalVersion Condition="$(InformationalVersion.Contains('+'))">$(InformationalVersion).$(OvsBuildDate)</InformationalVersion>
+      <InformationalVersion Condition="!$(InformationalVersion.Contains('+'))">$(InformationalVersion)+$(OvsBuildDate)</InformationalVersion>
+    </PropertyGroup>
+  </Target>
+
   <Target Name="RequireVersionFile" BeforeTargets="BeforeBuild">
     <Error Condition="'$(OvsVersion)' == ''" Text="VERSION file not found at $(OvsVersionFile); the dotnet tree must be built inside the repository." />
   </Target>

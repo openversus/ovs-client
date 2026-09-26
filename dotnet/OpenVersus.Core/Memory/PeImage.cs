@@ -53,6 +53,39 @@ public static unsafe class PeImage
         return BitConverter.ToUInt32(headers[(lfanew + 24 + 56)..]);
     }
 
+    /// <summary>
+    /// Data directory <paramref name="index"/> (2 is resources) as (RVA, size), from a PE32 or PE32+
+    /// optional header; (0, 0) when the image has fewer directories. Throws a
+    /// <see cref="FormatException"/> when <paramref name="headers"/> are not a PE's.
+    /// </summary>
+    public static (uint Rva, uint Size) DataDirectory(ReadOnlySpan<byte> headers, int index)
+    {
+        int optional = NtHeaders(headers) + 24;
+        bool pe32Plus = BitConverter.ToUInt16(headers[optional..]) == 0x20B;
+        uint count = BitConverter.ToUInt32(headers[(optional + (pe32Plus ? 108 : 92))..]);
+        if (index >= count)
+        {
+            return (0, 0);
+        }
+
+        int entry = optional + (pe32Plus ? 112 : 96) + (index * 8);
+        return (BitConverter.ToUInt32(headers[entry..]), BitConverter.ToUInt32(headers[(entry + 4)..]));
+    }
+
+    /// <summary>Where <paramref name="rva"/> lies in the file, or -1 when no section holds it.</summary>
+    public static long FileOffset(IReadOnlyList<PeSection> sections, uint rva)
+    {
+        foreach (var s in sections)
+        {
+            if (rva >= s.Rva && rva < s.Rva + Math.Max(s.VirtualSize, s.RawSize))
+            {
+                return s.RawOffset + (long)(rva - s.Rva);
+            }
+        }
+
+        return -1;
+    }
+
     /// <summary>The section table. Throws a <see cref="FormatException"/> when <paramref name="headers"/> are not a PE's.</summary>
     public static List<PeSection> Sections(ReadOnlySpan<byte> headers)
     {

@@ -15,11 +15,19 @@ public sealed class State
     private readonly TomlConfig _toml;
 
     /// <summary>Opens <see cref="FileName"/> in <paramref name="directory"/>, converting a legacy
-    /// <see cref="LegacyFileName"/> first when that is all there is.</summary>
-    public State(string directory)
+    /// <see cref="LegacyFileName"/> first when that is all there is. With <paramref name="oldHome"/>
+    /// (<see cref="Layout.OldHome"/>), an OVSState.toml there is moved in, and an OVSState.ini there
+    /// is converted when <paramref name="directory"/> has none.</summary>
+    public State(string directory, string? oldHome = null)
     {
         string path = Path.Combine(directory, FileName);
+        Layout.TakeOver(oldHome, directory, FileName);
         string legacyPath = Path.Combine(directory, LegacyFileName);
+        if (!File.Exists(legacyPath) && oldHome != null)
+        {
+            legacyPath = Path.Combine(oldHome, LegacyFileName);
+        }
+
         _toml = TomlConfig.Load(path);
         if (_toml.LoadError != null || _toml.Errors.Count > 0)
         {

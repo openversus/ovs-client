@@ -16,8 +16,9 @@ which NativeAOT uses to link. The tests need only the SDK.
 Publish with trampoline pages read-write-execute for their whole life, as the C++ client did.
 
 .PARAMETER Install
-Copy the published OpenVersus_<version>.asi into this directory (the game's plugins folder),
-renaming any OpenVersus*.asi already there to .bak, since the ASI loader would otherwise load both.
+Copy the published OpenVersus_<version>.asi into OpenVersus inside this directory (the game's
+plugins folder), renaming any OpenVersus*.asi in either to .bak, since the ASI loader would
+otherwise load both.
 
 .PARAMETER SkipTests
 Do not run the tests in the default command.
@@ -73,12 +74,14 @@ function Publish-Plugin {
     Say "published $published ($([math]::Round((Get-Item $published).Length / 1MB, 1)) MB)"
     if ($Install) {
         if (-not (Test-Path $Install -PathType Container)) { Fail "$Install is not a directory" }
-        foreach ($old in Get-ChildItem (Join-Path $Install "OpenVersus*.asi") -ErrorAction SilentlyContinue) {
+        $modDir = Join-Path $Install "OpenVersus"
+        New-Item -ItemType Directory -Force -Path $modDir | Out-Null
+        foreach ($old in @(Get-ChildItem (Join-Path $Install "OpenVersus*.asi") -ErrorAction SilentlyContinue) + @(Get-ChildItem (Join-Path $modDir "OpenVersus*.asi") -ErrorAction SilentlyContinue)) {
             Move-Item $old.FullName "$($old.FullName).bak" -Force
             Write-Host "kept the previous plugin as $($old.FullName).bak"
         }
-        Copy-Item $published $Install -Force
-        Say "installed to $(Join-Path $Install (Split-Path $published -Leaf))"
+        Copy-Item $published $modDir -Force
+        Say "installed to $(Join-Path $modDir (Split-Path $published -Leaf))"
     }
 }
 

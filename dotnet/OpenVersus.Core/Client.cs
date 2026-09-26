@@ -24,7 +24,7 @@ public sealed class Client
     /// <summary>The plugin's log.</summary>
     public Log Log { get; }
     /// <summary>The plugin's folder, where the settings, state and cache files live.</summary>
-    public string Directory { get; }
+    public string Directory { get; private set; }
     /// <summary>OpenVersus.toml, as read by <see cref="Initialize"/>.</summary>
     public Settings Settings { get; private set; } = null!;
     /// <summary>OVSState.toml, as read by <see cref="Initialize"/>.</summary>
@@ -42,7 +42,9 @@ public sealed class Client
     /// <summary>The HTTP transport for the server; a host may replace it before <see cref="Initialize"/>.</summary>
     public IHttpTransport Http { get; set; } = new WinHttpTransport();
 
-    private readonly string _pluginPath;
+    private string _pluginPath;
+    /// <summary>Where updates install: plugins/OpenVersus/ when the loader loads it, else beside the plugin.</summary>
+    private string _installDirectory;
 
     private readonly nint _module;
     private readonly List<Action> _shutdown = [];
@@ -53,7 +55,100 @@ public sealed class Client
         Log = log;
         Directory = Path.GetDirectoryName(pluginPath)!;
         _pluginPath = pluginPath;
+        _installDirectory = Directory;
         _module = module;
+    }
+
+    /// <summary>
+    /// When the install holds other copies of OpenVersus (<see cref="DuplicatePlugins"/>), retires
+    /// all but the newest, tells the player, and closes the game without patching anything: another
+    /// copy may already have patched it this launch. Returns false when this is the only copy.
+    /// </summary>
+    private bool RetireOtherCopies()
+    {
+        string self = Path.GetFullPath(_pluginPath);
+        List<string> others = DuplicatePlugins.Find(self, Directory, Path.GetDirectoryName(Environment.ProcessPath));
+        if (others.Count == 0)
+        {
+            return false;
+        }
+
+        var (keep, retire) = DuplicatePlugins.Decide(self, others, DuplicatePlugins.EmbeddedVersion);
+        Log.Warn($"[Duplicates] {others.Count} other OpenVersus plugin(s) in this install: {string.Join(", ", others.Select(o => $"{o} ({DuplicatePlugins.EmbeddedVersion(o)?.ToString() ?? "no version"})"))}; keeping {keep}");
+        var failed = DuplicatePlugins.Retire(retire);
+        foreach (var (path, error) in failed)
+        {
+            Log.Warn($"[Duplicates] Could not rename {path}: {error}");
+        }
+
+        var renamed = retire.Where(r => !failed.Any(f => f.Path == r)).ToList();
+        var text = new System.Text.StringBuilder("OpenVersus found more than one copy of itself in this game install, and only one can run at a time.\n\n");
+        if (renamed.Count > 0)
+        {
+            text.Append("These were renamed to .bak and will not load again:\n").AppendJoin("\n", renamed).Append("\n\n");
+        }
+
+        if (failed.Count > 0)
+        {
+            text.Append("These could not be renamed; please delete them by hand:\n").AppendJoin("\n", failed.Select(f => f.Path)).Append("\n\n");
+        }
+
+        text.Append("Keeping: ").Append(keep).Append("\n\nThe game will now close. Please launch it again.");
+        Log.Info("[Duplicates] Closing the game so only one copy loads next launch");
+        User32.MessageBox(0, text.ToString(), OvsVersion.Name, User32.MB_ICONEXCLAMATION);
+        Log.Close();
+        Firmware.TerminateProcess(Kernel32.GetCurrentProcess(), 0);
+        return true;
+    }
+
+    /// <summary>
+    /// Moves the plugin and its files into plugins/OpenVersus/ beside the game executable when it
+    /// runs from anywhere else and the loader's settings say that folder is loaded
+    /// (<see cref="LoaderConfig"/>); otherwise it stays where it is. This launch carries on from
+    /// the new folder, except the log, which stays where it was opened. Updates install into the
+    /// same folder.
+    /// </summary>
+    private void MoveHome()
+    {
+        string? game = Path.GetDirectoryName(Environment.ProcessPath);
+        if (game == null)
+        {
+            return;
+        }
+
+        string home = Path.Combine(game, "plugins", Layout.FolderName);
+        bool loaded = LoaderConfig.LoadsPluginSubfolders(game, out string why);
+        if (!loaded)
+        {
+            if (!Layout.SameFolder(Directory, home))
+            {
+                Log.Info($"[Layout] Staying in {Directory} rather than moving to {home}: {why}");
+            }
+
+            return;
+        }
+
+        _installDirectory = home;
+        if (Layout.SameFolder(Directory, home))
+        {
+            return;
+        }
+
+        string? moved = Layout.MoveInto(_pluginPath, home, out var notes);
+        foreach (string note in notes)
+        {
+            Log.Info($"[Layout] {note}");
+        }
+
+        if (moved == null)
+        {
+            Log.Warn($"[Layout] Running from {Directory} this launch; updates still install into {home}");
+            return;
+        }
+
+        _pluginPath = moved;
+        Directory = home;
+        Log.Info($"[Layout] Running from {home} now ({why}); this launch's log stays at {Log.Path}");
     }
 
     /// <summary>
@@ -63,8 +158,16 @@ public sealed class Client
     public bool Initialize()
     {
         Log.Info($"On Attach Initialize ({OvsVersion.Name} {OvsVersion.Current})");
-        Settings = Settings.Load(Directory, Log);
-        State = new State(Directory).Load();
+        if (RetireOtherCopies())
+        {
+            return true;
+        }
+
+        MoveHome();
+
+        string? oldHome = Layout.OldHome(Directory);
+        Settings = Settings.Load(Directory, Log, oldHome);
+        State = new State(Directory, oldHome).Load();
         if (Log.Notice != null)
         {
             Log.Warn(Log.Notice);
@@ -112,7 +215,7 @@ public sealed class Client
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         ulong hash = Image.HashTextSection();
         Log.Debug($".text hash: 0x{hash:X16} | Time: {stopwatch.Elapsed.TotalMilliseconds:F3} ms");
-        var cache = new PatternCache(Directory, hash, OvsVersion.Current);
+        var cache = new PatternCache(Directory, hash, OvsVersion.Current, Layout.OldHome(Directory));
         Patterns = new PatternResolver(Image, cache, Settings, Log);
         Log.Info("Parsed Settings");
 
@@ -164,7 +267,7 @@ public sealed class Client
         if (Settings.AutoUpdate)
         {
             Log.Info("[AutoUpdate] Auto-update is enabled. OVS will check for updates automatically and download/apply them when available.");
-            var update = new AutoUpdate(Settings.ServerUrl, _pluginPath, Http, new WinHttpTransport(useSystemProxy: true), Log, Log.Close);
+            var update = new AutoUpdate(Settings.ServerUrl, _pluginPath, _installDirectory, Http, new WinHttpTransport(useSystemProxy: true), Log, Log.Close);
             Start("OVS auto-update", update.Run);
         }
         else

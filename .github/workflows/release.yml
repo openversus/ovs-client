@@ -114,8 +114,8 @@ jobs:
           dir=artifacts/install
           [ -d "$dir/plugins" ] || { echo "::error::the downloaded artifact has no plugins directory"; ls -R artifacts; exit 1; }
           # Ties the tag to the binary: the build names the plugin for the VERSION it read.
-          asi="$dir/plugins/OpenVersus_$base.asi"
-          [ -f "$asi" ] || { echo "::error::the artifact has no plugins/OpenVersus_$base.asi"; ls -R "$dir"; exit 1; }
+          asi="$dir/plugins/OpenVersus/OpenVersus_$base.asi"
+          [ -f "$asi" ] || { echo "::error::the artifact has no plugins/OpenVersus/OpenVersus_$base.asi"; ls -R "$dir"; exit 1; }
           ( cd "$dir" && zip -qr "$GITHUB_WORKSPACE/OpenVersus_v$label.zip" . )
           cp "$asi" .
           # Checksums in binary mode ("hash *file"), the explicit form a Windows sha256sum also
