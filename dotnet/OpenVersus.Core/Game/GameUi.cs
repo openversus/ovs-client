@@ -19,7 +19,7 @@ public static unsafe class GameUi
     public const string DialogParametersCtorName = "FMvsDialogParameters::FMvsDialogParameters";
     /// <summary>The <see cref="GameFunctions"/> key for the function that binds a dialog button's delegate, which <see cref="AssignCallbackToButton"/> calls.</summary>
     public const string DialogCallbackSetterName = "SingleParamDialogCallbackSetter";
-    /// <summary>The <see cref="GameFunctions"/> key for the game's quit callback, bound to the refund dialog's Disagree button.</summary>
+    /// <summary>The <see cref="GameFunctions"/> key for the game's quit callback. Unused since the free-mod notice became OK-only; kept for dialogs that should offer to quit.</summary>
     public const string QuitGameName = "QuitGame";
     /// <summary>The <see cref="GameFunctions"/> key for UMvsNotificationManager::Get, which takes the game instance.</summary>
     public const string GetNotificationManagerName = "UMvsNotificationManager::Get";

@@ -1,0 +1,147 @@
+# Publishes a release when a version tag is pushed.
+#
+# Nothing is built here. The release is made from the artifact of the build that already ran
+# for the tagged commit (build.yml): the exact files that were built and tested, not a rebuild
+# of them.
+#
+# Tags are bare versions, the contents of VERSION (2026.09.25.01, not v2026.09.25.01). A
+# suffix such as 2026.09.25.01-test1 publishes as a prerelease.
+#
+# To release: bump VERSION, push, let the build finish (or don't -- this waits for it), then
+# tag that commit and push the tag.
+#
+# Assets: OpenVersus_v<tag>.zip, the install (extracted beside the game's executable);
+# OpenVersus_<version>.asi, the plugin alone, which is what the server's download_url points
+# the auto-updater at; a .sha256 beside each, and SHA256SUMS.
+name: release
+
+on:
+  push:
+    # Deliberately loose. The exact format is enforced by the version check below, where a
+    # bad tag fails loudly; a pattern that failed to match would instead mean the release
+    # silently never ran.
+    tags: [ '[0-9]*' ]
+
+permissions:
+  contents: write   # create the release
+  actions: read     # find the build run and download its artifact
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Tag must match VERSION
+        id: version
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          base="${tag%%-*}"
+          src=$(tr -d '[:space:]' < VERSION)
+          echo "tag $tag   base $base   VERSION $src"
+          # The plugin is named for VERSION and reports it to the server, and the updater
+          # compares versions, so a release whose tag disagrees with the binary is worse than
+          # no release.
+          [ -n "$src" ] || { echo "::error::VERSION is empty"; exit 1; }
+          [ "$base" = "$src" ] || { echo "::error::tag $tag does not match VERSION \"$src\" -- bump VERSION and tag that commit"; exit 1; }
+          {
+            echo "label=$tag"
+            echo "base=$base"
+            echo "prerelease=$([ "$tag" != "$base" ] && echo true || echo false)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Find the build for this commit
+        id: build
+        run: |
+          set -euo pipefail
+          # The build is triggered by the branch push, not the tag. If both were pushed
+          # together it may still be running, so wait for it; if the commit was pushed with
+          # [skip ci], or never to a branch, no build exists and never will.
+          deadline=$(( $(date +%s) + 45*60 ))
+          grace=$(( $(date +%s) + 5*60 ))
+          while :; do
+            runs=$(gh run list --repo "$REPO" --workflow build.yml --commit "$GITHUB_SHA" \
+                     --json databaseId,status,conclusion --limit 20)
+            ok=$(jq -r '[.[] | select(.conclusion == "success")] | sort_by(.databaseId) | last | .databaseId // empty' <<<"$runs")
+            if [ -n "$ok" ]; then echo "run=$ok" >> "$GITHUB_OUTPUT"; echo "using build run $ok"; break; fi
+            total=$(jq 'length' <<<"$runs")
+            pending=$(jq '[.[] | select(.status != "completed")] | length' <<<"$runs")
+            now=$(date +%s)
+            if [ "$total" -eq 0 ] && [ "$now" -ge "$grace" ]; then
+              echo "::error::no build exists for $GITHUB_SHA -- was it pushed with [skip ci], or never pushed to a branch?"; exit 1
+            fi
+            if [ "$total" -gt 0 ] && [ "$pending" -eq 0 ]; then
+              echo "::error::every build for $GITHUB_SHA finished without succeeding (a failed or canceled build); rerun it, then rerun this"; exit 1
+            fi
+            [ "$now" -lt "$deadline" ] || { echo "::error::timed out waiting for the build of $GITHUB_SHA"; exit 1; }
+            echo "waiting for the build of $GITHUB_SHA ($total found, $pending still running)"
+            sleep 30
+          done
+
+      - name: The artifact must be present
+        run: |
+          set -euo pipefail
+          names=$(gh api "repos/$REPO/actions/runs/${{ steps.build.outputs.run }}/artifacts" \
+                    --jq '.artifacts[] | select(.expired == false) | .name')
+          echo "$names"
+          grep -q -- '-windows-x64$' <<<"$names" || { echo "::error::build run ${{ steps.build.outputs.run }} has no unexpired windows-x64 artifact"; exit 1; }
+
+      - name: Download the artifact
+        uses: actions/download-artifact@v8
+        with:
+          run-id: ${{ steps.build.outputs.run }}
+          github-token: ${{ github.token }}
+          path: artifacts
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          label="${{ steps.version.outputs.label }}"
+          base="${{ steps.version.outputs.base }}"
+          dir=$(find artifacts -maxdepth 1 -type d -name '*-windows-x64' | head -1)
+          [ -n "$dir" ] || { echo "::error::no windows-x64 artifact directory"; exit 1; }
+          # Ties the tag to the binary: the build names the plugin for the VERSION it read.
+          asi="$dir/plugins/OpenVersus_$base.asi"
+          [ -f "$asi" ] || { echo "::error::the artifact has no plugins/OpenVersus_$base.asi"; ls -R "$dir"; exit 1; }
+          ( cd "$dir" && zip -qr "$GITHUB_WORKSPACE/OpenVersus_v$label.zip" . )
+          cp "$asi" .
+          # Checksums in binary mode ("hash *file"), the explicit form a Windows sha256sum also
+          # expects. One .sha256 per file so each download has its checksum beside it, plus
+          # the combined SHA256SUMS. Verify with: sha256sum -c <file>.sha256
+          for f in OpenVersus_*.zip OpenVersus_*.asi; do
+            sha256sum -b "$f" > "$f.sha256"
+          done
+          sha256sum -b OpenVersus_*.zip OpenVersus_*.asi > SHA256SUMS
+          cat SHA256SUMS
+          sha256sum -c ./*.sha256   # prove each file verifies before it is published
+          unzip -l "OpenVersus_v$label.zip"
+
+      - name: Notes
+        run: |
+          set -euo pipefail
+          {
+            echo "Built from \`${GITHUB_SHA}\` in [build run ${{ steps.build.outputs.run }}](https://github.com/$REPO/actions/runs/${{ steps.build.outputs.run }})."
+            echo
+            echo "- \`OpenVersus_v${{ steps.version.outputs.label }}.zip\`: the install. Extract it beside the game's executable, \`MultiVersus-Win64-Shipping.exe\`."
+            echo "- \`OpenVersus_${{ steps.version.outputs.base }}.asi\`: the plugin alone, for updating an existing install (replace the old \`OpenVersus*.asi\` in \`plugins\`; the ASI loader loads every \`.asi\` there)."
+            echo "- \`*.sha256\`, \`SHA256SUMS\`: checksums. Verify with \`sha256sum -c <file>.sha256\`."
+          } > notes.md
+          cat notes.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Release
+        uses: softprops/action-gh-release@v3
+        with:
+          name: OpenVersus ${{ steps.version.outputs.label }}
+          body_path: notes.md
+          prerelease: ${{ steps.version.outputs.prerelease }}
+          fail_on_unmatched_files: true
+          files: |
+            OpenVersus_*.zip
+            OpenVersus_*.asi
+            OpenVersus_*.sha256
+            SHA256SUMS

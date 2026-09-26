@@ -3,8 +3,8 @@ namespace OpenVersus.Memory;
 /// <summary>
 /// A byte pattern in the form the C++ client's [Patterns] entries use, parsed with the same
 /// rules as its TransformPattern: spaces are ignored, every single '?' is one wildcard byte
-/// (so "??" is two), hex digits pair up into bytes, and any other character is skipped. Existing
-/// OpenVersus.ini files must mean the same thing here as they did there.
+/// (so "??" is two), hex digits pair up into bytes, and any other character is skipped. Patterns
+/// carried over from players' OpenVersus.ini files must mean the same thing here as they did there.
 /// </summary>
 public sealed class BytePattern
 {

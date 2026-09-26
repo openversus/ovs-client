@@ -63,61 +63,11 @@ public class SettingsTests
         Assert.False(s.PostMatchFreeze);
     }
 
-    private static string RepoFile(string name) => Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", name);
+    private static string NewDir() => Directory.CreateTempSubdirectory("ovs-settings-").FullName;
 
-    private static string TempCopy(string source)
-    {
-        string dir = Directory.CreateTempSubdirectory("ovs-settings-").FullName;
-        string path = Path.Combine(dir, Settings.FileName);
-        File.Copy(source, path);
-        return path;
-    }
-
-    /// <summary>Loading sample.ini adds only the rows it lacks, each at the end of its section in
-    /// the file's "Key = Value" style, and leaves every existing line, blank line and comment alone.</summary>
-    [SkippableFact]
-    public void LoadingSampleIniOnlyAddsTheMissingRows()
-    {
-        string sample = RepoFile("sample.ini");
-        Skip.If(!File.Exists(sample), "sample.ini not found");
-        string path = TempCopy(sample);
-        string[] before = File.ReadAllLines(path);
-
-        var s = Settings.Load(path);
-        string[] after = File.ReadAllLines(path);
-
-        var added = new List<string>();
-        int b = 0;
-        foreach (string line in after)
-        {
-            if (b < before.Length && line == before[b])
-            {
-                b++;
-            }
-            else
-            {
-                added.Add(line);
-            }
-        }
-
-        Assert.Equal(before.Length, b);
-        Assert.NotEmpty(added);
-        Assert.All(added, line => Assert.Matches(@"^\w+ = ", line));
-        Assert.Contains("PostMatchFreeze = true", added);
-        Assert.Contains("NetStats = false", added);
-        Assert.Equal(after.Count(l => l.Length == 0), before.Count(l => l.Length == 0));
-        Assert.Equal(after.Count(l => l.StartsWith(';')), before.Count(l => l.StartsWith(';')));
-        Assert.Equal("https://prod.openversus.org/", s.ServerUrl);
-
-        byte[] once = File.ReadAllBytes(path);
-        Settings.Load(path);
-        Assert.Equal(once, File.ReadAllBytes(path));
-        Directory.Delete(Path.GetDirectoryName(path)!, recursive: true);
-    }
-
-    /// <summary>A complete file in the shape the C++ client (through Wine) wrote is not rewritten at all.</summary>
+    /// <summary>A complete file is not rewritten at all.</summary>
     [Fact]
-    public void ACompleteWineWrittenFileIsLeftByteIdentical()
+    public void ACompleteFileIsLeftByteIdentical()
     {
         var text = new System.Text.StringBuilder();
         foreach (var section in Settings.Table.GroupBy(d => d.Section))
@@ -125,53 +75,102 @@ public class SettingsTests
             text.Append('[').Append(section.Key).Append("]\r\n");
             foreach (var def in section)
             {
-                text.Append(def.Key).Append('=').Append(def.Default == "true" ? "false" : def.Default).Append("\r\n");
+                string value = def.Kind == SettingKind.Bool ? (def.Default == "true" ? "false" : "true") : SettingsMigration.Quote(def.Default);
+                text.Append(def.Key).Append('=').Append(value).Append("\r\n");
             }
         }
 
-        string dir = Directory.CreateTempSubdirectory("ovs-settings-").FullName;
+        string dir = NewDir();
         string path = Path.Combine(dir, Settings.FileName);
         File.WriteAllText(path, text.ToString());
         byte[] original = File.ReadAllBytes(path);
         DateTime written = File.GetLastWriteTimeUtc(path);
 
-        var s = Settings.Load(path);
+        var s = Settings.Load(dir);
         Assert.Equal(original, File.ReadAllBytes(path));
         Assert.Equal(written, File.GetLastWriteTimeUtc(path));
         Assert.False(s.AutoUpdate);
         Directory.Delete(dir, recursive: true);
     }
 
+    /// <summary>With no file at all, the one written is dotnet/sample.toml byte for byte, and it
+    /// reads back as every default.</summary>
+    [Fact]
+    public void AFileWrittenFromNothingIsSampleToml()
+    {
+        string dir = NewDir();
+        var s = Settings.Load(dir);
+        string path = Path.Combine(dir, Settings.FileName);
+        Assert.Equal(File.ReadAllBytes(RepoFile("dotnet/sample.toml")), File.ReadAllBytes(path));
+        foreach (var def in Settings.Table)
+        {
+            Assert.Equal(def.Default, TomlConfig.Load(path).Get(def.Section, def.Key));
+        }
+
+        Assert.Equal(OvsVersion.DefaultServerUrl, s.ServerUrl);
+        Directory.Delete(dir, recursive: true);
+    }
+
     [Fact]
     public void BadValuesAreWarnedAboutAndLeftOnDisk()
     {
-        string dir = Directory.CreateTempSubdirectory("ovs-settings-").FullName;
+        string dir = NewDir();
         string path = Path.Combine(dir, Settings.FileName);
-        File.WriteAllText(path, "[Settings]\nAutoUpdate = yes\nEnableKeyboardHotkeys = FALSE\n");
+        File.WriteAllText(path, "[Settings]\nAutoUpdate = \"yes\"\nEnableKeyboardHotkeys = false\n");
         var log = new ListLogger();
 
-        var s = Settings.Load(path, log);
+        var s = Settings.Load(dir, log);
         Assert.True(s.AutoUpdate);
         Assert.False(s.EnableKeyboardHotkeys);
-        Assert.Equal(1, log.Lines.Count(l => l.Contains("is not")));
+        Assert.Equal(1, log.Lines.Count(l => l.Contains("is not true/false")));
         Assert.Contains(log.Lines, l => l.Contains("AutoUpdate = \"yes\""));
-        string[] after = File.ReadAllLines(path);
-        Assert.Contains("AutoUpdate = yes", after);
+        Assert.Contains("AutoUpdate = \"yes\"", File.ReadAllLines(path));
+        Directory.Delete(dir, recursive: true);
+    }
+
+    [Fact]
+    public void AFileThatIsNotTomlIsLeftAloneAndEverySettingIsItsDefault()
+    {
+        string dir = NewDir();
+        string path = Path.Combine(dir, Settings.FileName);
+        File.WriteAllText(path, "[Settings]\nAutoUpdate = false\n[Server.Game]\nServerUrl = https://my.server/\n");
+        byte[] before = File.ReadAllBytes(path);
+        var log = new ListLogger();
+
+        var s = Settings.Load(dir, log);
+        Assert.True(s.AutoUpdate);
+        Assert.Equal(OvsVersion.DefaultServerUrl, s.ServerUrl);
+        Assert.Equal(before, File.ReadAllBytes(path));
+        Assert.Contains(log.Lines, l => l.Contains("is not valid TOML") && l.Contains("line 4, column 13"));
+        Assert.Equal(new SettingsProblem("OpenVersus.toml has a mistake", "Line 4, column 13. Using default settings until it is fixed"), s.Problem);
+        Directory.Delete(dir, recursive: true);
+    }
+
+    [Fact]
+    public void RetiredAndUnknownKeysAreReportedApart()
+    {
+        string dir = NewDir();
+        File.WriteAllText(Path.Combine(dir, Settings.FileName), "[Settings]\nlogsize = \"50\"\nMadeUp = true\n");
+        var log = new ListLogger();
+
+        Settings.Load(dir, log);
+        Assert.Contains(log.Lines, l => l.Contains("[Settings] LogSize is no longer used") && l.Contains("no size to cap"));
+        Assert.Contains(log.Lines, l => l.Contains("[Settings] MadeUp is not a setting this version knows"));
+        Assert.DoesNotContain(log.Lines, l => l.Contains("LogSize is not a setting"));
         Directory.Delete(dir, recursive: true);
     }
 
     [SkippableFact]
-    public void AnUnwritableIniStillLoadsAndWarns()
+    public void AnUnwritableFileStillLoadsAndWarns()
     {
         UnixPermissions.SkipUnlessUnix();
-        string dir = Directory.CreateTempSubdirectory("ovs-settings-").FullName;
-        string path = Path.Combine(dir, Settings.FileName);
-        File.WriteAllText(path, "[Settings]\nAutoUpdate = false\n");
+        string dir = NewDir();
+        File.WriteAllText(Path.Combine(dir, Settings.FileName), "[Settings]\nAutoUpdate = false\n");
         UnixPermissions.MakeReadOnly(dir);
         var log = new ListLogger();
         try
         {
-            var s = Settings.Load(path, log);
+            var s = Settings.Load(dir, log);
             Assert.False(s.AutoUpdate);
             Assert.True(s.SunsetDate);
             Assert.Contains(log.Lines, l => l.Contains("Could not write"));
@@ -183,4 +182,5 @@ public class SettingsTests
         }
     }
 
+    internal static string RepoFile(string name) => Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", name);
 }

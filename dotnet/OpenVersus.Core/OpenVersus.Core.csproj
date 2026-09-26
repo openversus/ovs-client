@@ -13,6 +13,9 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.12" />
+    <!-- OpenVersus.toml. Only the syntax tree is used (Tomlyn.Parsing, Tomlyn.Syntax), which is
+         reflection-free and keeps comments and spacing; the serializer is not. -->
+    <PackageReference Include="Tomlyn" Version="2.10.1" />
     <PackageReference Include="ZstdSharp.Port" Version="0.8.8" />
   </ItemGroup>
 

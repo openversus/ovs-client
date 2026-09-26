@@ -49,7 +49,7 @@ public static class DialogHooks
         }
         else
         {
-            c.Log.Warn("Couldn't find pQuitGameCallback Pattern. The refund dialog's Disagree button will do nothing.");
+            c.Log.Debug("Couldn't find the QuitGameCallback pattern; nothing calls it since the free-mod notice has only an OK button.");
         }
 
         foreach (string name in new[] { GameUi.AddDialogName, GameUi.GetFrontendManagerName, GameUi.DialogParametersCtorName, GameUi.DialogCallbackSetterName, GameUi.QuitGameName })

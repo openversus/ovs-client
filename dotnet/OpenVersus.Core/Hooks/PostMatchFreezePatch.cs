@@ -3,9 +3,9 @@ using OpenVersus.Memory;
 namespace OpenVersus.Hooks;
 
 /// <summary>
-/// Restores the winner's control during the post-match linger. After the match ends locally,
-/// the input handler returns early for the local player's slot, which freezes the frame counter
-/// the sender uses. Six NOPs over that early return. See HANDOFF-post-match-freeze.
+/// Lets the other clients see the winner during the post-match linger again. After the match
+/// ends locally, the input handler returns early for the local player's slot, which freezes the
+/// frame counter the sender uses. Six NOPs over that early return. See HANDOFF-post-match-freeze.
 /// </summary>
 public static class PostMatchFreezePatch
 {

@@ -4,7 +4,8 @@ using System.Text;
 namespace OpenVersus.Config;
 
 /// <summary>
-/// One ini file, kept line for line. Reading follows the Windows profile API the C++ client used,
+/// One ini file, kept line for line. The client's files are TOML now (<see cref="TomlConfig"/>);
+/// this reads the C++ client's OpenVersus.ini and OVSState.ini once, to convert them. Reading follows the Windows profile API the C++ client used,
 /// since every file players have was read through it: section and key names match regardless of
 /// case, values are trimmed and lose surrounding quotes, a line starting with ';' is a comment and
 /// the first of two duplicate keys wins. Writing changes only the value of an existing key, or adds
@@ -14,14 +15,14 @@ namespace OpenVersus.Config;
 /// </summary>
 public sealed class IniFile
 {
-    private enum Kind
+    internal enum Kind
     {
         Blank, Comment, Section, KeyValue, Other
     }
 
     /// <summary>One line of the file. For a key line, Text is everything up to and including the
     /// '=' and any spacing after it, so a value can be replaced without disturbing the rest.</summary>
-    private sealed class Line(Kind kind, string text, string? name = null, string value = "")
+    internal sealed class Line(Kind kind, string text, string? name = null, string value = "")
     {
         public Kind Kind { get; } = kind;
         public string Text { get; set; } = text;
@@ -45,6 +46,15 @@ public sealed class IniFile
 
     /// <summary>The file this document reads from and saves to.</summary>
     public string Path { get; }
+
+    /// <summary>The lines as read, for <see cref="SettingsMigration"/>.</summary>
+    internal IReadOnlyList<Line> Lines => _lines;
+
+    /// <summary>The file's line ending: CRLF or LF.</summary>
+    internal string NewLine => _newLine;
+
+    /// <summary>Whether the file ends with a line ending.</summary>
+    internal bool FinalNewLine => _finalNewLine;
 
     /// <summary>Why the file could not be read, in which case this is an empty document, as the
     /// profile API handed back defaults for a file it could not open.</summary>
@@ -222,15 +232,29 @@ public sealed class IniFile
         _preamble.CopyTo(bytes, 0);
         body.CopyTo(bytes, _preamble.Length);
 
-        string temp = Path + ".tmp";
+        SaveError = WriteAtomically(Path, bytes);
+        if (SaveError != null)
+        {
+            return false;
+        }
+
+        _dirty = false;
+        return true;
+    }
+
+    /// <summary>Writes through a temporary file beside <paramref name="path"/>, so a failed write
+    /// never leaves half a file. Returns why it failed, or null.</summary>
+    internal static Exception? WriteAtomically(string path, byte[] bytes)
+    {
+        string temp = path + ".tmp";
         try
         {
             File.WriteAllBytes(temp, bytes);
-            File.Move(temp, Path, overwrite: true);
+            File.Move(temp, path, overwrite: true);
+            return null;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
-            SaveError = e;
             try
             {
                 File.Delete(temp);
@@ -239,11 +263,8 @@ public sealed class IniFile
             {
             }
 
-            return false;
+            return e;
         }
-
-        _dirty = false;
-        return true;
     }
 
     /// <summary>The text as it would be saved, for tests.</summary>
@@ -288,7 +309,8 @@ public sealed class IniFile
         return new Line(Kind.Other, text);
     }
 
-    private static string Unquote(string value) =>
+    /// <summary>The value without one pair of matching surrounding quotes, as the profile API read it.</summary>
+    internal static string Unquote(string value) =>
         value.Length >= 2 && (value[0] == '"' || value[0] == '\'') && value[^1] == value[0] ? value[1..^1] : value;
 
     private int FindSection(string section)

@@ -23,11 +23,11 @@ public sealed class Client
 
     /// <summary>The plugin's log.</summary>
     public Log Log { get; }
-    /// <summary>The plugin's folder, where the ini, state and cache files live.</summary>
+    /// <summary>The plugin's folder, where the settings, state and cache files live.</summary>
     public string Directory { get; }
-    /// <summary>OpenVersus.ini, as read by <see cref="Initialize"/>.</summary>
+    /// <summary>OpenVersus.toml, as read by <see cref="Initialize"/>.</summary>
     public Settings Settings { get; private set; } = null!;
-    /// <summary>OVSState.ini, as read by <see cref="Initialize"/>.</summary>
+    /// <summary>OVSState.toml, as read by <see cref="Initialize"/>.</summary>
     public State State { get; private set; } = null!;
     /// <summary>Which patches and hooks took.</summary>
     public HookStatus Status { get; } = new();
@@ -63,8 +63,8 @@ public sealed class Client
     public bool Initialize()
     {
         Log.Info($"On Attach Initialize ({OvsVersion.Name} {OvsVersion.Current})");
-        Settings = Settings.Load(Path.Combine(Directory, Settings.FileName), Log);
-        State = new State(Path.Combine(Directory, State.FileName)).Load();
+        Settings = Settings.Load(Directory, Log);
+        State = new State(Directory).Load();
         if (Log.Notice != null)
         {
             Log.Warn(Log.Notice);
@@ -112,7 +112,7 @@ public sealed class Client
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         ulong hash = Image.HashTextSection();
         Log.Debug($".text hash: 0x{hash:X16} | Time: {stopwatch.Elapsed.TotalMilliseconds:F3} ms");
-        var cache = new PatternCache(Path.Combine(Directory, PatternCache.FileName), hash, OvsVersion.Current);
+        var cache = new PatternCache(Directory, hash, OvsVersion.Current);
         Patterns = new PatternResolver(Image, cache, Settings, Log);
         Log.Info("Parsed Settings");
 
@@ -154,7 +154,8 @@ public sealed class Client
         if (Status.UeFuncs && Status.Dialog)
         {
             var state = State;
-            Start("OVS startup notices", () => StartupNotices.Run(state, Log));
+            var problem = Settings.Problem;
+            Start("OVS startup notices", () => StartupNotices.Run(state, problem, Log));
         }
 
         var env = Env!;

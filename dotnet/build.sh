@@ -42,7 +42,7 @@ usage() {
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        build|test|publish|harness|clean) command=$1 ;;
+        build|rebuild|test|publish|harness|clean) command=$1 ;;
         --accept-license) accept_license=true ;;
         --rwx) rwx=true ;;
         --install) shift; install_dir=${1:-}; [ -n "$install_dir" ] || { echo "--install needs a directory" >&2; exit 2; } ;;
@@ -141,6 +141,12 @@ do_clean() {
 need_dotnet
 case "$command" in
     build)
+        do_build
+        [ "$skip_tests" = true ] || do_test
+        do_publish
+        ;;
+    rebuild)
+        do_clean
         do_build
         [ "$skip_tests" = true ] || do_test
         do_publish

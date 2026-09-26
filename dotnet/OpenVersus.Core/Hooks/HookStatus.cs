@@ -34,9 +34,9 @@ public sealed class HookStatus
 
 /// <summary>What every hook needs: the image, the pattern resolver, the settings and the log.</summary>
 /// <param name="Image">The game executable.</param>
-/// <param name="Patterns">Finds the ini's patterns in the image.</param>
-/// <param name="Settings">OpenVersus.ini.</param>
-/// <param name="State">OVSState.ini.</param>
+/// <param name="Patterns">Finds the settings' patterns in the image.</param>
+/// <param name="Settings">OpenVersus.toml.</param>
+/// <param name="State">OVSState.toml.</param>
 /// <param name="Log">The plugin's log.</param>
 /// <param name="Status">Where each hook's result is recorded.</param>
 public sealed record HookContext(Game.GameImage Image, Game.PatternResolver Patterns, Config.Settings Settings, Config.State State, ILogger Log, HookStatus Status);
