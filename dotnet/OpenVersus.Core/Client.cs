@@ -50,6 +50,8 @@ public sealed class Client
 
     private readonly nint _module;
     private readonly List<Action> _shutdown = [];
+    /// <summary>Whether the startup update got the server's answer, which makes the background plugin check redundant.</summary>
+    private bool _startupCheckAnswered;
 
     /// <summary>A client for the plugin at <paramref name="pluginPath"/>, loaded as <paramref name="module"/>. Nothing runs until <see cref="Initialize"/>.</summary>
     public Client(Log log, string pluginPath, nint module)
@@ -204,6 +206,13 @@ public sealed class Client
 
         Log.Info($"host {Environment.ProcessPath}, pid {Environment.ProcessId}, {Environment.OSVersion}{(Wine.IsWine ? $", Wine {Wine.Version}" : "")}");
 
+        // The required update runs before anything is patched: the engine has not opened its
+        // paks yet, so they can be replaced. When it installs something it closes the game.
+        if (isGame && !string.IsNullOrEmpty(Settings.ServerUrl))
+        {
+            _startupCheckAnswered = RunStartupUpdate() != StartupUpdate.Outcome.NoAnswer;
+        }
+
         if (Settings.EnableKeyboardHotkeys && KeyboardHook.Install(Log, _module))
         {
             _shutdown.Add(KeyboardHook.Remove);
@@ -239,6 +248,31 @@ public sealed class Client
         return true;
     }
 
+    /// <summary>
+    /// <see cref="StartupUpdate"/> for this install: paks in the game's Content/Paks (skipped when
+    /// the game folder is not where the plugin expects it), staging, backup and the hash cache in
+    /// the plugin's folder, and the plugin updater's own checks for a newer .asi.
+    /// </summary>
+    private StartupUpdate.Outcome RunStartupUpdate()
+    {
+        // <game>/MultiVersus/Binaries/Win64/<exe>: the paks are in <game>/MultiVersus/Content/Paks.
+        string? exeDirectory = Path.GetDirectoryName(Environment.ProcessPath);
+        string? gameDirectory = exeDirectory == null ? null : Path.GetDirectoryName(Path.GetDirectoryName(exeDirectory));
+        string? paksDirectory = gameDirectory == null ? null : Path.Combine(gameDirectory, "Content", "Paks");
+        if (paksDirectory == null || !System.IO.Directory.Exists(paksDirectory))
+        {
+            Log.Warn($"[Update] No Content/Paks beside the game ({paksDirectory ?? "unknown"}); paks cannot be updated");
+            paksDirectory = null;
+        }
+
+        var download = new WinHttpTransport(useSystemProxy: true);
+        var plugins = new AutoUpdate(Settings.ServerUrl, _pluginPath, _installDirectory, Http, download, Log, Log.Close);
+        var paks = paksDirectory == null ? null : new PakUpdate(paksDirectory, Path.Combine(Directory, "update-staging"),
+            Path.Combine(Directory, "pak-backup"), Path.Combine(Directory, "PakHashes.txt"), download, Log);
+        var state = State;
+        return new StartupUpdate(Settings.ServerUrl, Settings.AutoUpdate, Http, plugins, paks, Log, Log.Close, state.SetUpdateNotice).Run();
+    }
+
     /// <summary>Kept from the C++ client for the planned peer-to-peer rollback experiment.</summary>
     private void SpawnP2PServer()
     {
@@ -262,18 +296,28 @@ public sealed class Client
             _shutdown.Add(poller.Stop);
         }
 
+        string? updated = State.TakeUpdateNotice();
+        if (updated != null)
+        {
+            Log.Info($"[Update] The last launch installed an update: {updated}");
+        }
+
         if (Status.UeFuncs && Status.Dialog)
         {
             var state = State;
             var problem = Settings.Problem;
-            Start("OVS startup notices", () => StartupNotices.Run(state, problem, Log));
+            Start("OVS startup notices", () => StartupNotices.Run(state, problem, Log, updated));
         }
 
         var env = Env!;
         var serverIdentity = ServerIdentity;
         Start("OVS identity", () => IdentityRegistration.Run(env, Settings.ServerUrl, Http, serverIdentity, Log));
 
-        if (Settings.AutoUpdate)
+        if (Settings.AutoUpdate && _startupCheckAnswered)
+        {
+            Log.Info("[AutoUpdate] Auto-update is enabled; the startup check already asked the server for this launch.");
+        }
+        else if (Settings.AutoUpdate)
         {
             Log.Info("[AutoUpdate] Auto-update is enabled. OVS will check for updates automatically and download/apply them when available.");
             var update = new AutoUpdate(Settings.ServerUrl, _pluginPath, _installDirectory, Http, new WinHttpTransport(useSystemProxy: true), Log, Log.Close);

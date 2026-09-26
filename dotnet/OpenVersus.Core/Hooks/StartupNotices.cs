@@ -8,7 +8,8 @@ namespace OpenVersus.Hooks;
 
 /// <summary>
 /// The one-time "free mod" dialog, the "OpenVersus Loaded" toast, and a second toast when the
-/// settings could not be used (<see cref="Settings.Problem"/>). The C++ showed them from
+/// settings could not be used (<see cref="Settings.Problem"/>), and one saying what the last
+/// update installed (<see cref="State.TakeUpdateNotice"/>). The C++ showed them from
 /// inside the sunset checker, retrying on every call until the frontend was ready; here a
 /// game-thread job retries once a second until both have shown.
 /// </summary>
@@ -20,18 +21,22 @@ public static unsafe class StartupNotices
     private static bool s_toastDone;
     private static SettingsProblem? s_problem;
     private static bool s_problemDone;
+    private static string? s_updated;
+    private static bool s_updatedDone;
     private static int s_attempts;
     /// <summary>Once a second for ten minutes, then the notices are given up on and the log says so.</summary>
     private const int MaxAttempts = 600;
 
     /// <summary>Waits off the game thread for the game instance and window, then runs the job on the game thread.</summary>
-    public static void Run(State state, SettingsProblem? problem, ILogger log)
+    public static void Run(State state, SettingsProblem? problem, ILogger log, string? updated = null)
     {
         s_state = state;
         s_log = log;
         s_dialogDone = state.PaidModWarned;
         s_problem = problem;
         s_problemDone = problem == null;
+        s_updated = updated;
+        s_updatedDone = updated == null;
         log.Debug("startup notices: waiting for the game instance and window");
         while (GameUi.FighterGameInstance == 0 || GameThread.Window == 0)
         {
@@ -50,7 +55,7 @@ public static unsafe class StartupNotices
     {
         if (++s_attempts > MaxAttempts)
         {
-            s_log?.Warn($"startup notices given up after {MaxAttempts} attempts (dialog {(s_dialogDone ? "shown" : "not shown")}, toast {(s_toastDone ? "shown" : "not shown")}, settings toast {(s_problemDone ? "shown or not needed" : "not shown")})");
+            s_log?.Warn($"startup notices given up after {MaxAttempts} attempts (dialog {(s_dialogDone ? "shown" : "not shown")}, toast {(s_toastDone ? "shown" : "not shown")}, settings toast {(s_problemDone ? "shown or not needed" : "not shown")}, update toast {(s_updatedDone ? "shown or not needed" : "not shown")})");
             return true;
         }
         bool verbose = s_attempts <= 5 || s_attempts % 30 == 0;
@@ -127,7 +132,21 @@ public static unsafe class StartupNotices
             return false;
         }
 
-        bool done = s_dialogDone && s_toastDone && s_problemDone;
+        // Likewise an attempt of its own for what the last update installed.
+        if (s_toastDone && !toastThisAttempt && s_problemDone && !s_updatedDone && s_updated != null)
+        {
+            nint shown = GameUi.ShowNotification("OpenVersus updated", s_updated, 10.0f, setWidgetClass: true);
+            s_log?.Debug($"startup notices: update toast request returned 0x{shown:X}");
+            s_updatedDone = shown != 0;
+            if (s_updatedDone)
+            {
+                s_log?.Info($"startup notices: update toast shown: {s_updated}");
+            }
+
+            return false;
+        }
+
+        bool done = s_dialogDone && s_toastDone && s_problemDone && s_updatedDone;
         if (done)
         {
             s_log?.Info($"startup notices shown after {s_attempts} attempt(s)");

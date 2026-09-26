@@ -308,14 +308,27 @@ public sealed class AutoUpdate(string serverUrl, string pluginPath, string insta
     private void Install(VersionInfo info)
     {
         byte[]? plugin = Fetch(info);
-        if (plugin == null)
+        if (plugin == null || !InstallPlugin(plugin, info.LatestVersion!))
         {
             return;
         }
 
+        log.Info("[AutoUpdate] New DLL installed! Restarting game...");
+        User32.MessageBox(0, "A new version of OpenVersus has been released and an update has been applied. The game will now close; please relaunch the game to play.", "Game restarting", User32.MB_ICONINFORMATION);
+        beforeExit(); // TerminateProcess gives no exit moment, so the log is closed and archived here
+        Firmware.TerminateProcess(Kernel32.GetCurrentProcess(), 0);
+    }
+
+    /// <summary>
+    /// Puts a fetched <paramref name="plugin"/> in place as <see cref="InstallPath"/>, the running
+    /// one renamed to ".bak" first. False, with the running plugin left or put back where it was,
+    /// when it cannot be installed. The new plugin loads on the next launch.
+    /// </summary>
+    internal bool InstallPlugin(byte[] plugin, string version)
+    {
         string temp = Path.Combine(Path.GetTempPath(), "OpenVersus_update.asi");
         string backup = pluginPath + ".bak";
-        string target = InstallPath(installDirectory, info.LatestVersion!);
+        string target = InstallPath(installDirectory, version);
         try
         {
             File.WriteAllBytes(temp, plugin);
@@ -336,17 +349,15 @@ public sealed class AutoUpdate(string serverUrl, string pluginPath, string insta
             {
                 log.Warn($"[AutoUpdate] Failed to move new DLL into place ({e.Message}), restoring original asi file");
                 File.Move(backup, pluginPath);
-                return;
+                return false;
             }
         }
         catch (Exception e)
         {
             log.Warn($"[AutoUpdate] Install failed: {e.Message}");
-            return;
+            return false;
         }
-        log.Info("[AutoUpdate] New DLL installed! Restarting game...");
-        User32.MessageBox(0, "A new version of OpenVersus has been released and an update has been applied. The game will now close; please relaunch the game to play.", "Game restarting", User32.MB_ICONINFORMATION);
-        beforeExit(); // TerminateProcess gives no exit moment, so the log is closed and archived here
-        Firmware.TerminateProcess(Kernel32.GetCurrentProcess(), 0);
+
+        return true;
     }
 }

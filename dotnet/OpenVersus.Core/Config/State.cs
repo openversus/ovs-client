@@ -136,6 +136,27 @@ public sealed class State
         return id;
     }
 
+    /// <summary>Remembers what an update installed, for a toast on the next launch, and writes the file.</summary>
+    public void SetUpdateNotice(string text)
+    {
+        _toml.Set("Update", "Notice", SettingKind.String, text);
+        _toml.Save();
+    }
+
+    /// <summary>What the last update installed, or null; cleared once taken, so it shows once.</summary>
+    public string? TakeUpdateNotice()
+    {
+        string? text = _toml.Get("Update", "Notice");
+        if (string.IsNullOrEmpty(text))
+        {
+            return null;
+        }
+
+        _toml.Set("Update", "Notice", SettingKind.String, "");
+        _toml.Save();
+        return text;
+    }
+
     /// <summary>Whether <paramref name="value"/> is an install id: exactly 32 hex characters, either case, as the C++ checked.</summary>
     public static bool IsValidInstallId(string value) => value.Length == 32 && value.All(char.IsAsciiHexDigit);
 }

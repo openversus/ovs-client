@@ -23,7 +23,18 @@ public sealed class WinHttpTransport(string agent = "OVS/1.0", bool useSystemPro
     public HttpResult Post(Uri url, string contentType, ReadOnlySpan<byte> body, TimeSpan timeout) =>
         Send(url, "POST", $"Content-Type: {contentType}\r\n{headers?.Invoke()}", body, timeout);
 
-    private HttpResult Send(Uri url, string verb, string? headers, ReadOnlySpan<byte> body, TimeSpan timeout)
+    /// <inheritdoc/>
+    public HttpResult Download(Uri url, Stream destination, TimeSpan timeout, Action<int>? progress = null)
+    {
+        string? extra = headers?.Invoke();
+        return Send(url, "GET", string.IsNullOrEmpty(extra) ? null : extra, default, timeout, destination, progress);
+    }
+
+    /// <summary>
+    /// One request. With <paramref name="sink"/>, a 2xx body is written there as it arrives and a
+    /// read that fails part way is a failure; without it the body is collected and returned.
+    /// </summary>
+    private HttpResult Send(Uri url, string verb, string? headers, ReadOnlySpan<byte> body, TimeSpan timeout, Stream? sink = null, Action<int>? progress = null)
     {
         nint session = 0, connect = 0, request = 0;
         try
@@ -63,6 +74,33 @@ public sealed class WinHttpTransport(string agent = "OVS/1.0", bool useSystemPro
             uint status = 0, size = sizeof(uint), index = 0;
             WinHttp.WinHttpQueryHeaders(request, WinHttp.WINHTTP_QUERY_STATUS_CODE | WinHttp.WINHTTP_QUERY_FLAG_NUMBER, 0, ref status, ref size, ref index);
 
+            bool ok = status is >= 200 and < 300;
+            if (sink != null && ok)
+            {
+                var buffer = new byte[256 * 1024];
+                while (true)
+                {
+                    if (!WinHttp.WinHttpQueryDataAvailable(request, out uint available))
+                    {
+                        return HttpResult.Failed($"WinHttpQueryDataAvailable failed ({Marshal.GetLastPInvokeError()})");
+                    }
+
+                    if (available == 0)
+                    {
+                        return new HttpResult(true, (int)status, [], null);
+                    }
+
+                    uint want = Math.Min(available, (uint)buffer.Length);
+                    if (!WinHttp.WinHttpReadData(request, buffer, want, out uint got) || got == 0)
+                    {
+                        return HttpResult.Failed($"WinHttpReadData failed ({Marshal.GetLastPInvokeError()})");
+                    }
+
+                    sink.Write(buffer, 0, (int)got);
+                    progress?.Invoke((int)got);
+                }
+            }
+
             var data = new MemoryStream();
             while (WinHttp.WinHttpQueryDataAvailable(request, out uint available) && available > 0)
             {
@@ -74,7 +112,7 @@ public sealed class WinHttpTransport(string agent = "OVS/1.0", bool useSystemPro
 
                 data.Write(chunk, 0, (int)read);
             }
-            return new HttpResult(status is >= 200 and < 300, (int)status, data.ToArray(), null);
+            return new HttpResult(ok, (int)status, data.ToArray(), null);
         }
         finally
         {

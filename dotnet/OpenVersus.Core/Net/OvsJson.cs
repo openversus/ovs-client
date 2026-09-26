@@ -15,6 +15,23 @@ public sealed record VersionInfo(
     [property: JsonPropertyName("is_latest"), JsonConverter(typeof(LenientBoolConverter))] bool IsLatest,
     [property: JsonPropertyName("release_name"), JsonConverter(typeof(LenientStringConverter))] string? ReleaseName);
 
+/// <summary>One file of a release as /ovs/client-version lists it under "files".</summary>
+/// <param name="Name">name: the asset's file name.</param>
+/// <param name="Kind">kind: "plugin" (the .asi) or "paks" (an OVS_* pak, utoc, ucas or sig).</param>
+/// <param name="Size">size: bytes.</param>
+/// <param name="Sha256">sha256: the SHA-256 GitHub records for the asset, lowercase hex.</param>
+/// <param name="DownloadUrl">download_url: where it downloads from.</param>
+public sealed record UpdateFile(
+    [property: JsonConverter(typeof(LenientStringConverter))] string? Name,
+    [property: JsonConverter(typeof(LenientStringConverter))] string? Kind,
+    long Size,
+    [property: JsonConverter(typeof(LenientStringConverter))] string? Sha256,
+    [property: JsonPropertyName("download_url"), JsonConverter(typeof(LenientStringConverter))] string? DownloadUrl);
+
+/// <summary>The "files" list of /ovs/client-version; null when the server sent none.</summary>
+/// <param name="Files">files: every asset of the release the updater may install.</param>
+public sealed record ReleaseFiles(List<UpdateFile>? Files);
+
 /// <summary>A string that takes a number or a boolean as its text, and an object, an array or null as null.</summary>
 public sealed class LenientStringConverter : JsonConverter<string?>
 {
@@ -110,6 +127,7 @@ public sealed record IdentifyResponse(
 [JsonSerializable(typeof(Notification))]
 [JsonSerializable(typeof(IdentityBody))]
 [JsonSerializable(typeof(IdentifyResponse))]
+[JsonSerializable(typeof(ReleaseFiles))]
 internal sealed partial class OvsJson : JsonSerializerContext
 {
 }
