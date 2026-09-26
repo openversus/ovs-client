@@ -140,7 +140,9 @@ The tag must equal `VERSION` (a `v` prefix does not match). A suffix, as in `202
 publishes a prerelease; remove a test release with `gh release delete <tag> --cleanup-tag`. The
 release holds `OpenVersus_v<tag>.zip` (the install), `OpenVersus_<version>.asi` (the plugin alone,
 which is what the server's `download_url` should point the auto-updater at), a `.sha256` beside
-each, and `SHA256SUMS`.
+each, and `SHA256SUMS`. The server offers a release's `.asi` asset and falls back to its zip when there is
+none; the updater handles both, installing only the one `.asi` in a zip (or the one named for the
+offered version) and never the zip's loader or `OpenVersus.toml`.
 
 ## How it maps to the C++ client
 

@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using OpenVersus.Native;
@@ -6,7 +7,9 @@ namespace OpenVersus.Net;
 
 /// <summary>
 /// Asks the server for the latest client and installs it: the running .asi is renamed to a
-/// .bak, the download takes its place, and the game is closed so the next launch loads it.
+/// .bak, the download takes its place, and the game is closed so the next launch loads it. The
+/// download is the .asi itself, or a release zip when the release has no .asi asset (the server
+/// falls back to it), in which case only the .asi inside is installed.
 /// The C++ did the version check over a raw socket without TLS, which cannot reach an https
 /// server; this goes through the transport, so the check works against production.
 /// </summary>
@@ -120,6 +123,68 @@ public sealed class AutoUpdate(string serverUrl, string pluginPath, IHttpTranspo
         }
     }
 
+    /// <summary>The most a plugin may be, uncompressed; the real one is a few MB.</summary>
+    private const int MaxPluginBytes = 64 * 1024 * 1024;
+
+    /// <summary>
+    /// The plugin in a download: the body itself when it is one, or the .asi inside a zip. A zip
+    /// must hold exactly one .asi, or one named for <paramref name="version"/> among several.
+    /// Nothing else in a zip is used: the ASI loader is in use while the game runs, and the
+    /// settings file in a release must never replace the player's. Null, with
+    /// <paramref name="problem"/> saying why, when there is no plugin to install;
+    /// <paramref name="source"/> names what was taken.
+    /// </summary>
+    public static byte[]? PluginFrom(byte[] body, string version, out string source, out string? problem)
+    {
+        source = "the download";
+        if (!body.AsSpan().StartsWith("PK\x03\x04"u8))
+        {
+            problem = Validate(body);
+            return problem == null ? body : null;
+        }
+
+        try
+        {
+            using var zip = new ZipArchive(new MemoryStream(body), ZipArchiveMode.Read);
+            var plugins = zip.Entries.Where(e => e.Name.EndsWith(".asi", StringComparison.OrdinalIgnoreCase)).ToList();
+            string wanted = $"{OvsVersion.Name}_{version.Trim()}.asi";
+            ZipArchiveEntry? entry = plugins.Count == 1
+                ? plugins[0]
+                : plugins.FirstOrDefault(e => e.Name.Equals(wanted, StringComparison.OrdinalIgnoreCase));
+            if (entry == null)
+            {
+                problem = plugins.Count == 0 ? "a zip with no .asi in it" : $"a zip with {plugins.Count} .asi files and none named {wanted}";
+                return null;
+            }
+
+            source = $"{entry.FullName} from the zip";
+            // The header's size can lie, so the read itself is bounded.
+            using var stream = entry.Open();
+            var buffer = new MemoryStream();
+            var chunk = new byte[81920];
+            int read;
+            while ((read = stream.Read(chunk, 0, chunk.Length)) > 0)
+            {
+                if (buffer.Length + read > MaxPluginBytes)
+                {
+                    problem = $"a zip whose {entry.FullName} is over {MaxPluginBytes / (1024 * 1024)} MB";
+                    return null;
+                }
+
+                buffer.Write(chunk, 0, read);
+            }
+
+            byte[] plugin = buffer.ToArray();
+            problem = Validate(plugin) is { } invalid ? $"a zip whose {entry.FullName} is {invalid}" : null;
+            return problem == null ? plugin : null;
+        }
+        catch (InvalidDataException e)
+        {
+            problem = $"a damaged zip ({e.Message})";
+            return null;
+        }
+    }
+
     private void Install(VersionInfo info)
     {
         var url = Urls.Parse(info.DownloadUrl!);
@@ -136,18 +201,21 @@ public sealed class AutoUpdate(string serverUrl, string pluginPath, IHttpTranspo
             return;
         }
         log.Info($"[AutoUpdate] Downloaded {result.Body.Length} bytes");
-        if (Validate(result.Body) is { } problem)
+        byte[]? plugin = PluginFrom(result.Body, info.LatestVersion!, out string source, out string? problem);
+        if (plugin == null)
         {
             log.Warn($"[AutoUpdate] Download is {problem}; not installing it");
             return;
         }
+
+        log.Info($"[AutoUpdate] Installing {source} ({plugin.Length} bytes)");
 
         string temp = Path.Combine(Path.GetTempPath(), "OpenVersus_update.asi");
         string backup = pluginPath + ".bak";
         string target = InstallPath(pluginPath, info.LatestVersion!);
         try
         {
-            File.WriteAllBytes(temp, result.Body);
+            File.WriteAllBytes(temp, plugin);
             log.Info($"[AutoUpdate] Backing up {Path.GetFileName(pluginPath)} and installing {Path.GetFileName(target)}...");
             if (File.Exists(backup))
             {

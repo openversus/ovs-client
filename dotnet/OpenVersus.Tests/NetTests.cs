@@ -167,4 +167,73 @@ public class NetTests
         Assert.Equal(OvsVersion.Current, doc.RootElement.GetProperty("clientVersion").GetString());
         Assert.Equal(64, doc.RootElement.GetProperty("hardwareId").GetString()!.Length);
     }
+
+    /// <summary>The smallest body <see cref="AutoUpdate.Validate"/> accepts, marked so it can be told apart.</summary>
+    private static byte[] Plugin(byte mark)
+    {
+        var pe = new byte[20000];
+        pe[0] = (byte)'M';
+        pe[1] = (byte)'Z';
+        BitConverter.TryWriteBytes(pe.AsSpan(0x3C), 0x80);
+        "PE\0\0"u8.CopyTo(pe.AsSpan(0x80));
+        BitConverter.TryWriteBytes(pe.AsSpan(0x80 + 24 + 56), 0x1000u);
+        pe[^1] = mark;
+        return pe;
+    }
+
+    private static byte[] Zip(params (string Name, byte[] Body)[] entries)
+    {
+        var stream = new MemoryStream();
+        using (var zip = new System.IO.Compression.ZipArchive(stream, System.IO.Compression.ZipArchiveMode.Create, leaveOpen: true))
+        {
+            foreach (var (name, body) in entries)
+            {
+                using var entry = zip.CreateEntry(name).Open();
+                entry.Write(body);
+            }
+        }
+
+        return stream.ToArray();
+    }
+
+    [Fact]
+    public void ThePluginInAReleaseZipIsInstalledAndNothingElse()
+    {
+        byte[] release = Zip(
+            ("xinput1_3.dll", Plugin(1)),
+            ("plugins/OpenVersus_2026.10.01.01.asi", Plugin(2)),
+            ("plugins/OpenVersus.toml", "[Settings]\n"u8.ToArray()));
+
+        byte[]? plugin = AutoUpdate.PluginFrom(release, "2026.10.01.01", out string source, out string? problem);
+        Assert.Null(problem);
+        Assert.Equal(Plugin(2), plugin);
+        Assert.Equal("plugins/OpenVersus_2026.10.01.01.asi from the zip", source);
+    }
+
+    [Fact]
+    public void ABareAsiIsInstalledAsBefore()
+    {
+        Assert.Equal(Plugin(3), AutoUpdate.PluginFrom(Plugin(3), "2026.10.01.01", out string source, out _));
+        Assert.Equal("the download", source);
+    }
+
+    [Fact]
+    public void AZipIsRefusedUnlessOnePluginInItIsClearlyTheOne()
+    {
+        // Several .asi files: the one named for the offered version wins.
+        byte[] two = Zip(("OpenVersus_2026.09.01.01.asi", Plugin(4)), ("OpenVersus_2026.10.01.01.asi", Plugin(5)));
+        Assert.Equal(Plugin(5), AutoUpdate.PluginFrom(two, "2026.10.01.01", out _, out _));
+        Assert.Null(AutoUpdate.PluginFrom(two, "2026.11.01.01", out _, out string? ambiguous));
+        Assert.Contains("2 .asi files and none named OpenVersus_2026.11.01.01.asi", ambiguous);
+
+        Assert.Null(AutoUpdate.PluginFrom(Zip(("readme.txt", "hi"u8.ToArray())), "2026.10.01.01", out _, out string? none));
+        Assert.Equal("a zip with no .asi in it", none);
+
+        Assert.Null(AutoUpdate.PluginFrom(Zip(("OpenVersus.asi", new byte[20000])), "2026.10.01.01", out _, out string? notPe));
+        Assert.Contains("OpenVersus.asi is not a Windows binary", notPe);
+
+        byte[] damaged = Zip(("OpenVersus.asi", Plugin(6)))[..40];
+        Assert.Null(AutoUpdate.PluginFrom(damaged, "2026.10.01.01", out _, out string? broken));
+        Assert.StartsWith("a damaged zip", broken);
+    }
 }
