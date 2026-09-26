@@ -42,7 +42,7 @@ public sealed unsafe class UpdateProgressWindow : IDisposable
     public void AddBytes(int bytes)
     {
         _doneBytes += bytes;
-        int permille = (int)(Math.Min(_doneBytes, _totalBytes) * 1000 / _totalBytes);
+        int permille = (int)(Math.Clamp(_doneBytes, 0, _totalBytes) * 1000 / _totalBytes);
         if (_bar != 0 && permille != _shownPermille)
         {
             _shownPermille = permille;

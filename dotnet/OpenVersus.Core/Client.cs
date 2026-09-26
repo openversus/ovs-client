@@ -268,7 +268,11 @@ public sealed class Client
         var download = new WinHttpTransport(useSystemProxy: true);
         var plugins = new AutoUpdate(Settings.ServerUrl, _pluginPath, _installDirectory, Http, download, Log, Log.Close);
         var paks = paksDirectory == null ? null : new PakUpdate(paksDirectory, Path.Combine(Directory, "update-staging"),
-            Path.Combine(Directory, "pak-backup"), Path.Combine(Directory, "PakHashes.txt"), download, Log);
+            Path.Combine(Directory, "pak-backup"), Path.Combine(Directory, "PakHashes.txt"), download, Log, Settings.ReleaseOwner);
+        if (paks != null && paks.ReleaseOwner != PakUpdate.DefaultOwner)
+        {
+            Log.Warn($"[Update] Testing: paks may download from {paks.ReleaseOwner}'s releases ([Settings.Debug] ReleaseOwner)");
+        }
         var state = State;
         return new StartupUpdate(Settings.ServerUrl, Settings.AutoUpdate, Http, plugins, paks, Log, Log.Close, state.SetUpdateNotice).Run();
     }

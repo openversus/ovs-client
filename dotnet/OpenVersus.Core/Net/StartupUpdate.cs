@@ -10,8 +10,9 @@ namespace OpenVersus.Net;
 /// AutoUpdate on, a newer plugin is out), downloads everything behind a progress window,
 /// installs it and closes the game, so the next launch runs the new files. The ASI loader calls
 /// the plugin at the game's entry point, before the engine opens its paks, so they can be
-/// replaced here. Paks download whatever AutoUpdate says: they are content the game needs.
-/// A release without paks (Infinity War) leaves this with nothing to do.
+/// replaced here. Paks download whatever AutoUpdate says: the game crashes without the paks the
+/// server's content needs, so when they cannot be brought up to date the game is closed rather
+/// than started. A release without paks (Infinity War) leaves this with nothing to do.
 /// </summary>
 /// <param name="serverUrl">The OVS server.</param>
 /// <param name="autoUpdate">Whether a newer plugin may be installed too.</param>
@@ -30,7 +31,10 @@ public sealed class StartupUpdate(string serverUrl, bool autoUpdate, IHttpTransp
         NoAnswer,
         /// <summary>Everything matches the release.</summary>
         UpToDate,
-        /// <summary>An update was due but failed; nothing was changed and it is tried again next launch.</summary>
+        /// <summary>
+        /// An update was due but failed; nothing was changed and it is tried again next launch.
+        /// For paks the game has been closed (only tests see this); a plugin alone lets it play on.
+        /// </summary>
         Failed,
         /// <summary>Installed. Only tests see this: in the game the process has been closed.</summary>
         Installed,
@@ -76,7 +80,7 @@ public sealed class StartupUpdate(string serverUrl, bool autoUpdate, IHttpTransp
         List<UpdateFile> due = [];
         if (paks != null)
         {
-            var listed = PakUpdate.Paks(ParseFiles(result.Text), out string? problem);
+            var listed = PakUpdate.Paks(ParseFiles(result.Text), out string? problem, paks.ReleaseOwner);
             if (listed == null)
             {
                 log.Warn($"[Update] Not using this release's paks: {problem}");
@@ -110,16 +114,14 @@ public sealed class StartupUpdate(string serverUrl, bool autoUpdate, IHttpTransp
         if (due.Count > 0 && !paks!.Download(due, (name, n, count) => window?.SetFile(name, n, count), bytes => window?.AddBytes(bytes)))
         {
             window?.Dispose();
-            Tell("The OpenVersus update could not be downloaded. No game files were changed; the game will start as it is and try again next launch.", "Update failed", User32.MB_ICONERROR);
-            return Outcome.Failed;
+            return Close("OpenVersus could not download a required game update, and the game can't run without it. No files were changed.\n\nMultiVersus will now close. Check your internet connection and launch it again.", "Update failed");
         }
 
         window?.SetStatus("Downloads verified. Installing the update...");
         if (due.Count > 0 && !paks!.Install(due))
         {
             window?.Dispose();
-            Tell("OpenVersus downloaded the update, but Windows would not let one of the game files be replaced. The previous files were put back and the game will start as it is.", "Update not installed", User32.MB_ICONERROR);
-            return Outcome.Failed;
+            return Close("OpenVersus downloaded the update, but Windows would not let one of the game files be replaced. The previous files were put back.\n\nMultiVersus will now close. Make sure no other copy of the game is running, then launch it again.", "Update not installed");
         }
 
         bool pluginInstalled = plugin != null && plugins.InstallPlugin(plugin, info.LatestVersion!);
@@ -138,5 +140,15 @@ public sealed class StartupUpdate(string serverUrl, bool autoUpdate, IHttpTransp
         beforeExit(); // TerminateProcess gives no exit moment, so the log is closed and archived here
         Exit();
         return Outcome.Installed;
+    }
+
+    /// <summary>Tells the player why a required update failed and closes the game, which would crash without it.</summary>
+    private Outcome Close(string text, string caption)
+    {
+        log.Error($"[Update] {caption}; closing the game rather than starting it without the content it needs");
+        Tell(text, caption, User32.MB_ICONERROR);
+        beforeExit();
+        Exit();
+        return Outcome.Failed;
     }
 }

@@ -22,8 +22,8 @@ public class PakUpdateTests : IDisposable
     private string Staging => Path.Combine(_plugin, "update-staging");
     private string Backup => Path.Combine(_plugin, "pak-backup");
 
-    private PakUpdate Updater(ServedFiles http) =>
-        new(_paks, Staging, Backup, Path.Combine(_plugin, "PakHashes.txt"), http, _log);
+    private PakUpdate Updater(ServedFiles http, string owner = PakUpdate.DefaultOwner) =>
+        new(_paks, Staging, Backup, Path.Combine(_plugin, "PakHashes.txt"), http, _log, owner) { Sleep = _ => { } };
 
     private static string Sha(byte[] body) => Convert.ToHexStringLower(SHA256.HashData(body));
 
@@ -62,6 +62,32 @@ public class PakUpdateTests : IDisposable
     [InlineData("https://objects.githubusercontent.com/openversus/ovs-paks/releases/download/content/OVS_P.pak", false)]
     [InlineData(null, false)]
     public void PaksDownloadOnlyFromOpenversusReleases(string? url, bool ok) => Assert.Equal(ok, PakUpdate.IsAllowedUrl(url, "OVS_P.pak"));
+
+    [Fact]
+    public void AForkIsAllowedOnlyWhenItIsTheConfiguredOwner()
+    {
+        const string Fork = "https://github.com/tuggernuts1123/ovs-client/releases/download/2026.09.27.1/OVS_P.pak";
+        Assert.False(PakUpdate.IsAllowedUrl(Fork, "OVS_P.pak"));
+        Assert.True(PakUpdate.IsAllowedUrl(Fork, "OVS_P.pak", "tuggernuts1123"));
+        Assert.False(PakUpdate.IsAllowedUrl("https://github.com/openversus/ovs-paks/releases/download/content/OVS_P.pak", "OVS_P.pak", "tuggernuts1123"));
+
+        Assert.Equal("tuggernuts1123", Updater(new ServedFiles(), "tuggernuts1123").ReleaseOwner);
+        Assert.Equal(PakUpdate.DefaultOwner, Updater(new ServedFiles(), "../evil").ReleaseOwner);
+        Assert.Equal(PakUpdate.DefaultOwner, Updater(new ServedFiles(), "").ReleaseOwner);
+    }
+
+    [Fact]
+    public void AFlakyDownloadIsRetried()
+    {
+        byte[] pak = Bytes("pak body");
+        var http = new ServedFiles { [Release + "OVS_P.pak"] = pak };
+        http.FailFirst = 2;
+        long bytes = 0;
+
+        Assert.True(Updater(http).Download([Entry("OVS_P.pak", pak)], onBytes: b => bytes += b));
+        Assert.Equal(3, http.Requested.Count);
+        Assert.Equal(pak.Length, bytes);
+    }
 
     [Fact]
     public void AReleaseWithoutPaksHasNothingToDo()
@@ -265,7 +291,7 @@ public class PakUpdateTests : IDisposable
     }
 
     [Fact]
-    public void AFailedDownloadTellsThePlayerAndTheGameStarts()
+    public void AFailedPakDownloadClosesTheGameInsteadOfCrashingIt()
     {
         var entry = Entry("OVS_P.pak", Bytes("endgame content"));
         var told = new List<string>();
@@ -273,7 +299,7 @@ public class PakUpdateTests : IDisposable
         var http = new ServedFiles { [VersionUrl] = VersionJson(entry) };
 
         Assert.Equal(StartupUpdate.Outcome.Failed, Startup(http, told, notices).Run());
-        Assert.Equal(["Update failed"], told);
+        Assert.Equal(["Update failed", "exit"], told);
         Assert.Empty(notices);
         Assert.False(File.Exists(Path.Combine(_paks, "OVS_P.pak")));
     }
@@ -294,10 +320,18 @@ public class PakUpdateTests : IDisposable
     private sealed class ServedFiles : Dictionary<string, byte[]>, IHttpTransport
     {
         public List<string> Requested { get; } = [];
+        /// <summary>How many requests get no response before the served ones start.</summary>
+        public int FailFirst { get; set; }
 
         public HttpResult Get(Uri url, TimeSpan timeout)
         {
             Requested.Add(url.ToString());
+            if (FailFirst > 0)
+            {
+                FailFirst--;
+                return HttpResult.Failed("connection reset");
+            }
+
             return TryGetValue(url.ToString(), out var body) ? new HttpResult(true, 200, body, null) : new HttpResult(false, 404, [], null);
         }
 

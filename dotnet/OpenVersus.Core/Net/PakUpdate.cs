@@ -17,8 +17,20 @@ namespace OpenVersus.Net;
 /// <param name="hashCachePath">The file remembering local hashes by size and modified time.</param>
 /// <param name="download">The transport for the downloads (GitHub, so no server identity on it).</param>
 /// <param name="log">Where progress and problems are logged.</param>
-public sealed class PakUpdate(string paksDirectory, string stagingDirectory, string backupDirectory, string hashCachePath, IHttpTransport download, ILogger log)
+/// <param name="releaseOwner">The GitHub account paks may download from; <see cref="DefaultOwner"/> unless testing a fork.</param>
+public sealed class PakUpdate(string paksDirectory, string stagingDirectory, string backupDirectory, string hashCachePath, IHttpTransport download, ILogger log, string releaseOwner = PakUpdate.DefaultOwner)
 {
+    /// <summary>The organization whose releases paks come from.</summary>
+    public const string DefaultOwner = "openversus";
+    /// <summary>Tries per file before a download counts as failed.</summary>
+    public const int Attempts = 3;
+
+    /// <summary>The account paks may download from: <paramref name="releaseOwner"/> when it is a plain GitHub name, else <see cref="DefaultOwner"/>.</summary>
+    public string ReleaseOwner { get; } = releaseOwner.Length is > 0 and <= 39 && releaseOwner.All(c => char.IsAsciiLetterOrDigit(c) || c == '-') ? releaseOwner : DefaultOwner;
+
+    /// <summary>The wait between tries; tests replace it.</summary>
+    public Action<TimeSpan> Sleep { get; init; } = Thread.Sleep;
+
     /// <summary>More files than a release would ever carry; a manifest with more is refused.</summary>
     public const int MaxFiles = 64;
     /// <summary>GitHub's limit for one release asset.</summary>
@@ -34,11 +46,12 @@ public sealed class PakUpdate(string paksDirectory, string stagingDirectory, str
         && s_extensions.Any(e => name.EndsWith(e, StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
-    /// Whether <paramref name="url"/> is a release download of a repository of the openversus
-    /// organization on GitHub, over https, for the file <paramref name="name"/>. Any repository of the
-    /// organization, so the pak repository can be added on the server without a client release.
+    /// Whether <paramref name="url"/> is a release download of a repository of
+    /// <paramref name="owner"/> on GitHub, over https, for the file <paramref name="name"/>. Any
+    /// repository of the account, so the pak repository can be added on the server without a
+    /// client release.
     /// </summary>
-    public static bool IsAllowedUrl(string? url, string name)
+    public static bool IsAllowedUrl(string? url, string name, string owner = DefaultOwner)
     {
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme != "https" || !uri.IsDefaultPort
             || uri.UserInfo.Length > 0 || !string.Equals(uri.Host, "github.com", StringComparison.OrdinalIgnoreCase))
@@ -48,7 +61,7 @@ public sealed class PakUpdate(string paksDirectory, string stagingDirectory, str
 
         // /openversus/<repo>/releases/download/<tag>/<file>
         string[] parts = uri.AbsolutePath.Split('/');
-        return parts.Length == 7 && parts[0] == "" && parts[1] == "openversus" && parts[2].Length > 0
+        return parts.Length == 7 && parts[0] == "" && string.Equals(parts[1], owner, StringComparison.OrdinalIgnoreCase) && parts[2].Length > 0
             && parts[3] == "releases" && parts[4] == "download" && parts[5].Length > 0
             && string.Equals(Uri.UnescapeDataString(parts[6]), name, StringComparison.OrdinalIgnoreCase);
     }
@@ -58,7 +71,7 @@ public sealed class PakUpdate(string paksDirectory, string stagingDirectory, str
     /// paks), null with <paramref name="problem"/> saying why when any entry is unsafe or
     /// incomplete, since a release is installed whole or not at all.
     /// </summary>
-    public static List<UpdateFile>? Paks(ReleaseFiles? manifest, out string? problem)
+    public static List<UpdateFile>? Paks(ReleaseFiles? manifest, out string? problem, string owner = DefaultOwner)
     {
         problem = null;
         var paks = (manifest?.Files ?? []).Where(f => f != null && f.Kind == "paks").ToList();
@@ -76,9 +89,9 @@ public sealed class PakUpdate(string paksDirectory, string stagingDirectory, str
             {
                 problem = $"the pak entry \"{name}\" is not an OVS content file name";
             }
-            else if (!IsAllowedUrl(file.DownloadUrl, name))
+            else if (!IsAllowedUrl(file.DownloadUrl, name, owner))
             {
-                problem = $"{name} would download from {file.DownloadUrl}, which is not an openversus GitHub release";
+                problem = $"{name} would download from {file.DownloadUrl}, which is not a GitHub release of {owner}";
             }
             else if (file.Sha256 is not { Length: 64 } sha || !sha.All(char.IsAsciiHexDigit))
             {
@@ -183,21 +196,41 @@ public sealed class PakUpdate(string paksDirectory, string stagingDirectory, str
             var file = files[i];
             onFile?.Invoke(file.Name!, i + 1, files.Count);
             string staged = Path.Combine(stagingDirectory, file.Name!);
-            log.Info($"[Paks] Downloading {file.Name} ({file.Size} bytes) from {file.DownloadUrl}");
-            string? problem;
-            try
+            string? problem = null;
+            for (int attempt = 1; attempt <= Attempts; attempt++)
             {
-                using var output = new FileStream(staged, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 16);
-                using var hashing = new HashingStream(output);
-                var result = download.Download(new Uri(file.DownloadUrl!), hashing, TimeSpan.FromSeconds(60), onBytes);
-                problem = !result.Ok ? $"the download failed ({result.Error ?? $"HTTP {result.Status}"})"
-                    : hashing.Length != file.Size ? $"it is {hashing.Length} bytes, but the release says {file.Size}"
-                    : !string.Equals(hashing.Sha256(), file.Sha256, StringComparison.OrdinalIgnoreCase) ? $"its SHA-256 is {hashing.Sha256()}, but the release says {file.Sha256!.ToLowerInvariant()}"
-                    : null;
-            }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-            {
-                problem = $"it cannot be written ({e.Message})";
+                log.Info($"[Paks] Downloading {file.Name} ({file.Size} bytes) from {file.DownloadUrl}{(attempt > 1 ? $", try {attempt} of {Attempts}" : "")}");
+                long received = 0;
+                try
+                {
+                    using var output = new FileStream(staged, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 16);
+                    using var hashing = new HashingStream(output);
+                    var result = download.Download(new Uri(file.DownloadUrl!), hashing, TimeSpan.FromSeconds(60), bytes =>
+                    {
+                        received += bytes;
+                        onBytes?.Invoke(bytes);
+                    });
+                    problem = !result.Ok ? $"the download failed ({result.Error ?? $"HTTP {result.Status}"})"
+                        : hashing.Length != file.Size ? $"it is {hashing.Length} bytes, but the release says {file.Size}"
+                        : !string.Equals(hashing.Sha256(), file.Sha256, StringComparison.OrdinalIgnoreCase) ? $"its SHA-256 is {hashing.Sha256()}, but the release says {file.Sha256!.ToLowerInvariant()}"
+                        : null;
+                }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+                {
+                    problem = $"it cannot be written ({e.Message})";
+                }
+
+                if (problem == null)
+                {
+                    break;
+                }
+
+                log.Warn($"[Paks] {file.Name}, try {attempt} of {Attempts}: {problem}");
+                onBytes?.Invoke((int)-received); // the bar goes back for the retry
+                if (attempt < Attempts)
+                {
+                    Sleep(TimeSpan.FromSeconds(2 * attempt));
+                }
             }
 
             if (problem != null)

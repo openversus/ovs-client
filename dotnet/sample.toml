@@ -163,6 +163,9 @@ NonMVSPatching = false
 # For profiling; leave it off. Counts calls to the end-of-service check and logs them once a minute.
 CountSunsetCalls = false
 
+# For testing updates from a fork; leave it. Game content only downloads from this GitHub account's releases.
+ReleaseOwner = "openversus"
+
 # ---------------------------------------------------------------------------
 # The OpenVersus server. Leave this section alone unless you run your own server.
 # ---------------------------------------------------------------------------
