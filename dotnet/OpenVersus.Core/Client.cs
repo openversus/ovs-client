@@ -39,8 +39,10 @@ public sealed class Client
     public ObjectFinder Objects { get; private set; } = null!;
     /// <summary>The player's identity and hardware fingerprint, collected during <see cref="Initialize"/>.</summary>
     public EnvInfo? Env { get; private set; }
-    /// <summary>The HTTP transport for the server; a host may replace it before <see cref="Initialize"/>.</summary>
-    public IHttpTransport Http { get; set; } = new WinHttpTransport();
+    /// <summary>The install id and token the client's own server calls carry.</summary>
+    public ServerIdentity ServerIdentity { get; } = new();
+    /// <summary>The HTTP transport for the server, sending <see cref="ServerIdentity"/>'s headers; a host may replace it before <see cref="Initialize"/>.</summary>
+    public IHttpTransport Http { get; set; }
 
     private string _pluginPath;
     /// <summary>Where updates install: plugins/OpenVersus/ when the loader loads it, else beside the plugin.</summary>
@@ -57,6 +59,7 @@ public sealed class Client
         _pluginPath = pluginPath;
         _installDirectory = Directory;
         _module = module;
+        Http = new WinHttpTransport(headers: ServerIdentity.Headers);
     }
 
     /// <summary>
@@ -219,9 +222,14 @@ public sealed class Client
         Patterns = new PatternResolver(Image, cache, Settings, Log);
         Log.Info("Parsed Settings");
 
-        // Collect Steam/Epic identity and hardware fingerprint. It makes accounts "sticky", so
-        // nobody resets their name and perks when their IP changes or they switch to Proton.
-        Env = new EnvInfo();
+        // Collect Steam/Epic identity, the install id and the hardware fingerprint. They make
+        // accounts "sticky", so nobody resets their name and perks when their IP changes or they
+        // switch to Proton. The install id is created here, before any background work, so the
+        // first notification poll and registration already carry it.
+        var runtime = Runtime.Detect();
+        Env = new EnvInfo(runtime) { InstallId = State.LoadOrCreateInstallId() };
+        ServerIdentity.InstallId = Env.InstallId;
+        Log.Info($"[OVS] Runtime: {Runtime.Name(runtime)}; install identity {(Env.InstallId.Length > 0 ? "verified" : "unavailable")}; hardware fingerprint {(Env.HardwareId.Length > 0 ? "v2" : "none")}");
 
         ApplyHooks();
         GameThread.Attach(Log);
@@ -262,7 +270,8 @@ public sealed class Client
         }
 
         var env = Env!;
-        Start("OVS identity", () => IdentityRegistration.Run(env, Settings.ServerUrl, Http, Log));
+        var serverIdentity = ServerIdentity;
+        Start("OVS identity", () => IdentityRegistration.Run(env, Settings.ServerUrl, Http, serverIdentity, Log));
 
         if (Settings.AutoUpdate)
         {

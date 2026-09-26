@@ -81,12 +81,24 @@ public sealed class LenientBoolConverter : JsonConverter<bool>
 /// <param name="Timeout">timeout: seconds an admin banner stays up; 8 when absent.</param>
 public sealed record Notification(string? Type, string Title = "", string Message = "", double? Timeout = null);
 
-/// <summary>The body of the identity POST.</summary>
+/// <summary>The body of the identity POST, in the C++ client's field order.</summary>
 /// <param name="SteamId">steamId: the Steam id, or "Unknown".</param>
 /// <param name="EpicId">epicId: the Epic id, or "Unknown".</param>
-/// <param name="HardwareId">hardwareId: the hardware fingerprint.</param>
+/// <param name="HardwareId">hardwareId: the V2 hardware fingerprint, or "".</param>
+/// <param name="HardwareIdVersion">hardwareIdVersion: "2" with a fingerprint, else "".</param>
+/// <param name="HardwareIdQuality">hardwareIdQuality: "strong" with a fingerprint, else "".</param>
+/// <param name="InstallId">installId: this install's random id, or "".</param>
 /// <param name="ClientVersion">clientVersion: the running client's version.</param>
-public sealed record IdentityBody(string SteamId, string EpicId, string HardwareId, string ClientVersion);
+public sealed record IdentityBody(string SteamId, string EpicId, string HardwareId, string HardwareIdVersion, string HardwareIdQuality, string InstallId, string ClientVersion);
+
+/// <summary>What /api/identify sends back. The server also sends accountId, which the client has no use for.</summary>
+/// <param name="Ok">ok: whether the identity was registered.</param>
+/// <param name="Token">token: a token the server resolves the player from on the client's own calls.</param>
+/// <param name="Error">error: why not, such as "client_update_required".</param>
+public sealed record IdentifyResponse(
+    [property: JsonConverter(typeof(LenientBoolConverter))] bool Ok,
+    [property: JsonConverter(typeof(LenientStringConverter))] string? Token,
+    [property: JsonConverter(typeof(LenientStringConverter))] string? Error);
 
 /// <summary>
 /// The JSON the client reads and writes, compiled ahead of time: NativeAOT has no reflection
@@ -97,6 +109,7 @@ public sealed record IdentityBody(string SteamId, string EpicId, string Hardware
 [JsonSerializable(typeof(VersionInfo))]
 [JsonSerializable(typeof(Notification))]
 [JsonSerializable(typeof(IdentityBody))]
+[JsonSerializable(typeof(IdentifyResponse))]
 internal sealed partial class OvsJson : JsonSerializerContext
 {
 }

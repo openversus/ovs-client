@@ -9,14 +9,19 @@ namespace OpenVersus.Net;
 /// </summary>
 /// <param name="agent">The User-Agent.</param>
 /// <param name="useSystemProxy">Whether to use the WinHTTP proxy setting.</param>
-public sealed class WinHttpTransport(string agent = "OVS/1.0", bool useSystemProxy = false) : IHttpTransport
+/// <param name="headers">Extra request headers, each ending in CRLF, asked for on every request; null or "" for none.</param>
+public sealed class WinHttpTransport(string agent = "OVS/1.0", bool useSystemProxy = false, Func<string?>? headers = null) : IHttpTransport
 {
     /// <inheritdoc/>
-    public HttpResult Get(Uri url, TimeSpan timeout) => Send(url, "GET", null, default, timeout);
+    public HttpResult Get(Uri url, TimeSpan timeout)
+    {
+        string? extra = headers?.Invoke();
+        return Send(url, "GET", string.IsNullOrEmpty(extra) ? null : extra, default, timeout);
+    }
 
     /// <inheritdoc/>
     public HttpResult Post(Uri url, string contentType, ReadOnlySpan<byte> body, TimeSpan timeout) =>
-        Send(url, "POST", $"Content-Type: {contentType}\r\n", body, timeout);
+        Send(url, "POST", $"Content-Type: {contentType}\r\n{headers?.Invoke()}", body, timeout);
 
     private HttpResult Send(Uri url, string verb, string? headers, ReadOnlySpan<byte> body, TimeSpan timeout)
     {
