@@ -236,4 +236,107 @@ public class NetTests
         Assert.Null(AutoUpdate.PluginFrom(damaged, "2026.10.01.01", out _, out string? broken));
         Assert.StartsWith("a damaged zip", broken);
     }
+
+    /// <summary>Serves a fixed result per URL, 404 for anything else, and records what was asked for.</summary>
+    private sealed class FakeHttp(Dictionary<string, HttpResult> results) : IHttpTransport
+    {
+        public List<string> Requested { get; } = [];
+
+        public HttpResult Get(Uri url, TimeSpan timeout)
+        {
+            Requested.Add(url.ToString());
+            return results.TryGetValue(url.ToString(), out var result) ? result : new HttpResult(false, 404, [], null);
+        }
+
+        public HttpResult Post(Uri url, string contentType, ReadOnlySpan<byte> body, TimeSpan timeout) => throw new NotSupportedException();
+    }
+
+    private const string AsiUrl = "https://github.com/openversus/ovs-client/releases/download/2026.10.01.01/OpenVersus_2026.10.01.01.asi";
+
+    private static string Sha256Line(byte[] body, string name) =>
+        Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(body)).ToLowerInvariant() + " *" + name + "\n";
+
+    private static HttpResult Served(byte[] body) => new(true, 200, body, null);
+
+    private static (byte[]? Plugin, ListLogger Log, FakeHttp Http) FetchWith(HttpResult? checksum, byte[]? body = null, string url = AsiUrl)
+    {
+        body ??= Plugin(7);
+        var results = new Dictionary<string, HttpResult> { [url] = Served(body) };
+        if (checksum != null)
+        {
+            results[url + ".sha256"] = checksum;
+        }
+
+        var http = new FakeHttp(results);
+        var log = new ListLogger();
+        var update = new AutoUpdate("https://prod.openversus.org/", "OpenVersus_2026.09.25.06.asi", http, http, log, () => { });
+        byte[]? plugin = update.Fetch(new VersionInfo("2026.10.01.01", url, false, ""));
+        return (plugin, log, http);
+    }
+
+    [Fact]
+    public void TheChecksumFileIsReadAsSha256sumWritesIt()
+    {
+        byte[] body = Plugin(8);
+        string line = Sha256Line(body, "OpenVersus_2026.10.01.01.asi");
+        Assert.Null(AutoUpdate.CheckSha256(line, "OpenVersus_2026.10.01.01.asi", body));
+        Assert.Null(AutoUpdate.CheckSha256(line.ToUpperInvariant().Replace(" *OPENVERSUS_2026.10.01.01.ASI", " *OpenVersus_2026.10.01.01.asi"), "OpenVersus_2026.10.01.01.asi", body));
+        Assert.Null(AutoUpdate.CheckSha256(line.Split(' ')[0], "OpenVersus_2026.10.01.01.asi", body));
+
+        Assert.Contains("but the release says", AutoUpdate.CheckSha256(line, "OpenVersus_2026.10.01.01.asi", Plugin(9)));
+        Assert.Contains("is for OpenVersus_2026.10.01.01.asi, not other.asi", AutoUpdate.CheckSha256(line, "other.asi", body));
+        Assert.Contains("does not hold a SHA-256", AutoUpdate.CheckSha256("", "x.asi", body));
+        Assert.Contains("does not hold a SHA-256", AutoUpdate.CheckSha256("<html>Not Found</html>", "x.asi", body));
+    }
+
+    [Fact]
+    public void AMatchingChecksumInstalls()
+    {
+        byte[] body = Plugin(10);
+        var (plugin, log, http) = FetchWith(Served(System.Text.Encoding.UTF8.GetBytes(Sha256Line(body, "OpenVersus_2026.10.01.01.asi"))), body);
+        Assert.Equal(body, plugin);
+        Assert.Equal([AsiUrl, AsiUrl + ".sha256"], http.Requested);
+        Assert.Contains(log.Lines, l => l.Contains("SHA-256 matches"));
+    }
+
+    [Fact]
+    public void AMismatchedChecksumDoesNotInstall()
+    {
+        var (plugin, log, _) = FetchWith(Served(System.Text.Encoding.UTF8.GetBytes(Sha256Line(Plugin(11), "OpenVersus_2026.10.01.01.asi"))), Plugin(12));
+        Assert.Null(plugin);
+        Assert.Contains(log.Lines, l => l.Contains("Not installing the download") && l.Contains("but the release says"));
+    }
+
+    /// <summary>No .sha256 is treated like a mismatch: nothing this client could install lacks one.</summary>
+    [Fact]
+    public void AReleaseWithoutAChecksumIsNotInstalled()
+    {
+        var (plugin, log, _) = FetchWith(checksum: null);
+        Assert.Null(plugin);
+        Assert.Contains(log.Lines, l => l.Contains("Not installing the download: the release publishes no checksum"));
+    }
+
+    [Theory]
+    [InlineData(500)]
+    [InlineData(0)]
+    public void AChecksumThatCannotBeFetchedWaitsForTheNextLaunch(int status)
+    {
+        var failed = status == 0 ? HttpResult.Failed("timed out") : new HttpResult(false, status, [], null);
+        var (plugin, log, _) = FetchWith(failed);
+        Assert.Null(plugin);
+        Assert.Contains(log.Lines, l => l.Contains("Could not fetch the checksum") && l.Contains("trying again next launch"));
+    }
+
+    /// <summary>A zip is checked as downloaded, against the zip's own .sha256, before anything is taken out of it.</summary>
+    [Fact]
+    public void AZipIsCheckedAgainstTheZipsChecksum()
+    {
+        const string zipUrl = "https://github.com/openversus/ovs-client/releases/download/2026.10.01.01/OpenVersus_v2026.10.01.01.zip";
+        byte[] zip = Zip(("plugins/OpenVersus_2026.10.01.01.asi", Plugin(13)));
+        var (plugin, _, _) = FetchWith(Served(System.Text.Encoding.UTF8.GetBytes(Sha256Line(zip, "OpenVersus_v2026.10.01.01.zip"))), zip, zipUrl);
+        Assert.Equal(Plugin(13), plugin);
+
+        var (refused, _, _) = FetchWith(Served(System.Text.Encoding.UTF8.GetBytes(Sha256Line(Plugin(13), "OpenVersus_v2026.10.01.01.zip"))), zip, zipUrl);
+        Assert.Null(refused);
+    }
 }

@@ -142,7 +142,11 @@ release holds `OpenVersus_v<tag>.zip` (the install), `OpenVersus_<version>.asi` 
 which is what the server's `download_url` should point the auto-updater at), a `.sha256` beside
 each, and `SHA256SUMS`. The server offers a release's `.asi` asset and falls back to its zip when there is
 none; the updater handles both, installing only the one `.asi` in a zip (or the one named for the
-offered version) and never the zip's loader or `OpenVersus.toml`.
+offered version) and never the zip's loader or `OpenVersus.toml`. Before anything is installed, the download is checked
+against the release's `<download_url>.sha256`: a mismatch, a missing `.sha256`, or one that cannot be
+fetched or read, means no install this launch. A missing one counts as a mismatch because every
+release the updater could install (only newer ones are) comes from this pipeline, which always
+publishes them.
 
 ## How it maps to the C++ client
 
