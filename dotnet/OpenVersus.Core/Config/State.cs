@@ -4,7 +4,7 @@ namespace OpenVersus.Config;
 /// OVSState.toml: what the client has already told this player, and this install's random id.
 /// The C++ client's OVSState.ini has its values carried over and is deleted once the TOML is on disk.
 /// </summary>
-public sealed class State
+public sealed partial class State
 {
     /// <summary>The state file's name, beside the plugin.</summary>
     public const string FileName = "OVSState.toml";
@@ -30,11 +30,17 @@ public sealed class State
         }
 
         _toml = TomlConfig.Load(path);
-        if (_toml.LoadError != null || _toml.Errors.Count > 0)
+        if (_toml.LoadError != null)
+        {
+            // A file that is there but cannot be read may hold the only copy of the install id,
+            // so this launch runs on a document that is never saved over it.
+            _toml = TomlConfig.InMemory(path);
+        }
+        else if (_toml.Errors.Count > 0)
         {
             // The client's own file, so a broken one starts over; otherwise the agreement could
             // never be saved and the free-mod dialog would come back every launch.
-            _toml = TomlConfig.FromText("", path);
+            _toml = StartOver(path);
         }
 
         if (!File.Exists(legacyPath))
@@ -159,4 +165,63 @@ public sealed class State
 
     /// <summary>Whether <paramref name="value"/> is an install id: exactly 32 hex characters, either case, as the C++ checked.</summary>
     public static bool IsValidInstallId(string value) => value.Length == 32 && value.All(char.IsAsciiHexDigit);
+
+    /// <summary>Where a <see cref="FileName"/> that would not parse is kept, beside it, before a new one replaces it.</summary>
+    public const string BrokenFileName = FileName + ".broken";
+
+    /// <summary>
+    /// A new document for the <see cref="FileName"/> at <paramref name="path"/>, which does not parse.
+    /// The broken file is copied to <see cref="BrokenFileName"/> first, and its install id, when a
+    /// line of it still reads as one, is written into the new file, since a new id would be a new
+    /// account for a player without a Steam or Epic id. When the copy cannot be made, the document
+    /// is never saved, so nothing replaces a file that may hold the only copy of the id.
+    /// </summary>
+    private static TomlConfig StartOver(string path)
+    {
+        byte[] bytes;
+        try
+        {
+            bytes = File.ReadAllBytes(path);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return TomlConfig.InMemory(path);
+        }
+
+        TomlConfig toml;
+        try
+        {
+            File.WriteAllBytes(Path.Combine(Path.GetDirectoryName(path)!, BrokenFileName), bytes);
+            toml = TomlConfig.FromText("", path);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            toml = TomlConfig.InMemory(path);
+        }
+
+        if (SalvageInstallId(bytes) is { } id)
+        {
+            toml.Set("Identity", "InstallId", SettingKind.String, id);
+            toml.Save();
+        }
+
+        return toml;
+    }
+
+    /// <summary>
+    /// The install id in the text of a state file that does not parse: the one value of every
+    /// <c>InstallId = "…"</c> line that holds an id, or null when there is none or they disagree.
+    /// Read as Latin-1, so a file that is not UTF-8 still gives up an id written in ASCII.
+    /// </summary>
+    internal static string? SalvageInstallId(byte[] bytes)
+    {
+        var ids = InstallIdLine().Matches(System.Text.Encoding.Latin1.GetString(bytes))
+            .Select(m => m.Groups[1].Value)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        return ids.Count == 1 ? ids[0] : null;
+    }
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"^[ \t]*InstallId[ \t]*=[ \t]*[""']?([0-9A-Fa-f]{32})[""']?[ \t]*\r?$", System.Text.RegularExpressions.RegexOptions.Multiline)]
+    private static partial System.Text.RegularExpressions.Regex InstallIdLine();
 }

@@ -18,13 +18,13 @@ public sealed record VersionInfo(
 /// <summary>One file of a release as /ovs/client-version lists it under "files".</summary>
 /// <param name="Name">name: the asset's file name.</param>
 /// <param name="Kind">kind: "plugin" (the .asi) or "paks" (an OVS_* pak, utoc, ucas or sig).</param>
-/// <param name="Size">size: bytes.</param>
+/// <param name="Size">size: bytes, as a number or a string of digits.</param>
 /// <param name="Sha256">sha256: the SHA-256 GitHub records for the asset, lowercase hex.</param>
 /// <param name="DownloadUrl">download_url: where it downloads from.</param>
 public sealed record UpdateFile(
     [property: JsonConverter(typeof(LenientStringConverter))] string? Name,
     [property: JsonConverter(typeof(LenientStringConverter))] string? Kind,
-    long Size,
+    [property: JsonConverter(typeof(LenientInt64Converter))] long Size,
     [property: JsonConverter(typeof(LenientStringConverter))] string? Sha256,
     [property: JsonPropertyName("download_url"), JsonConverter(typeof(LenientStringConverter))] string? DownloadUrl);
 
@@ -77,6 +77,34 @@ public sealed class LenientStringConverter : JsonConverter<string?>
 
     /// <inheritdoc/>
     public override void Write(Utf8JsonWriter writer, string? value, JsonSerializerOptions options) => writer.WriteStringValue(value);
+}
+
+/// <summary>
+/// A whole number, also taken from a string of its digits ("12345"). Anything else fails the
+/// parse rather than standing in as some number: a size the updater trusted wrongly would fail
+/// its download instead of saying why.
+/// </summary>
+public sealed class LenientInt64Converter : JsonConverter<long>
+{
+    /// <inheritdoc/>
+    public override long Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        if (reader.TokenType == JsonTokenType.Number && reader.TryGetInt64(out long number))
+        {
+            return number;
+        }
+
+        if (reader.TokenType == JsonTokenType.String
+            && long.TryParse(reader.GetString(), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out long text))
+        {
+            return text;
+        }
+
+        throw new JsonException($"expected a whole number, not {(reader.TokenType == JsonTokenType.String ? $"\"{reader.GetString()}\"" : reader.TokenType.ToString())}");
+    }
+
+    /// <inheritdoc/>
+    public override void Write(Utf8JsonWriter writer, long value, JsonSerializerOptions options) => writer.WriteNumberValue(value);
 }
 
 /// <summary>
@@ -150,4 +178,18 @@ public sealed record IdentifyResponse(
 [JsonSerializable(typeof(PakInstallManifest))]
 internal sealed partial class OvsJson : JsonSerializerContext
 {
+    /// <summary><paramref name="json"/> as a <typeparamref name="T"/>, or null, with <paramref name="problem"/> saying why when it is not that JSON.</summary>
+    public static T? TryParse<T>(string json, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> type, out string? problem) where T : class
+    {
+        try
+        {
+            problem = null;
+            return JsonSerializer.Deserialize(json, type);
+        }
+        catch (JsonException e)
+        {
+            problem = e.Message;
+            return null;
+        }
+    }
 }

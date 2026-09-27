@@ -20,17 +20,7 @@ public static class IdentityRegistration
         JsonSerializer.Serialize(new IdentityBody(env.SteamId, env.EpicId, env.HardwareId, env.HardwareIdVersion, env.HardwareIdQuality, env.InstallId, OvsVersion.Current), OvsJson.Default.IdentityBody);
 
     /// <summary>What /api/identify sent back, or null when it is not that JSON.</summary>
-    public static IdentifyResponse? ParseResponse(string json)
-    {
-        try
-        {
-            return JsonSerializer.Deserialize(json, OvsJson.Default.IdentifyResponse);
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-    }
+    public static IdentifyResponse? ParseResponse(string json) => OvsJson.TryParse(json, OvsJson.Default.IdentifyResponse, out _);
 
     /// <summary>
     /// Registers what is known now, retrying while no answer arrives, so the server has the install

@@ -111,6 +111,75 @@ public class IdentityTests : IDisposable
         Assert.Equal("", new State(_dir).Load().LoadOrCreateInstallId());
     }
 
+    [Theory]
+    [InlineData("[Identity]\r\nInstallId = \"" + InstallId + "\"\r\n[FirstRun\r\nPaidModWarned = true\r\n")]
+    [InlineData("InstallId=" + InstallId + "\r\n= = =\r\n")]
+    [InlineData("[Identity]\nInstallId = '" + InstallId + "'\n[Identity]\nInstallId = '" + InstallId + "'\n")]
+    public void ABrokenStateFileKeepsItsInstallId(string broken)
+    {
+        File.WriteAllText(In(State.FileName), broken);
+
+        var state = new State(_dir).Load();
+        Assert.Equal(InstallId, state.InstallId);
+        Assert.Equal(InstallId, state.LoadOrCreateInstallId());
+        Assert.Equal(broken, File.ReadAllText(In(State.BrokenFileName)));
+        Assert.Empty(TomlConfig.Load(In(State.FileName)).Errors);
+        Assert.Equal(InstallId, new State(_dir).Load().InstallId);
+    }
+
+    [Fact]
+    public void AnInstallIdIsSalvagedFromAFileThatIsNotUtf8()
+    {
+        byte[] broken = [.. System.Text.Encoding.ASCII.GetBytes($"[Identity]\r\nInstallId = \"{InstallId}\"\r\nName = \""), 0xFF, 0xFE, .. "\"\r\n"u8];
+        File.WriteAllBytes(In(State.FileName), broken);
+
+        Assert.Equal(InstallId, new State(_dir).Load().InstallId);
+        Assert.Equal(broken, File.ReadAllBytes(In(State.BrokenFileName)));
+    }
+
+    [Theory]
+    [InlineData("= = =\r\n")]
+    [InlineData("InstallId = \"0123456789abcdef0123456789abcdef\"\r\nInstallId = \"fedcba9876543210fedcba9876543210\"\r\n= = =\r\n")]
+    [InlineData("InstallId = \"0123456789abcdef\"\r\n= = =\r\n")]
+    public void ABrokenStateFileWithoutOneClearIdIsKeptBeforeANewIdIsWritten(string broken)
+    {
+        File.WriteAllText(In(State.FileName), broken);
+
+        var state = new State(_dir).Load();
+        Assert.Equal("", state.InstallId);
+        Assert.True(State.IsValidInstallId(state.LoadOrCreateInstallId()));
+        Assert.Equal(broken, File.ReadAllText(In(State.BrokenFileName)));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ABrokenStateFileThatCannotBeKeptIsNeverReplaced(bool hasId)
+    {
+        string broken = (hasId ? $"InstallId = \"{InstallId}\"\r\n" : "") + "= = =\r\n";
+        File.WriteAllText(In(State.FileName), broken);
+        Directory.CreateDirectory(In(State.BrokenFileName));
+
+        var state = new State(_dir).Load();
+        Assert.Equal(hasId ? InstallId : "", state.LoadOrCreateInstallId());
+        Assert.Equal(broken, File.ReadAllText(In(State.FileName)));
+    }
+
+    [SkippableFact]
+    public void AStateFileThatCannotBeReadIsNeverReplaced()
+    {
+        UnixPermissions.SkipUnlessUnix();
+        string text = $"[Identity]\r\nInstallId = \"{InstallId}\"\r\n";
+        File.WriteAllText(In(State.FileName), text);
+        UnixPermissions.MakeUnreadable(In(State.FileName));
+
+        var state = new State(_dir).Load();
+        Assert.Equal("", state.LoadOrCreateInstallId());
+        state.MarkPaidModWarned();
+        UnixPermissions.Restore(In(State.FileName));
+        Assert.Equal(text, File.ReadAllText(In(State.FileName)));
+    }
+
     // Hardware id V2
 
     [Fact]

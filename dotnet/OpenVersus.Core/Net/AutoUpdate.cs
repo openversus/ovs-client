@@ -21,16 +21,28 @@ namespace OpenVersus.Net;
 public sealed class AutoUpdate(string serverUrl, string pluginPath, string installDirectory, IHttpTransport http, IHttpTransport download, ILogger log, Action beforeExit)
 {
     /// <summary>The version response, or null when the text is not that.</summary>
-    public static VersionInfo? Parse(string json)
+    public static VersionInfo? Parse(string json) => OvsJson.TryParse(json, OvsJson.Default.VersionInfo, out _);
+
+    /// <summary>The version check on <paramref name="serverUrl"/>, saying which client asks; null when that is not a URL.</summary>
+    public static Uri? VersionUrl(string serverUrl) => Urls.Join(serverUrl, $"/ovs/client-version?v={Uri.EscapeDataString(OvsVersion.Current)}");
+
+    /// <summary>
+    /// Why <paramref name="info"/> offers no plugin to install over <paramref name="running"/>, or
+    /// null when it offers a newer one. The one rule for both the startup and the background check.
+    /// </summary>
+    public static string? NotOffered(VersionInfo info, string running)
     {
-        try
+        if (info.IsLatest)
         {
-            return JsonSerializer.Deserialize(json, OvsJson.Default.VersionInfo);
+            return "Already up to date";
         }
-        catch (JsonException)
+
+        if (string.IsNullOrEmpty(info.LatestVersion) || string.IsNullOrEmpty(info.DownloadUrl))
         {
-            return null;
+            return "Missing version/URL in response, skipping";
         }
+
+        return IsNewer(info.LatestVersion, running) ? null : $"Server offers {info.LatestVersion} and this is {running}; not installing";
     }
 
     /// <summary>
@@ -46,7 +58,7 @@ public sealed class AutoUpdate(string serverUrl, string pluginPath, string insta
             return;
         }
 
-        var url = Urls.Join(serverUrl, $"/ovs/client-version?v={Uri.EscapeDataString(OvsVersion.Current)}");
+        var url = VersionUrl(serverUrl);
         if (url == null)
         {
             log.Warn("[AutoUpdate] Failed to parse server URL");
@@ -66,20 +78,9 @@ public sealed class AutoUpdate(string serverUrl, string pluginPath, string insta
             return;
         }
         log.Debug($"[AutoUpdate] Current: {OvsVersion.Current}, Latest: {info.LatestVersion}");
-        if (info.IsLatest)
+        if (NotOffered(info, OvsVersion.Current) is { } reason)
         {
-            log.Info("[AutoUpdate] Already up to date");
-            return;
-        }
-        if (string.IsNullOrEmpty(info.LatestVersion) || string.IsNullOrEmpty(info.DownloadUrl))
-        {
-            log.Warn("[AutoUpdate] Missing version/URL in response, skipping");
-            return;
-        }
-
-        if (!IsNewer(info.LatestVersion, OvsVersion.Current))
-        {
-            log.Info($"[AutoUpdate] Server offers {info.LatestVersion} and this is {OvsVersion.Current}; not installing");
+            log.Info($"[AutoUpdate] {reason}");
             return;
         }
 
@@ -320,44 +321,121 @@ public sealed class AutoUpdate(string serverUrl, string pluginPath, string insta
     }
 
     /// <summary>
-    /// Puts a fetched <paramref name="plugin"/> in place as <see cref="InstallPath"/>, the running
-    /// one renamed to ".bak" first. False, with the running plugin left or put back where it was,
-    /// when it cannot be installed. The new plugin loads on the next launch.
+    /// Puts a fetched <paramref name="plugin"/> in place as <see cref="InstallPath"/> and renames the
+    /// running one to ".bak". The new file is written beside where it goes as "&lt;name&gt;.new", which
+    /// neither the ASI loader nor <see cref="DuplicatePlugins"/> loads, so putting it in place is a
+    /// rename on one drive. It goes in before the running one is renamed: a process that dies between
+    /// the two leaves two plugins, which the next launch's duplicate check settles for the newer one,
+    /// never none. False, with the running plugin where it was, when it cannot be installed. The new
+    /// plugin loads on the next launch.
     /// </summary>
     internal bool InstallPlugin(byte[] plugin, string version)
     {
-        string temp = Path.Combine(Path.GetTempPath(), "OpenVersus_update.asi");
-        string backup = pluginPath + ".bak";
         string target = InstallPath(installDirectory, version);
+        string staged = target + ".new";
+        string backup = pluginPath + ".bak";
         try
         {
-            File.WriteAllBytes(temp, plugin);
-            // Before the running plugin is renamed, so a failure here leaves the install as it was.
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-            log.Info($"[AutoUpdate] Backing up {Path.GetFileName(pluginPath)} and installing {Path.GetFileName(target)}...");
+            File.WriteAllBytes(staged, plugin);
+        }
+        catch (Exception e)
+        {
+            log.Warn($"[AutoUpdate] Install failed: {e.Message}");
+            TryDelete(staged);
+            return false;
+        }
+
+        log.Info($"[AutoUpdate] Installing {Path.GetFileName(target)} and backing up {Path.GetFileName(pluginPath)}...");
+        if (string.Equals(Path.GetFullPath(target), Path.GetFullPath(pluginPath), StringComparison.OrdinalIgnoreCase))
+        {
+            return ReplaceRunning(staged, target, backup);
+        }
+
+        try
+        {
+            File.Move(staged, target, overwrite: true);
+        }
+        catch (Exception e)
+        {
+            log.Warn($"[AutoUpdate] Failed to move the new plugin into place ({e.Message}); the running one is untouched");
+            TryDelete(staged);
+            return false;
+        }
+
+        try
+        {
             if (File.Exists(backup))
             {
                 File.Delete(backup);
             }
 
             File.Move(pluginPath, backup);
-            try
-            {
-                File.Move(temp, target, overwrite: true);
-            }
-            catch (Exception e)
-            {
-                log.Warn($"[AutoUpdate] Failed to move new DLL into place ({e.Message}), restoring original asi file");
-                File.Move(backup, pluginPath);
-                return false;
-            }
         }
         catch (Exception e)
         {
-            log.Warn($"[AutoUpdate] Install failed: {e.Message}");
+            // Both would load next launch; the duplicate check would settle it, but "false" means as it was.
+            log.Warn($"[AutoUpdate] Failed to rename {Path.GetFileName(pluginPath)} to .bak ({e.Message}); removing the new plugin again");
+            TryDelete(target);
             return false;
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// <see cref="InstallPlugin"/> when the new plugin has the running one's name: a loaded module
+    /// can be renamed but not replaced, so the running one goes to ".bak" first, and comes back when
+    /// the new one cannot be moved in.
+    /// </summary>
+    private bool ReplaceRunning(string staged, string target, string backup)
+    {
+        try
+        {
+            if (File.Exists(backup))
+            {
+                File.Delete(backup);
+            }
+
+            File.Move(pluginPath, backup);
+        }
+        catch (Exception e)
+        {
+            log.Warn($"[AutoUpdate] Install failed: {e.Message}");
+            TryDelete(staged);
+            return false;
+        }
+
+        try
+        {
+            File.Move(staged, target, overwrite: true);
+            return true;
+        }
+        catch (Exception e)
+        {
+            log.Warn($"[AutoUpdate] Failed to move new DLL into place ({e.Message}), restoring original asi file");
+            try
+            {
+                File.Move(backup, pluginPath);
+            }
+            catch (Exception restore)
+            {
+                log.Error($"[AutoUpdate] Could not restore {Path.GetFileName(pluginPath)} from .bak ({restore.Message})");
+            }
+
+            TryDelete(staged);
+            return false;
+        }
+    }
+
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+        }
     }
 }

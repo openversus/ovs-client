@@ -270,6 +270,45 @@ public class PakUpdateTests : IDisposable
         Assert.Equal(StartupUpdate.Outcome.UpToDate, Startup(http, told, []).Run());
         Assert.Empty(told);
         Assert.Equal([VersionUrl], http.Requested);
+        Assert.DoesNotContain(_log.Lines, l => l.Contains("Not using this release's paks"));
+    }
+
+    [Fact]
+    public void AResponseWithoutAFileListIsAReleaseWithoutPaks()
+    {
+        var http = new ServedFiles { [VersionUrl] = Bytes($"{{\"latest_version\":\"{OvsVersion.Current}\",\"is_latest\":true}}") };
+
+        Assert.Equal(StartupUpdate.Outcome.UpToDate, Startup(http, [], []).Run());
+        Assert.DoesNotContain(_log.Lines, l => l.Contains("Not using this release's paks"));
+    }
+
+    [Fact]
+    public void ASizeSentAsAStringIsRead()
+    {
+        byte[] pak = Bytes("endgame content");
+        var entry = Entry("OVS_P.pak", pak);
+        string json = Encoding.UTF8.GetString(VersionJson(entry)).Replace($"\"size\":{pak.Length}", $"\"size\":\"{pak.Length}\"");
+        var http = new ServedFiles { [VersionUrl] = Bytes(json), [entry.DownloadUrl!] = pak };
+
+        Assert.Equal(StartupUpdate.Outcome.Installed, Startup(http, [], []).Run());
+        Assert.Equal(pak, File.ReadAllBytes(Path.Combine(_paks, "OVS_P.pak")));
+    }
+
+    [Theory]
+    [InlineData("\"files\":{\"name\":\"OVS_P.pak\"}", "could not be converted")]
+    [InlineData("\"files\":[\"OVS_P.pak\"]", "could not be converted")]
+    [InlineData("\"files\":[{\"name\":\"OVS_P.pak\",\"kind\":\"paks\",\"size\":\"12 KB\"}]", "\"12 KB\"")]
+    [InlineData("\"files\":[{\"name\":\"OVS_P.pak\",\"kind\":\"paks\",\"size\":12.5}]", "whole number")]
+    public void AFileListThatCannotBeReadIsReportedRatherThanTakenForNoPaks(string files, string reason)
+    {
+        var told = new List<string>();
+        var http = new ServedFiles { [VersionUrl] = Bytes($"{{\"latest_version\":\"{OvsVersion.Current}\",\"is_latest\":true,{files}}}") };
+
+        Assert.Equal(StartupUpdate.Outcome.UpToDate, Startup(http, told, []).Run());
+        Assert.Empty(told);
+        string warning = Assert.Single(_log.Lines, l => l.Contains("Not using this release's paks"));
+        Assert.Contains("its file list cannot be read", warning);
+        Assert.Contains(reason, warning);
     }
 
     [Fact]
@@ -327,6 +366,17 @@ public class PakUpdateTests : IDisposable
     }
 
     // The backup manifest: an install the process dies in is put back on the next launch
+
+    [Fact]
+    public void AnUnfinishedManifestWithoutFilesIsReportedNotThrown()
+    {
+        var updater = Updater(new ServedFiles());
+        Directory.CreateDirectory(Backup);
+        File.WriteAllText(updater.ManifestPath, "{\"state\":\"installing\",\"release\":\"x\",\"started\":\"y\"}");
+
+        Assert.False(updater.Recover());
+        Assert.Contains(_log.Lines, l => l.Contains("lists no files"));
+    }
 
     private PakInstallManifest ReadManifest(PakUpdate updater) =>
         System.Text.Json.JsonSerializer.Deserialize(File.ReadAllBytes(updater.ManifestPath), OvsJson.Default.PakInstallManifest)!;

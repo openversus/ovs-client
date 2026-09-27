@@ -18,12 +18,15 @@ public sealed unsafe class UpdateProgressWindow : IDisposable
     private readonly long _totalBytes;
     private long _doneBytes;
     private int _shownPermille = -1;
+    // Set on the window's thread and read on the downloading one, which may give up waiting for
+    // the window before it is made; Volatile and Interlocked keep both threads' view current.
     private uint _threadId;
+    private bool _closed;
     private nint _status, _bar;
 
     private UpdateProgressWindow(long totalBytes) => _totalBytes = Math.Max(1, totalBytes);
 
-    /// <summary>Opens the window for a download of <paramref name="totalBytes"/>; returns once it is up (or has failed to come up).</summary>
+    /// <summary>Opens the window for a download of <paramref name="totalBytes"/>; returns once it is up, has failed to come up, or five seconds have passed.</summary>
     public static UpdateProgressWindow Open(long totalBytes, string heading)
     {
         var window = new UpdateProgressWindow(totalBytes);
@@ -43,29 +46,37 @@ public sealed unsafe class UpdateProgressWindow : IDisposable
     {
         _doneBytes += bytes;
         int permille = (int)(Math.Clamp(_doneBytes, 0, _totalBytes) * 1000 / _totalBytes);
-        if (_bar != 0 && permille != _shownPermille)
+        nint bar = Volatile.Read(ref _bar);
+        if (bar != 0 && permille != _shownPermille)
         {
             _shownPermille = permille;
-            User32.SendMessage(_bar, User32.PBM_SETPOS, (nuint)permille, 0);
+            User32.SendMessage(bar, User32.PBM_SETPOS, (nuint)permille, 0);
         }
     }
 
     /// <summary>Shows <paramref name="text"/> under the heading.</summary>
     public void SetStatus(string text)
     {
-        if (_status != 0)
+        nint status = Volatile.Read(ref _status);
+        if (status != 0)
         {
-            User32.SetWindowText(_status, text);
+            User32.SetWindowText(status, text);
         }
     }
 
-    /// <summary>Closes the window.</summary>
+    /// <summary>
+    /// Closes the window, whenever it is called: a window still being made when <see cref="Open"/>
+    /// stopped waiting sees the flag once it is up and closes itself, as it has no close button.
+    /// </summary>
     public void Dispose()
     {
-        if (_threadId != 0)
+        // The flag is set before the thread id is read, and the window's thread publishes its id
+        // before reading the flag, so at least one of the two sees the other.
+        Volatile.Write(ref _closed, true);
+        uint thread = Interlocked.Exchange(ref _threadId, 0);
+        if (thread != 0)
         {
-            User32.PostThreadMessage(_threadId, User32.WM_QUIT, 0, 0);
-            _threadId = 0;
+            User32.PostThreadMessage(thread, User32.WM_QUIT, 0, 0);
         }
     }
 
@@ -74,10 +85,14 @@ public sealed unsafe class UpdateProgressWindow : IDisposable
         nint window = 0;
         try
         {
-            window = Create(heading);
+            if (!Volatile.Read(ref _closed))
+            {
+                window = Create(heading);
+            }
+
             if (window != 0)
             {
-                _threadId = Kernel32.GetCurrentThreadId();
+                Interlocked.Exchange(ref _threadId, Kernel32.GetCurrentThreadId());
             }
         }
         finally
@@ -87,6 +102,13 @@ public sealed unsafe class UpdateProgressWindow : IDisposable
 
         if (window == 0)
         {
+            return;
+        }
+
+        if (Volatile.Read(ref _closed))
+        {
+            // Closed while it was being made, maybe before its thread id was there to be told.
+            User32.DestroyWindow(window);
             return;
         }
 

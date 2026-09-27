@@ -30,7 +30,7 @@ public sealed class PakUpdate(string paksDirectory, string stagingDirectory, str
     /// <summary>Tries per file before a download counts as failed.</summary>
     public const int Attempts = 3;
 
-    /// <summary>The account paks may download from: <paramref name="releaseOwner"/> when it is a plain GitHub name, else <see cref="DefaultOwner"/>.</summary>
+    /// <summary>The account paks may download from: the one the constructor was given when it is a plain GitHub name, else <see cref="DefaultOwner"/>.</summary>
     public string ReleaseOwner { get; } = releaseOwner.Length is > 0 and <= 39 && releaseOwner.All(c => char.IsAsciiLetterOrDigit(c) || c == '-') ? releaseOwner : DefaultOwner;
 
     /// <summary>The wait between tries; tests replace it.</summary>
@@ -199,7 +199,7 @@ public sealed class PakUpdate(string paksDirectory, string stagingDirectory, str
     }
 
     /// <summary>
-    /// The files whose copy in Content/Paks is missing, a different size, or a different SHA-256.
+    /// The files whose copy in the pak folder (Saved\Paks) is missing, a different size, or a different SHA-256.
     /// A local file's hash is taken from the cache while its size and modified time are unchanged.
     /// </summary>
     public List<UpdateFile> Needed(IReadOnlyList<UpdateFile> paks)
@@ -453,6 +453,12 @@ public sealed class PakUpdate(string paksDirectory, string stagingDirectory, str
         if (manifest?.State != Installing)
         {
             return true;
+        }
+
+        if (manifest.Files == null)
+        {
+            log.Error($"[Paks] The install manifest {ManifestPath} lists no files; the release check will repair the paks");
+            return false;
         }
 
         log.Warn($"[Paks] The install of {manifest.Release} started {manifest.Started} did not finish; putting the previous files back");

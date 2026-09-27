@@ -206,11 +206,26 @@ public sealed class Client
 
         Log.Info($"host {Environment.ProcessPath}, pid {Environment.ProcessId}, {Environment.OSVersion}{(Wine.IsWine ? $", Wine {Wine.Version}" : "")}");
 
+        // The install id is created before the first request to the server, the startup check
+        // below, so every call carries it. "" when it cannot be stored, and the check still runs.
+        string installId = State.LoadOrCreateInstallId();
+        ServerIdentity.InstallId = installId;
+        Log.Info($"[OVS] Install identity {(installId.Length > 0 ? "verified" : "unavailable")}");
+
         // The required update runs before anything is patched: the engine has not opened its
         // paks yet, so they can be replaced. When it installs something it closes the game.
+        // Nothing it throws may stop the hooks below; the background check then runs as it
+        // does when the server gives no answer.
         if (isGame && !string.IsNullOrEmpty(Settings.ServerUrl))
         {
-            _startupCheckAnswered = RunStartupUpdate() != StartupUpdate.Outcome.NoAnswer;
+            try
+            {
+                _startupCheckAnswered = RunStartupUpdate() != StartupUpdate.Outcome.NoAnswer;
+            }
+            catch (Exception e)
+            {
+                Log.Error($"[Update] The startup check failed: {e}");
+            }
         }
 
         if (Settings.EnableKeyboardHotkeys && KeyboardHook.Install(Log, _module))
@@ -233,12 +248,10 @@ public sealed class Client
 
         // Collect Steam/Epic identity, the install id and the hardware fingerprint. They make
         // accounts "sticky", so nobody resets their name and perks when their IP changes or they
-        // switch to Proton. The install id is created here, before any background work, so the
-        // first notification poll and registration already carry it.
+        // switch to Proton.
         var runtime = Runtime.Detect();
-        Env = new EnvInfo(runtime) { InstallId = State.LoadOrCreateInstallId() };
-        ServerIdentity.InstallId = Env.InstallId;
-        Log.Info($"[OVS] Runtime: {Runtime.Name(runtime)}; install identity {(Env.InstallId.Length > 0 ? "verified" : "unavailable")}; hardware fingerprint {(Env.HardwareId.Length > 0 ? "v2" : "none")}");
+        Env = new EnvInfo(runtime) { InstallId = installId };
+        Log.Info($"[OVS] Runtime: {Runtime.Name(runtime)}; hardware fingerprint {(Env.HardwareId.Length > 0 ? "v2" : "none")}");
 
         ApplyHooks();
         GameThread.Attach(Log);
@@ -249,9 +262,10 @@ public sealed class Client
     }
 
     /// <summary>
-    /// <see cref="StartupUpdate"/> for this install: paks in the game's Content/Paks (skipped when
-    /// the game folder is not where the plugin expects it), staging, backup and the hash cache in
-    /// the plugin's folder, and the plugin updater's own checks for a newer .asi.
+    /// <see cref="StartupUpdate"/> for this install: paks in %LOCALAPPDATA%\MultiVersus\Saved\Paks
+    /// (skipped when there is no local AppData folder), staging, backup and the hash cache beside it
+    /// in Saved\OpenVersus, hand-installed paks moved out of the game's Content\Paks, and the plugin
+    /// updater's own checks for a newer .asi.
     /// </summary>
     private StartupUpdate.Outcome RunStartupUpdate()
     {
