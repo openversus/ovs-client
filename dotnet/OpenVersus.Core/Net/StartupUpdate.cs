@@ -113,7 +113,7 @@ public sealed class StartupUpdate(string serverUrl, bool autoUpdate, IHttpTransp
         }
 
         long total = due.Sum(f => f.Size);
-        log.Info($"[Update] Downloading {(pluginDue ? $"OpenVersus {info.LatestVersion}" : "")}{(pluginDue && due.Count > 0 ? " and " : "")}{(due.Count > 0 ? $"{due.Count} pak file(s), {total / (1024 * 1024)} MB" : "")}");
+        log.Info($"[Update] Downloading {(pluginDue ? $"OpenVersus {info.LatestVersion}" : "")}{(pluginDue && due.Count > 0 ? " and " : "")}{(due.Count > 0 ? $"{due.Count} pak file(s), {(total >= 1024 * 1024 ? $"{total / (1024 * 1024)} MB" : $"{Math.Max(1, total / 1024)} KB")}" : "")}");
         using var window = OpenWindow(total);
 
         byte[]? plugin = null;

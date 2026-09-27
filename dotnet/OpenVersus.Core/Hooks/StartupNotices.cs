@@ -135,7 +135,7 @@ public static unsafe class StartupNotices
         // Likewise an attempt of its own for what the last update installed.
         if (s_toastDone && !toastThisAttempt && s_problemDone && !s_updatedDone && s_updated != null)
         {
-            nint shown = GameUi.ShowNotification("OpenVersus updated", s_updated, 10.0f, setWidgetClass: true);
+            nint shown = GameUi.ShowNotification("OpenVersus Updated", s_updated, 10.0f, setWidgetClass: true);
             s_log?.Debug($"startup notices: update banner request returned 0x{shown:X}");
             s_updatedDone = shown != 0;
             if (s_updatedDone)
