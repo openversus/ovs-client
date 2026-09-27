@@ -32,6 +32,25 @@ public sealed record UpdateFile(
 /// <param name="Files">files: every asset of the release the updater may install.</param>
 public sealed record ReleaseFiles(List<UpdateFile>? Files);
 
+/// <summary>
+/// manifest.json in the pak backup folder: what one pak install moved there. Written to disk
+/// before the first file moves, so an install the process did not live to finish can be put
+/// back and checked on the next launch.
+/// </summary>
+/// <param name="State">"installing" until every file is in place, then "complete"; "rolledback" once put back.</param>
+/// <param name="Release">The release being installed.</param>
+/// <param name="Started">When the install began, UTC, ISO 8601.</param>
+/// <param name="Files">Every file the install touches, in the order it moves them.</param>
+public sealed record PakInstallManifest(string State, string Release, string Started, List<PakInstallEntry> Files);
+
+/// <summary>One file of a <see cref="PakInstallManifest"/>.</summary>
+/// <param name="Name">The pak file's name, in both the pak folder and the backup folder.</param>
+/// <param name="HadOriginal">Whether a copy was installed before, which then sits in the backup folder.</param>
+/// <param name="OldSha256">That copy's SHA-256, lowercase hex; null when there was none.</param>
+/// <param name="OldSize">That copy's size in bytes; 0 when there was none.</param>
+/// <param name="NewSha256">The release file's SHA-256.</param>
+public sealed record PakInstallEntry(string Name, bool HadOriginal, string? OldSha256, long OldSize, string NewSha256);
+
 /// <summary>A string that takes a number or a boolean as its text, and an object, an array or null as null.</summary>
 public sealed class LenientStringConverter : JsonConverter<string?>
 {
@@ -128,6 +147,7 @@ public sealed record IdentifyResponse(
 [JsonSerializable(typeof(IdentityBody))]
 [JsonSerializable(typeof(IdentifyResponse))]
 [JsonSerializable(typeof(ReleaseFiles))]
+[JsonSerializable(typeof(PakInstallManifest))]
 internal sealed partial class OvsJson : JsonSerializerContext
 {
 }

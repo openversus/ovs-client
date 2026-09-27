@@ -326,6 +326,113 @@ public class PakUpdateTests : IDisposable
         Assert.Contains(_log.Lines, l => l.Contains("Not using this release's paks"));
     }
 
+    // The backup manifest: an install the process dies in is put back on the next launch
+
+    private PakInstallManifest ReadManifest(PakUpdate updater) =>
+        System.Text.Json.JsonSerializer.Deserialize(File.ReadAllBytes(updater.ManifestPath), OvsJson.Default.PakInstallManifest)!;
+
+    /// <summary>OVS_A and OVS_B installed; the release changes both and adds OVS_C. Returns the release files, already downloaded.</summary>
+    private List<UpdateFile> StageABC(out ServedFiles http)
+    {
+        File.WriteAllBytes(Path.Combine(_paks, "OVS_A.pak"), Bytes("old a"));
+        File.WriteAllBytes(Path.Combine(_paks, "OVS_B.pak"), Bytes("old b"));
+        byte[] a = Bytes("new a"), b = Bytes("new b"), c = Bytes("new c");
+        var files = new List<UpdateFile> { Entry("OVS_A.pak", a), Entry("OVS_B.pak", b), Entry("OVS_C.pak", c) };
+        http = new ServedFiles { [Release + "OVS_A.pak"] = a, [Release + "OVS_B.pak"] = b, [Release + "OVS_C.pak"] = c };
+        Assert.True(Updater(http).Download(files));
+        return files;
+    }
+
+    [Fact]
+    public void AnInstallLeavesAManifestOfWhatItReplaced()
+    {
+        var files = StageABC(out var http);
+        var updater = Updater(http);
+
+        Assert.True(updater.Install(files, "2026.09.27.1"));
+        var manifest = ReadManifest(updater);
+        Assert.Equal("complete", manifest.State);
+        Assert.Equal("2026.09.27.1", manifest.Release);
+        Assert.Equal(["OVS_A.pak", "OVS_B.pak", "OVS_C.pak"], manifest.Files.Select(f => f.Name));
+        Assert.Equal(Sha(Bytes("old a")), manifest.Files[0].OldSha256);
+        Assert.Equal(5, manifest.Files[0].OldSize);
+        Assert.False(manifest.Files[2].HadOriginal);
+        Assert.Null(manifest.Files[2].OldSha256);
+        Assert.Equal("old a", File.ReadAllText(Path.Combine(Backup, "OVS_A.pak")));
+        Assert.False(File.Exists(updater.ManifestPath + ".tmp"));
+
+        // A finished install is not undone.
+        Assert.True(Updater(http).Recover());
+        Assert.Equal("new a", File.ReadAllText(Path.Combine(_paks, "OVS_A.pak")));
+    }
+
+    [Fact]
+    public void AnInstallTheProcessDiesInIsPutBackOnTheNextLaunch()
+    {
+        var files = StageABC(out var http);
+        var crashing = new PakUpdate(_paks, Staging, Backup, Path.Combine(_plugin, "PakHashes.txt"), http, _log)
+        {
+            AfterFileInstalled = name =>
+            {
+                if (name == "OVS_B.pak")
+                {
+                    throw new InvalidOperationException("process killed");
+                }
+            },
+        };
+
+        Assert.Throws<InvalidOperationException>(() => crashing.Install(files, "2026.09.27.1"));
+        Assert.Equal("installing", ReadManifest(crashing).State);
+        Assert.Equal("new b", File.ReadAllText(Path.Combine(_paks, "OVS_B.pak")));
+
+        // The next launch, a new process: only the manifest on disk says what happened.
+        var next = Updater(http);
+        Assert.True(next.Recover());
+        Assert.Equal("old a", File.ReadAllText(Path.Combine(_paks, "OVS_A.pak")));
+        Assert.Equal("old b", File.ReadAllText(Path.Combine(_paks, "OVS_B.pak")));
+        Assert.False(File.Exists(Path.Combine(_paks, "OVS_C.pak")));
+        Assert.Equal("rolledback", ReadManifest(next).State);
+        Assert.True(next.Recover()); // nothing left to do
+    }
+
+    [Fact]
+    public void OnlyAVerifiedBackupIsRestored()
+    {
+        var files = StageABC(out var http);
+        var crashing = new PakUpdate(_paks, Staging, Backup, Path.Combine(_plugin, "PakHashes.txt"), http, _log)
+        {
+            AfterFileInstalled = name => throw new InvalidOperationException("process killed"),
+        };
+        Assert.Throws<InvalidOperationException>(() => crashing.Install(files));
+        File.WriteAllText(Path.Combine(Backup, "OVS_A.pak"), "old A"); // same size, different bytes
+
+        var next = Updater(http);
+        Assert.False(next.Recover());
+        Assert.Equal("new a", File.ReadAllText(Path.Combine(_paks, "OVS_A.pak")));
+        Assert.Equal("old b", File.ReadAllText(Path.Combine(_paks, "OVS_B.pak"))); // never moved
+        Assert.Equal("rollback-failed", ReadManifest(next).State);
+        Assert.Contains(_log.Lines, l => l.Contains("OVS_A.pak: no copy matching the recorded SHA-256"));
+
+        // The release check then brings the pak folder to the release: OVS_A is already the
+        // release's copy, so only the rest is downloaded.
+        Assert.Equal(["OVS_B.pak", "OVS_C.pak"], next.Needed(files).Select(f => f.Name));
+    }
+
+    [Fact]
+    public void ADeadInstallIsPutBackEvenWhenTheServerIsDown()
+    {
+        var files = StageABC(out var http);
+        var crashing = new PakUpdate(_paks, Staging, Backup, Path.Combine(_plugin, "PakHashes.txt"), http, _log)
+        {
+            AfterFileInstalled = name => throw new InvalidOperationException("process killed"),
+        };
+        Assert.Throws<InvalidOperationException>(() => crashing.Install(files));
+        Assert.Equal("new a", File.ReadAllText(Path.Combine(_paks, "OVS_A.pak")));
+
+        Assert.Equal(StartupUpdate.Outcome.NoAnswer, Startup(new ServedFiles(), [], []).Run());
+        Assert.Equal("old a", File.ReadAllText(Path.Combine(_paks, "OVS_A.pak")));
+    }
+
     // Hand installs in the game's Content\Paks, which outranks Saved\Paks
 
     [Fact]

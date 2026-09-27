@@ -63,6 +63,10 @@ public sealed class StartupUpdate(string serverUrl, bool autoUpdate, IHttpTransp
     /// <summary>Checks, and when anything is due, updates and closes the game.</summary>
     public Outcome Run()
     {
+        // First, whatever the server says: an install the last launch did not live to finish is
+        // put back from the backup folder's manifest, so the game never starts on a half-swapped set.
+        paks?.Recover();
+
         var url = Urls.Join(serverUrl, $"/ovs/client-version?v={Uri.EscapeDataString(OvsVersion.Current)}");
         if (url == null)
         {
@@ -126,7 +130,7 @@ public sealed class StartupUpdate(string serverUrl, bool autoUpdate, IHttpTransp
         }
 
         window?.SetStatus("Downloads verified. Installing the update...");
-        if (due.Count > 0 && !paks!.Install(due))
+        if (due.Count > 0 && !paks!.Install(due, info.LatestVersion ?? ""))
         {
             window?.Dispose();
             return Close("OpenVersus downloaded the update, but Windows would not let one of the game files be replaced. The previous files were put back.\n\nMultiVersus will now close. Make sure no other copy of the game is running, then launch it again.", "Update not installed");

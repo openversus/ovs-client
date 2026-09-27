@@ -55,7 +55,7 @@ public static unsafe class StartupNotices
     {
         if (++s_attempts > MaxAttempts)
         {
-            s_log?.Warn($"startup notices given up after {MaxAttempts} attempts (dialog {(s_dialogDone ? "shown" : "not shown")}, toast {(s_toastDone ? "shown" : "not shown")}, settings toast {(s_problemDone ? "shown or not needed" : "not shown")}, update toast {(s_updatedDone ? "shown or not needed" : "not shown")})");
+            s_log?.Warn($"startup notices given up after {MaxAttempts} attempts (dialog {(s_dialogDone ? "shown" : "not shown")}, toast {(s_toastDone ? "shown" : "not shown")}, settings toast {(s_problemDone ? "shown or not needed" : "not shown")}, update banner {(s_updatedDone ? "shown or not needed" : "not shown")})");
             return true;
         }
         bool verbose = s_attempts <= 5 || s_attempts % 30 == 0;
@@ -136,11 +136,11 @@ public static unsafe class StartupNotices
         if (s_toastDone && !toastThisAttempt && s_problemDone && !s_updatedDone && s_updated != null)
         {
             nint shown = GameUi.ShowNotification("OpenVersus updated", s_updated, 10.0f, setWidgetClass: true);
-            s_log?.Debug($"startup notices: update toast request returned 0x{shown:X}");
+            s_log?.Debug($"startup notices: update banner request returned 0x{shown:X}");
             s_updatedDone = shown != 0;
             if (s_updatedDone)
             {
-                s_log?.Info($"startup notices: update toast shown: {s_updated}");
+                s_log?.Info($"startup notices: update banner shown: {s_updated}");
             }
 
             return false;

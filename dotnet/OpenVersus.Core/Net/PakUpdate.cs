@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Security.Cryptography;
+using System.Text.Json;
 using Microsoft.Extensions.Logging;
 
 namespace OpenVersus.Net;
@@ -327,57 +328,89 @@ public sealed class PakUpdate(string paksDirectory, string stagingDirectory, str
         return true;
     }
 
+    /// <summary>manifest.json in the backup folder: what the last install moved there (<see cref="PakInstallManifest"/>).</summary>
+    public string ManifestPath => Path.Combine(backupDirectory, "manifest.json");
+
+    /// <summary>Tests only: runs after each file is in place; throwing here stands in for the process dying mid-install.</summary>
+    internal Action<string>? AfterFileInstalled { get; init; }
+
     /// <summary>
-    /// Moves every downloaded file into Content/Paks, the file it replaces going to the backup
-    /// folder first. When any move fails, everything already moved is put back and false is
-    /// returned. On success the staging folder is removed and the hash cache learns the new files.
+    /// Moves every downloaded file into the pak folder, the copy it replaces going to the backup
+    /// folder first. The backup folder holds this install only: it is emptied, then
+    /// <see cref="ManifestPath"/> is written to disk (flushed, then renamed into place) listing every
+    /// file with the SHA-256 of the copy it replaces, all before the first file moves. So when the
+    /// process dies part way, <see cref="Recover"/> can put the previous files back on the next
+    /// launch and check each one. When a move fails, the same rollback runs at once and false is
+    /// returned. On success the manifest is marked complete, the staging folder is removed and the
+    /// hash cache learns the new files.
     /// </summary>
-    public bool Install(IReadOnlyList<UpdateFile> files)
+    public bool Install(IReadOnlyList<UpdateFile> files, string release = "")
     {
-        var done = new List<(string Target, string Backup, bool HadOriginal)>();
+        PakInstallManifest manifest;
         try
         {
+            if (Directory.Exists(backupDirectory))
+            {
+                Directory.Delete(backupDirectory, recursive: true);
+            }
+
             Directory.CreateDirectory(backupDirectory);
             Directory.CreateDirectory(paksDirectory);
+            var known = HashCache.Load(hashCachePath);
+            var entries = new List<PakInstallEntry>();
             foreach (var file in files)
             {
-                string target = Path.Combine(paksDirectory, file.Name!);
-                string backup = Path.Combine(backupDirectory, file.Name!);
-                bool hadOriginal = File.Exists(target);
-                if (hadOriginal)
+                var old = new FileInfo(Path.Combine(paksDirectory, file.Name!));
+                string? oldSha = null;
+                if (old.Exists)
                 {
-                    File.Move(target, backup, overwrite: true);
+                    oldSha = known.Find(file.Name!, old.Length, old.LastWriteTimeUtc.Ticks) ?? HashFile(old.FullName)
+                        ?? throw new IOException($"{file.Name} cannot be read to record it");
                 }
 
-                done.Add((target, backup, hadOriginal));
-                File.Move(Path.Combine(stagingDirectory, file.Name!), target);
+                entries.Add(new PakInstallEntry(file.Name!, old.Exists, oldSha, old.Exists ? old.Length : 0, file.Sha256!.ToLowerInvariant()));
+            }
+
+            manifest = new PakInstallManifest(Installing, release, DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture), entries);
+            WriteManifest(manifest);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            log.Error($"[Paks] Cannot prepare the backup folder {backupDirectory} ({e.Message}); nothing was changed");
+            DeleteStaging();
+            return false;
+        }
+
+        try
+        {
+            foreach (var entry in manifest.Files)
+            {
+                string target = Path.Combine(paksDirectory, entry.Name);
+                if (entry.HadOriginal)
+                {
+                    File.Move(target, Path.Combine(backupDirectory, entry.Name));
+                }
+
+                File.Move(Path.Combine(stagingDirectory, entry.Name), target);
+                AfterFileInstalled?.Invoke(entry.Name);
             }
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             log.Error($"[Paks] Installing failed ({e.Message}); putting the previous files back");
-            for (int i = done.Count - 1; i >= 0; i--)
-            {
-                var (target, backup, hadOriginal) = done[i];
-                try
-                {
-                    if (hadOriginal)
-                    {
-                        File.Move(backup, target, overwrite: true);
-                    }
-                    else if (File.Exists(target))
-                    {
-                        File.Delete(target);
-                    }
-                }
-                catch (Exception restore) when (restore is IOException or UnauthorizedAccessException)
-                {
-                    log.Error($"[Paks] Could not put back {Path.GetFileName(target)} ({restore.Message}); the previous copy is in {backupDirectory}");
-                }
-            }
-
+            RollBack(manifest);
             DeleteStaging();
             return false;
+        }
+
+        try
+        {
+            WriteManifest(manifest with { State = Complete });
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // The files are all in place; the next launch would put them back and download again.
+            log.Error($"[Paks] Installed, but the manifest could not be marked complete ({e.Message})");
         }
 
         var cache = HashCache.Load(hashCachePath);
@@ -389,8 +422,138 @@ public sealed class PakUpdate(string paksDirectory, string stagingDirectory, str
 
         cache.Save(hashCachePath, log);
         DeleteStaging();
-        log.Info($"[Paks] Installed {string.Join(", ", files.Select(f => f.Name))}; replaced files are in {backupDirectory}");
+        int replaced = manifest.Files.Count(f => f.HadOriginal);
+        log.Info($"[Paks] Installed {string.Join(", ", files.Select(f => f.Name))}{(replaced > 0 ? $"; the {replaced} replaced file(s) are in {backupDirectory}" : "")}");
         return true;
+    }
+
+    /// <summary>
+    /// Run before anything else at launch: when <see cref="ManifestPath"/> says an install began
+    /// and never finished, puts the previous files back (<see cref="RollBack"/>). True when there was
+    /// nothing to do or everything was put back.
+    /// </summary>
+    public bool Recover()
+    {
+        PakInstallManifest? manifest;
+        try
+        {
+            if (!File.Exists(ManifestPath))
+            {
+                return true;
+            }
+
+            manifest = JsonSerializer.Deserialize(File.ReadAllBytes(ManifestPath), OvsJson.Default.PakInstallManifest);
+        }
+        catch (Exception e) when (e is JsonException or IOException or UnauthorizedAccessException)
+        {
+            log.Error($"[Paks] The install manifest {ManifestPath} cannot be read ({e.Message}); the release check will repair the paks");
+            return false;
+        }
+
+        if (manifest?.State != Installing)
+        {
+            return true;
+        }
+
+        log.Warn($"[Paks] The install of {manifest.Release} started {manifest.Started} did not finish; putting the previous files back");
+        return RollBack(manifest);
+    }
+
+    /// <summary>
+    /// Puts back what <paramref name="manifest"/> recorded, last file first. A file that was new is
+    /// removed. A file that was replaced is left when the pak folder still holds the recorded copy
+    /// (its move never happened), else restored from the backup folder, but only a copy whose size
+    /// and SHA-256 match the manifest. The manifest is then marked rolled back, or rollback-failed
+    /// when some file had no verified copy; the release check downloads such a file again.
+    /// </summary>
+    private bool RollBack(PakInstallManifest manifest)
+    {
+        bool ok = true;
+        for (int i = manifest.Files.Count - 1; i >= 0; i--)
+        {
+            var entry = manifest.Files[i];
+            if (!IsPakName(entry.Name))
+            {
+                log.Error($"[Paks] The install manifest names \"{entry.Name}\", which is not a pak; skipping it");
+                ok = false;
+                continue;
+            }
+
+            string target = Path.Combine(paksDirectory, entry.Name);
+            string backup = Path.Combine(backupDirectory, entry.Name);
+            try
+            {
+                if (!entry.HadOriginal)
+                {
+                    if (File.Exists(target))
+                    {
+                        File.Delete(target);
+                        log.Info($"[Paks] {entry.Name}: removed (it was new in this install)");
+                    }
+                }
+                else if (Matches(target, entry.OldSize, entry.OldSha256))
+                {
+                    log.Info($"[Paks] {entry.Name}: the previous copy is still in place");
+                }
+                else if (Matches(backup, entry.OldSize, entry.OldSha256))
+                {
+                    File.Move(backup, target, overwrite: true);
+                    log.Info($"[Paks] {entry.Name}: previous copy restored and verified");
+                }
+                else
+                {
+                    log.Error($"[Paks] {entry.Name}: no copy matching the recorded SHA-256 {entry.OldSha256} in {paksDirectory} or {backupDirectory}");
+                    ok = false;
+                }
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                log.Error($"[Paks] {entry.Name}: could not be put back ({e.Message})");
+                ok = false;
+            }
+        }
+
+        try
+        {
+            WriteManifest(manifest with { State = ok ? RolledBack : RollbackFailed });
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            log.Error($"[Paks] The install manifest could not be updated after the rollback ({e.Message})");
+        }
+
+        if (ok)
+        {
+            log.Info("[Paks] Rollback complete: the previous paks are back");
+        }
+        else
+        {
+            log.Error("[Paks] Rollback incomplete; the release check will download what is missing");
+        }
+
+        return ok;
+    }
+
+    private const string Installing = "installing", Complete = "complete", RolledBack = "rolledback", RollbackFailed = "rollback-failed";
+
+    private static bool Matches(string path, long size, string? sha256)
+    {
+        var info = new FileInfo(path);
+        return info.Exists && info.Length == size && sha256 != null && string.Equals(HashFile(path), sha256, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Writes the manifest so that it is on disk before anything moves: to a temporary file written through and flushed, then renamed over the old one.</summary>
+    private void WriteManifest(PakInstallManifest manifest)
+    {
+        byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(manifest, OvsJson.Default.PakInstallManifest);
+        string temp = ManifestPath + ".tmp";
+        using (var stream = new FileStream(temp, FileMode.Create, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))
+        {
+            stream.Write(bytes);
+            stream.Flush(flushToDisk: true);
+        }
+
+        File.Move(temp, ManifestPath, overwrite: true);
     }
 
     private void DeleteStaging()
