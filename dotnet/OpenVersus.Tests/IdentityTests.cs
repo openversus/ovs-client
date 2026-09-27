@@ -324,6 +324,62 @@ public class IdentityTests : IDisposable
     }
 
     [Fact]
+    public void ASteamLaunchSendsTheSteamIdInItsOnlyRegistration()
+    {
+        var http = new ScriptedPosts(Json($"{{\"ok\":true,\"token\":\"{Token}\"}}"));
+        var env = new EnvInfo(RuntimeEnvironment.Proton) { GameId = "1818750", AppId = "1818750" };
+        int resolved = 0;
+
+        IdentityRegistration.Run(env, "http://ovs.test", http, new ServerIdentity(), new ListLogger(), resolveSteamId: () =>
+        {
+            Assert.Empty(http.Posts);
+            resolved++;
+            return "76561197960573826";
+        });
+
+        Assert.Equal(1, resolved);
+        Assert.Contains("\"steamId\":\"76561197960573826\"", Assert.Single(http.Posts).Body);
+    }
+
+    [Fact]
+    public void ASteamLaunchWithoutASteamIdRegistersOnceAndWaitsOnce()
+    {
+        var http = new ScriptedPosts(Json($"{{\"ok\":true,\"token\":\"{Token}\"}}"));
+        var env = new EnvInfo(RuntimeEnvironment.Proton) { AppId = "1818750" };
+        int resolved = 0;
+
+        IdentityRegistration.Run(env, "http://ovs.test", http, new ServerIdentity(), new ListLogger(), resolveSteamId: () =>
+        {
+            resolved++;
+            return "";
+        });
+
+        Assert.Equal(1, resolved);
+        Assert.Contains("\"steamId\":\"Unknown\"", Assert.Single(http.Posts).Body);
+    }
+
+    [Theory]
+    [InlineData("76561197960573826", 2)]
+    [InlineData("", 1)]
+    public void ALaunchNotThroughSteamRegistersAtOnce(string steamId, int posts)
+    {
+        var http = new ScriptedPosts(Json($"{{\"ok\":true,\"token\":\"{Token}\"}}"), Json($"{{\"ok\":true,\"token\":\"{Token}\"}}"));
+        var env = new EnvInfo(RuntimeEnvironment.Proton) { GameId = "Unknown", AppId = "" };
+
+        IdentityRegistration.Run(env, "http://ovs.test", http, new ServerIdentity(), new ListLogger(), resolveSteamId: () =>
+        {
+            Assert.Single(http.Posts);
+            return steamId;
+        });
+
+        Assert.Equal(posts, http.Posts.Count);
+        if (posts == 2)
+        {
+            Assert.Contains($"\"steamId\":\"{steamId}\"", http.Posts[1].Body);
+        }
+    }
+
+    [Fact]
     public void TheInstallIdIsNeverLogged()
     {
         var http = new ScriptedPosts(Json($"{{\"ok\":true,\"token\":\"{Token}\"}}"));

@@ -23,12 +23,17 @@ public static class IdentityRegistration
     public static IdentifyResponse? ParseResponse(string json) => OvsJson.TryParse(json, OvsJson.Default.IdentifyResponse, out _);
 
     /// <summary>
-    /// Registers what is known now, retrying while no answer arrives, so the server has the install
-    /// id before the game logs in. Then, when the environment lacked the Steam id, resolves it
-    /// (which can take up to a minute) and registers again with it. The token each registration
-    /// returns goes to <paramref name="identity"/>. Failures are logged.
+    /// Registers this player, retrying while no answer arrives, so the server knows who is at this
+    /// IP before the game logs in. When Steam launched the game and the environment lacked the Steam
+    /// id, it is resolved first (which can take up to a minute) and sent in the one registration, as
+    /// the C++ did: each /api/identify replaces what the server holds for the IP, so a first request
+    /// without it could leave the game's login with no identity and a new account. Other launches
+    /// (Epic, the Internet Archive build) have no Steam module to wait for, so they register at once
+    /// and again if a Steam id turns up. The token each registration returns goes to
+    /// <paramref name="identity"/>. Failures are logged. <paramref name="resolveSteamId"/> stands in
+    /// for <see cref="SteamId.Resolve"/> in tests.
     /// </summary>
-    public static void Run(EnvInfo env, string serverUrl, IHttpTransport http, ServerIdentity identity, ILogger log, Action<TimeSpan>? sleep = null)
+    public static void Run(EnvInfo env, string serverUrl, IHttpTransport http, ServerIdentity identity, ILogger log, Action<TimeSpan>? sleep = null, Func<string>? resolveSteamId = null)
     {
         if (string.IsNullOrEmpty(serverUrl))
         {
@@ -43,6 +48,13 @@ public static class IdentityRegistration
         }
 
         sleep ??= Thread.Sleep;
+        resolveSteamId ??= () => SteamId.Resolve(log, allowLoginUsers: env.Runtime == RuntimeEnvironment.NativeWindows);
+        bool steamIdMissing = env.SteamId is "Unknown" or "";
+        if (steamIdMissing && env.IsSteamLaunch)
+        {
+            UseSteamId(env, resolveSteamId());
+        }
+
         log.Debug(env.Print());
         bool registered = false;
         for (int attempt = 0; ; attempt++)
@@ -64,13 +76,10 @@ public static class IdentityRegistration
             sleep(RetryDelays[attempt]);
         }
 
-        if (env.SteamId is "Unknown" or "")
+        if (steamIdMissing && !env.IsSteamLaunch)
         {
-            string id = SteamId.Resolve(log, allowLoginUsers: env.Runtime == RuntimeEnvironment.NativeWindows);
-            if (id.Length > 0)
+            if (UseSteamId(env, resolveSteamId()))
             {
-                env.SteamId = id;
-                env.IsSteam = true;
                 Send(env, url, http, identity, log);
             }
             else if (!registered)
@@ -78,6 +87,19 @@ public static class IdentityRegistration
                 log.Warn("[OVS] RegisterIdentity: no Steam id either");
             }
         }
+    }
+
+    /// <summary>Takes a resolved Steam id into <paramref name="env"/>; false when there is none.</summary>
+    private static bool UseSteamId(EnvInfo env, string id)
+    {
+        if (id.Length == 0)
+        {
+            return false;
+        }
+
+        env.SteamId = id;
+        env.IsSteam = true;
+        return true;
     }
 
     private enum Outcome

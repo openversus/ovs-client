@@ -20,9 +20,11 @@ public sealed class EnvInfo
     /// <summary>The SteamID environment variable (native Windows only), or "Unknown". <see cref="IdentityRegistration.Run"/> fills it in from <see cref="Identity.SteamId.Resolve"/> when it is unknown.</summary>
     public string SteamId { get; set; } = "Unknown";
     /// <summary>The SteamGameId environment variable, or "Unknown".</summary>
-    public string GameId { get; } = "Unknown";
+    public string GameId { get; init; } = "Unknown";
     /// <summary>The SteamAppId environment variable, or "Unknown".</summary>
-    public string AppId { get; } = "Unknown";
+    public string AppId { get; init; } = "Unknown";
+    /// <summary>Whether Steam launched the game, which sets SteamGameId and SteamAppId; the game's Steam API then has the player's id.</summary>
+    public bool IsSteamLaunch => GameId is not ("Unknown" or "") || AppId is not ("Unknown" or "");
     /// <summary>The Epic account id, from the name of a file in the Epic launcher's saved data, or "Unknown".</summary>
     public string EpicId { get; } = "Unknown";
     /// <summary>This install's random id from <see cref="Config.State.LoadOrCreateInstallId"/>, or "" when none could be stored.</summary>
