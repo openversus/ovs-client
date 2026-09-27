@@ -257,6 +257,7 @@ public sealed class Client
         GameThread.Attach(Log);
         SpawnP2PServer();
         Objects = new ObjectFinder(Image, ProcessMemory.Instance, EngineNames.Instance, Log, tryObjectArray: Status.UeFuncs);
+        FfaStocksHooks.Attach(Objects);
         StartBackgroundWork();
         return true;
     }
@@ -439,6 +440,7 @@ public sealed class Client
         if (Settings.HookUe)
         {
             Status.UeFuncs = Apply("UE Funcs", c, UeFunctionHooks.Apply);
+            Status.FfaStocks = Apply("FFA Stocks", c, FfaStocksHooks.Apply);
         }
 
         if (Settings.Dialog)

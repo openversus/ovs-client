@@ -85,6 +85,18 @@ public static class Mvs
     public const int GameplayConfigCluster = 0x60;
     /// <summary>TArray&lt;FGameplayPlayerData&gt;: the same players the pawns carry.</summary>
     public const int GameplayConfigPlayers = 0x70;
+    /// <summary>FString: the mode, such as "1v1", "2v2" or "FFA" (CXXHeaderDump).</summary>
+    public const int GameplayConfigModeString = 0xA8;
+    /// <summary>
+    /// int32: FCustomGameSettings.NumRingouts, the first field of CustomGameSettings at 0xBC
+    /// (CXXHeaderDump). The server sends the ringouts to win, or a custom lobby's own count.
+    /// </summary>
+    public const int GameplayConfigNumRingouts = 0xBC;
+    /// <summary>
+    /// APfgFixedPawn, int32: RespawnsRemaining (CXXHeaderDump). -1 means unlimited, which online
+    /// matches start with; the native DoRespawn decrements a positive count and still revives at 0.
+    /// </summary>
+    public const int PawnRespawnsRemaining = 0x380;
     // APfgFixedGameStateBase
     /// <summary>Pointer to the game state's UPfgNetcodeSession.</summary>
     public const int GameStateNetcodeSession = 0x4A0;
