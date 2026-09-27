@@ -160,6 +160,16 @@ public class IdentityTests : IDisposable
         Assert.False(env.IsSteam);
     }
 
+    [Fact]
+    public void TheSteamUserAccessorIsLookedUpByItsVersionedNames()
+    {
+        // MultiVersus ships Steamworks 1.53, whose steam_api64.dll exports only the versioned
+        // SteamAPI_SteamUser_v021; with the bare name alone the API route never ran on Proton and
+        // loginusers.vdf named someone else's account.
+        Assert.Contains("SteamAPI_SteamUser_v021", SteamId.UserAccessorNames);
+        Assert.Equal("SteamAPI_SteamUser", SteamId.UserAccessorNames[^1]);
+    }
+
     // Runtime
 
     [Fact]

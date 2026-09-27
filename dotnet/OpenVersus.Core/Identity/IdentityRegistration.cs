@@ -76,7 +76,7 @@ public static class IdentityRegistration
 
         if (env.SteamId is "Unknown" or "")
         {
-            string id = SteamId.Resolve(log);
+            string id = SteamId.Resolve(log, allowLoginUsers: env.Runtime == RuntimeEnvironment.NativeWindows);
             if (id.Length > 0)
             {
                 env.SteamId = id;
