@@ -55,6 +55,9 @@ public static unsafe class FfaStocksHooks
     private static nint s_gameMode;
     private static FfaStocks? s_match;
     private static bool s_endBlockLogged;
+    private static HudTargets? s_hud;
+    private static long s_hudSequence;
+    private static long s_hudApplied;
 
     /// <summary>
     /// Hooks the four functions. False, or a <see cref="PatchException"/>, when this build's code
@@ -253,69 +256,103 @@ public static unsafe class FfaStocksHooks
     }
 
     /// <summary>
-    /// Shows lives in the HUD's score for each player. Posted to the game thread so it runs after
-    /// the simulation step, where the game may set the score itself; whether it overwrites this is
-    /// what the first matches' logs are to show.
+    /// Shows lives in the HUD's score for each player. Finding the HUD walks the whole object
+    /// array (about 150,000 objects), too slow for the game thread: it runs on a pool thread, once
+    /// per match (the objects are cached and checked for being alive after that), and only the
+    /// calls are posted to the game thread, after the simulation step. Whether the game overwrites
+    /// the score afterwards is what the first matches are to show.
     /// </summary>
     private static void PostLivesToHud(FfaStocks match)
     {
-        int[] lives = match.LivesLeft();
-        int[] players = match.PlayerIndexes.ToArray();
-        int maxLives = match.Lives;
-        GameThread.Post("FfaLivesHud", () => PushLivesToHud(lives, players, maxLives));
+        var update = new HudUpdate(s_gameMode, match.LivesLeft(), match.PlayerIndexes.ToArray(), match.Lives, Interlocked.Increment(ref s_hudSequence));
+        ThreadPool.QueueUserWorkItem(static u => HookGuard.Run("FfaLivesHud", u, static u =>
+        {
+            if (FindHud(u.GameMode) is { } hud)
+            {
+                GameThread.Post("FfaLivesHud", () => HookGuard.Run("FfaLivesHud", (hud, u), static s => PushLivesToHud(s.hud, s.u)));
+            }
+        }), update, preferLocal: false);
     }
 
-    private static void PushLivesToHud(int[] lives, int[] players, int maxLives)
+    /// <summary>The HUD objects for this match: cached while they are alive, otherwise found again. Off the game thread.</summary>
+    private static HudTargets? FindHud(nint gameMode)
     {
         var finder = s_finder;
         if (finder == null)
         {
+            return null;
+        }
+
+        if (s_hud is { } cached && cached.GameMode == gameMode && cached.Broker != 0 && cached.Widgets.Length > 0 && IsAlive(finder, cached))
+        {
+            return cached;
+        }
+
+        var hud = new HudTargets(
+            gameMode,
+            finder.FindInstanceOfClass(finder.FindClass("UI_Broker_C")),
+            finder.FindInstancesOfClass(finder.FindClass("UI_IGv3_PlayerScore_C")).ToArray(),
+            Reflection.Find(finder, finder.Image, "UI_Broker_C", "SetMaxScoreForPlayer"),
+            Reflection.Find(finder, finder.Image, "UI_Broker_C", "SetScoreForPlayer"),
+            Reflection.Find(finder, finder.Image, "UI_IGv3_PlayerScore_C", "OnScore"));
+        s_hud = hud;
+        s_log?.Info($"[FFA] HUD found: broker={(hud.Broker != 0 ? "yes" : "no")} score widgets={hud.Widgets.Length} "
+            + $"setMax={TakesPlayerAndScore(hud.SetMax)} setScore={TakesPlayerAndScore(hud.SetScore)} onScore={TakesPlayerAndScore(hud.OnScore)}");
+        return hud;
+    }
+
+    private static bool IsAlive(ObjectFinder finder, HudTargets hud) =>
+        finder.IsLive(hud.Broker) && hud.Widgets.All(finder.IsLive);
+
+    private static void PushLivesToHud(HudTargets hud, HudUpdate u)
+    {
+        // A later death's update may already have been applied; an older one must not undo it.
+        if (u.Sequence < s_hudApplied || s_finder is not { } finder || !IsAlive(finder, hud))
+        {
             return;
         }
 
-        var setMax = Reflection.Find(finder, finder.Image, "UI_Broker_C", "SetMaxScoreForPlayer");
-        var setScore = Reflection.Find(finder, finder.Image, "UI_Broker_C", "SetScoreForPlayer");
-        var onScore = Reflection.Find(finder, finder.Image, "UI_IGv3_PlayerScore_C", "OnScore");
-        nint broker = finder.FindInstanceOfClass(finder.FindClass("UI_Broker_C"));
-        nint[] widgets = finder.FindInstancesOfClass(finder.FindClass("UI_IGv3_PlayerScore_C")).ToArray();
-        int highest = players.Select(p => lives[p]).DefaultIfEmpty(0).Max();
-        bool tied = players.Count(p => lives[p] == highest) > 1;
-
-        int delivered = 0;
+        s_hudApplied = u.Sequence;
+        int highest = u.Players.Select(p => u.Lives[p]).DefaultIfEmpty(0).Max();
+        bool tied = u.Players.Count(p => u.Lives[p] == highest) > 1;
+        int calls = 0;
         Span<byte> parameters = stackalloc byte[16];
-        foreach (int player in players)
+        foreach (int player in u.Players)
         {
             // (int32 player, int32 score, bool leader, bool tied): the C++ client's layout, checked
             // against each function's reflected parameters before the call.
             parameters.Clear();
             BitConverter.TryWriteBytes(parameters, player);
-            BitConverter.TryWriteBytes(parameters[4..], maxLives);
-            if (broker != 0 && TakesPlayerAndScore(setMax))
-            {
-                Reflection.Invoke(setMax!, broker, parameters[..setMax!.Signature.Reflected!.ParmsSize]);
-            }
+            BitConverter.TryWriteBytes(parameters[4..], u.MaxLives);
+            calls += Call(hud.SetMax, hud.Broker, parameters);
 
-            BitConverter.TryWriteBytes(parameters[4..], lives[player]);
-            parameters[8] = (byte)(lives[player] == highest ? 1 : 0);
-            parameters[9] = (byte)(lives[player] == highest && tied ? 1 : 0);
-            if (broker != 0 && TakesPlayerAndScore(setScore))
+            BitConverter.TryWriteBytes(parameters[4..], u.Lives[player]);
+            parameters[8] = (byte)(u.Lives[player] == highest ? 1 : 0);
+            parameters[9] = (byte)(u.Lives[player] == highest && tied ? 1 : 0);
+            calls += Call(hud.SetScore, hud.Broker, parameters);
+            foreach (nint widget in hud.Widgets)
             {
-                Reflection.Invoke(setScore!, broker, parameters[..setScore!.Signature.Reflected!.ParmsSize]);
-                delivered++;
-            }
-
-            if (TakesPlayerAndScore(onScore))
-            {
-                foreach (nint widget in widgets)
-                {
-                    Reflection.Invoke(onScore!, widget, parameters[..onScore!.Signature.Reflected!.ParmsSize]);
-                    delivered++;
-                }
+                calls += Call(hud.OnScore, widget, parameters);
             }
         }
 
-        s_log?.Debug($"[FFA] lives to HUD: {string.Join(" ", players.Select(p => $"p{p}={lives[p]}"))}; broker={(broker != 0 ? "yes" : "no")} widgets={widgets.Length} calls={delivered}");
+        s_log?.Debug($"[FFA] lives to HUD: {string.Join(" ", u.Players.Select(p => $"p{p}={u.Lives[p]}"))}; calls={calls}");
     }
+
+    private static int Call(GameFunction? function, nint target, Span<byte> parameters)
+    {
+        if (target == 0 || !TakesPlayerAndScore(function))
+        {
+            return 0;
+        }
+
+        Reflection.Invoke(function!, target, parameters[..function!.Signature.Reflected!.ParmsSize]);
+        return 1;
+    }
+
+    private sealed record HudTargets(nint GameMode, nint Broker, nint[] Widgets, GameFunction? SetMax, GameFunction? SetScore, GameFunction? OnScore);
+
+    private sealed record HudUpdate(nint GameMode, int[] Lives, int[] Players, int MaxLives, long Sequence);
 
     /// <summary>Whether a HUD function starts with (int32 player, int32 score), the layout the push writes.</summary>
     private static bool TakesPlayerAndScore(GameFunction? function)
