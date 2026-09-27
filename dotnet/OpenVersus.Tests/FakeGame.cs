@@ -6,7 +6,9 @@ namespace OpenVersus.Tests;
 /// <summary>
 /// Memory made of byte blocks at chosen addresses. A read succeeds only when the whole range
 /// lies inside one block, and address 0 never reads, so the finder's "stop on an unreadable
-/// pointer" paths are exercised rather than fed zeros.
+/// pointer" paths are exercised rather than fed zeros. The block list is locked: tests add
+/// blocks while a sampler thread reads, and an unlocked read then throws "Collection was
+/// modified" inside the code under test.
 /// </summary>
 public sealed class FakeMemory : IMemory
 {
@@ -15,7 +17,11 @@ public sealed class FakeMemory : IMemory
     public byte[] Alloc(nint address, int size)
     {
         var bytes = new byte[size];
-        _blocks.Add((address, bytes));
+        lock (_blocks)
+        {
+            _blocks.Add((address, bytes));
+        }
+
         return bytes;
     }
 
@@ -26,12 +32,15 @@ public sealed class FakeMemory : IMemory
             return false;
         }
 
-        foreach (var (start, bytes) in _blocks)
+        lock (_blocks)
         {
-            if (address >= start && address + into.Length <= start + bytes.Length)
+            foreach (var (start, bytes) in _blocks)
             {
-                bytes.AsSpan((int)(address - start), into.Length).CopyTo(into);
-                return true;
+                if (address >= start && address + into.Length <= start + bytes.Length)
+                {
+                    bytes.AsSpan((int)(address - start), into.Length).CopyTo(into);
+                    return true;
+                }
             }
         }
 
@@ -47,11 +56,14 @@ public sealed class FakeMemory : IMemory
 
     private Span<byte> Slice(nint address, int length)
     {
-        foreach (var (start, bytes) in _blocks)
+        lock (_blocks)
         {
-            if (address >= start && address + length <= start + bytes.Length)
+            foreach (var (start, bytes) in _blocks)
             {
-                return bytes.AsSpan((int)(address - start), length);
+                if (address >= start && address + length <= start + bytes.Length)
+                {
+                    return bytes.AsSpan((int)(address - start), length);
+                }
             }
         }
 
