@@ -78,6 +78,7 @@ public sealed class StartupUpdate(string serverUrl, bool autoUpdate, IHttpTransp
         }
 
         List<UpdateFile> due = [];
+        bool releaseHasPaks = false;
         if (paks != null)
         {
             var listed = PakUpdate.Paks(ParseFiles(result.Text), out string? problem, paks.ReleaseOwner);
@@ -87,6 +88,8 @@ public sealed class StartupUpdate(string serverUrl, bool autoUpdate, IHttpTransp
             }
             else if (listed.Count > 0)
             {
+                releaseHasPaks = true;
+                paks.AdoptLegacy(listed);
                 due = paks.Needed(listed);
                 log.Info($"[Update] Release paks: {listed.Count}; to download: {due.Count}");
             }
@@ -96,6 +99,11 @@ public sealed class StartupUpdate(string serverUrl, bool autoUpdate, IHttpTransp
             && !string.IsNullOrEmpty(info.DownloadUrl) && AutoUpdate.IsNewer(info.LatestVersion, OvsVersion.Current);
         if (due.Count == 0 && !pluginDue)
         {
+            if (releaseHasPaks && !paks!.RetireLegacy())
+            {
+                return Close(LegacyStuck, "Update not installed");
+            }
+
             log.Info($"[Update] Up to date ({OvsVersion.Current}{(info.IsLatest ? "" : $", server offers {info.LatestVersion}")})");
             return Outcome.UpToDate;
         }
@@ -124,6 +132,12 @@ public sealed class StartupUpdate(string serverUrl, bool autoUpdate, IHttpTransp
             return Close("OpenVersus downloaded the update, but Windows would not let one of the game files be replaced. The previous files were put back.\n\nMultiVersus will now close. Make sure no other copy of the game is running, then launch it again.", "Update not installed");
         }
 
+        if (releaseHasPaks && !paks!.RetireLegacy())
+        {
+            window?.Dispose();
+            return Close(LegacyStuck, "Update not installed");
+        }
+
         bool pluginInstalled = plugin != null && plugins.InstallPlugin(plugin, info.LatestVersion!);
         if (due.Count == 0 && !pluginInstalled)
         {
@@ -141,6 +155,8 @@ public sealed class StartupUpdate(string serverUrl, bool autoUpdate, IHttpTransp
         Exit();
         return Outcome.Installed;
     }
+
+    private const string LegacyStuck = "OpenVersus could not move old game content out of the game's Content\\Paks folder, and it would load instead of the current content.\n\nMultiVersus will now close. Make sure no other copy of the game is running, then launch it again.";
 
     /// <summary>Tells the player why a required update failed and closes the game, which would crash without it.</summary>
     private Outcome Close(string text, string caption)

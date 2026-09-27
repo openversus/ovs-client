@@ -8,14 +8,19 @@ public class PakUpdateTests : IDisposable
 {
     private const string Release = "https://github.com/openversus/ovs-paks/releases/download/content/";
     private readonly string _root = Directory.CreateTempSubdirectory("ovs-paks-").FullName;
-    private readonly string _paks, _plugin;
+    private readonly string _paks, _plugin, _content;
     private readonly ListLogger _log = new();
 
     public PakUpdateTests()
     {
-        _paks = Directory.CreateDirectory(Path.Combine(_root, "MultiVersus", "Content", "Paks")).FullName;
-        _plugin = Directory.CreateDirectory(Path.Combine(_root, "plugins", "OpenVersus")).FullName;
+        // The layout the client uses: paks in AppData's Saved\Paks, the updater's files beside it,
+        // and the game's own Content\Paks where they were installed by hand before.
+        _paks = Directory.CreateDirectory(Path.Combine(_root, "AppData", "MultiVersus", "Saved", "Paks")).FullName;
+        _plugin = Directory.CreateDirectory(Path.Combine(_root, "AppData", "MultiVersus", "Saved", "OpenVersus")).FullName;
+        _content = Directory.CreateDirectory(Path.Combine(_root, "Game", "MultiVersus", "Content", "Paks")).FullName;
     }
+
+    private string OldContentBackup => Path.Combine(_plugin, "old-content-paks");
 
     public void Dispose() => Directory.Delete(_root, recursive: true);
 
@@ -23,7 +28,12 @@ public class PakUpdateTests : IDisposable
     private string Backup => Path.Combine(_plugin, "pak-backup");
 
     private PakUpdate Updater(ServedFiles http, string owner = PakUpdate.DefaultOwner) =>
-        new(_paks, Staging, Backup, Path.Combine(_plugin, "PakHashes.txt"), http, _log, owner) { Sleep = _ => { } };
+        new(_paks, Staging, Backup, Path.Combine(_plugin, "PakHashes.txt"), http, _log, owner)
+        {
+            Sleep = _ => { },
+            LegacyDirectory = _content,
+            LegacyBackupDirectory = OldContentBackup,
+        };
 
     private static string Sha(byte[] body) => Convert.ToHexStringLower(SHA256.HashData(body));
 
@@ -314,6 +324,69 @@ public class PakUpdateTests : IDisposable
         Assert.Equal(StartupUpdate.Outcome.UpToDate, Startup(http, told, []).Run());
         Assert.Empty(told);
         Assert.Contains(_log.Lines, l => l.Contains("Not using this release's paks"));
+    }
+
+    // Hand installs in the game's Content\Paks, which outranks Saved\Paks
+
+    [Fact]
+    public void AMatchingHandInstallIsMovedOverNotDownloaded()
+    {
+        byte[] pak = Bytes("current content");
+        var entry = Entry("OVS_P.pak", pak);
+        File.WriteAllBytes(Path.Combine(_content, "OVS_P.pak"), pak);
+        File.WriteAllBytes(Path.Combine(_content, "pakchunk0-Windows.pak"), Bytes("the game's own"));
+        var told = new List<string>();
+        var http = new ServedFiles { [VersionUrl] = VersionJson(entry), [entry.DownloadUrl!] = pak };
+
+        Assert.Equal(StartupUpdate.Outcome.UpToDate, Startup(http, told, []).Run());
+        Assert.Empty(told);
+        Assert.Equal([VersionUrl], http.Requested);
+        Assert.Equal(pak, File.ReadAllBytes(Path.Combine(_paks, "OVS_P.pak")));
+        Assert.False(File.Exists(Path.Combine(_content, "OVS_P.pak")));
+        Assert.True(File.Exists(Path.Combine(_content, "pakchunk0-Windows.pak")));
+    }
+
+    [Fact]
+    public void AStaleHandInstallIsMovedAsideAndTheReleaseDownloaded()
+    {
+        byte[] pak = Bytes("current content");
+        var entry = Entry("OVS_P.pak", pak);
+        File.WriteAllBytes(Path.Combine(_content, "OVS_P.pak"), Bytes("last month's"));
+        File.WriteAllBytes(Path.Combine(_content, "OVS_Old.utoc"), Bytes("no longer released"));
+        var told = new List<string>();
+        var http = new ServedFiles { [VersionUrl] = VersionJson(entry), [entry.DownloadUrl!] = pak };
+
+        Assert.Equal(StartupUpdate.Outcome.Installed, Startup(http, told, []).Run());
+        Assert.Equal(pak, File.ReadAllBytes(Path.Combine(_paks, "OVS_P.pak")));
+        Assert.Empty(Directory.EnumerateFiles(_content));
+        Assert.Equal("last month's", File.ReadAllText(Path.Combine(OldContentBackup, "OVS_P.pak")));
+        Assert.True(File.Exists(Path.Combine(OldContentBackup, "OVS_Old.utoc")));
+    }
+
+    [Fact]
+    public void AReleaseWithoutPaksLeavesHandInstallsAlone()
+    {
+        File.WriteAllBytes(Path.Combine(_content, "OVS_P.pak"), Bytes("hand installed"));
+        var http = new ServedFiles { [VersionUrl] = VersionJson() };
+
+        Assert.Equal(StartupUpdate.Outcome.UpToDate, Startup(http, [], []).Run());
+        Assert.True(File.Exists(Path.Combine(_content, "OVS_P.pak")));
+    }
+
+    [Fact]
+    public void AStrayHandInstallIsMovedAsideEvenWhenNothingDownloads()
+    {
+        byte[] pak = Bytes("current content");
+        var entry = Entry("OVS_P.pak", pak);
+        File.WriteAllBytes(Path.Combine(_paks, "OVS_P.pak"), pak);
+        File.WriteAllBytes(Path.Combine(_content, "OVS_P.pak"), Bytes("a stale copy that would win"));
+        var told = new List<string>();
+        var http = new ServedFiles { [VersionUrl] = VersionJson(entry) };
+
+        Assert.Equal(StartupUpdate.Outcome.UpToDate, Startup(http, told, []).Run());
+        Assert.Empty(told);
+        Assert.False(File.Exists(Path.Combine(_content, "OVS_P.pak")));
+        Assert.True(File.Exists(Path.Combine(OldContentBackup, "OVS_P.pak")));
     }
 
     /// <summary>Serves fixed bodies by URL (404 otherwise) and records what was asked for.</summary>

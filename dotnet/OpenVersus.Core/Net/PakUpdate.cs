@@ -5,13 +5,17 @@ using Microsoft.Extensions.Logging;
 namespace OpenVersus.Net;
 
 /// <summary>
-/// The release's paks against the game's Content/Paks: which ones are missing or differ,
-/// downloading those into a staging folder with every size and SHA-256 checked, and installing
-/// them all or nothing. The previous copy of each replaced file is kept in the backup folder.
-/// Staging and backup must be outside Content/Paks, which the engine mounts recursively, and
-/// staging should be on the game's drive so installing is a rename.
+/// The release's paks against the pak folder, %LOCALAPPDATA%\MultiVersus\Saved\Paks (one of the
+/// folders the engine mounts paks from, always writable, and never touched by Steam's updates
+/// or file verification): which ones are missing or differ, downloading those into a staging
+/// folder with every size and SHA-256 checked, and installing them all or nothing. The previous
+/// copy of each replaced file is kept in the backup folder. Staging and backup must be outside
+/// the pak folder, which the engine mounts recursively, and staging should be on the same drive
+/// so installing is a rename. Paks installed by hand into the game's own Content\Paks
+/// (<see cref="LegacyDirectory"/>) outrank Saved\Paks, so they are moved over when they match the
+/// release and moved out of the way when they don't.
 /// </summary>
-/// <param name="paksDirectory">The game's Content/Paks.</param>
+/// <param name="paksDirectory">The pak folder, Saved\Paks.</param>
 /// <param name="stagingDirectory">Where downloads wait until every one is verified.</param>
 /// <param name="backupDirectory">Where replaced files go.</param>
 /// <param name="hashCachePath">The file remembering local hashes by size and modified time.</param>
@@ -30,6 +34,84 @@ public sealed class PakUpdate(string paksDirectory, string stagingDirectory, str
 
     /// <summary>The wait between tries; tests replace it.</summary>
     public Action<TimeSpan> Sleep { get; init; } = Thread.Sleep;
+
+    /// <summary>The game's Content\Paks, where OVS paks used to be installed by hand; null when not known.</summary>
+    public string? LegacyDirectory { get; init; }
+
+    /// <summary>Where OVS paks taken out of <see cref="LegacyDirectory"/> go.</summary>
+    public string? LegacyBackupDirectory { get; init; }
+
+    /// <summary>
+    /// Moves each release pak that the pak folder lacks from <see cref="LegacyDirectory"/> into
+    /// it, when the old copy already matches the release, so a player coming from a hand install
+    /// downloads nothing. A copy that differs or cannot be moved stays, and is downloaded instead.
+    /// </summary>
+    public void AdoptLegacy(IReadOnlyList<UpdateFile> paks)
+    {
+        if (LegacyDirectory == null || !Directory.Exists(LegacyDirectory))
+        {
+            return;
+        }
+
+        foreach (var file in paks)
+        {
+            string old = Path.Combine(LegacyDirectory, file.Name!);
+            string target = Path.Combine(paksDirectory, file.Name!);
+            if (File.Exists(target) || !File.Exists(old) || new FileInfo(old).Length != file.Size
+                || !string.Equals(HashFile(old), file.Sha256, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            try
+            {
+                Directory.CreateDirectory(paksDirectory);
+                File.Move(old, target);
+                log.Info($"[Paks] {file.Name}: moved from the game's Content\\Paks to {paksDirectory} (it matches the release)");
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                log.Warn($"[Paks] {file.Name}: could not be moved from {LegacyDirectory} ({e.Message}); downloading it instead");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Moves every OVS pak still in <see cref="LegacyDirectory"/> to <see cref="LegacyBackupDirectory"/>:
+    /// the engine ranks the game's Content\Paks above Saved\Paks, so a stale copy there would win
+    /// over the installed one. False, with the reason logged, when one cannot be moved.
+    /// </summary>
+    public bool RetireLegacy()
+    {
+        if (LegacyDirectory == null || !Directory.Exists(LegacyDirectory))
+        {
+            return true;
+        }
+
+        try
+        {
+            var stale = Directory.EnumerateFiles(LegacyDirectory).Where(f => IsPakName(Path.GetFileName(f))).ToList();
+            if (stale.Count == 0)
+            {
+                return true;
+            }
+
+            string backup = LegacyBackupDirectory ?? Path.Combine(backupDirectory, "old-content-paks");
+            Directory.CreateDirectory(backup);
+            foreach (string path in stale)
+            {
+                File.Move(path, Path.Combine(backup, Path.GetFileName(path)), overwrite: true);
+            }
+
+            log.Info($"[Paks] Moved {string.Join(", ", stale.Select(Path.GetFileName))} out of the game's Content\\Paks into {backup}; OVS paks load from {paksDirectory} now");
+            return true;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            log.Error($"[Paks] Could not move old OVS paks out of {LegacyDirectory} ({e.Message}); they would load instead of the current ones");
+            return false;
+        }
+    }
 
     /// <summary>More files than a release would ever carry; a manifest with more is refused.</summary>
     public const int MaxFiles = 64;
@@ -256,6 +338,7 @@ public sealed class PakUpdate(string paksDirectory, string stagingDirectory, str
         try
         {
             Directory.CreateDirectory(backupDirectory);
+            Directory.CreateDirectory(paksDirectory);
             foreach (var file in files)
             {
                 string target = Path.Combine(paksDirectory, file.Name!);

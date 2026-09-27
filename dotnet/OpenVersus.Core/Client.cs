@@ -255,20 +255,31 @@ public sealed class Client
     /// </summary>
     private StartupUpdate.Outcome RunStartupUpdate()
     {
-        // <game>/MultiVersus/Binaries/Win64/<exe>: the paks are in <game>/MultiVersus/Content/Paks.
+        // OVS paks live in the game's Saved folder, %LOCALAPPDATA%\MultiVersus\Saved\Paks: one of
+        // the folders the engine mounts paks from (verified in game 2026-09-26), always writable,
+        // and left alone by Steam. The updater's own files sit beside it in Saved\OpenVersus, on
+        // the same drive, so installing is a rename. Under Proton this is the prefix's AppData.
+        string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        string? saved = string.IsNullOrEmpty(localAppData) ? null : Path.Combine(localAppData, "MultiVersus", "Saved");
+        if (saved == null)
+        {
+            Log.Warn("[Update] No local AppData folder; paks cannot be updated");
+        }
+
+        // <game>/MultiVersus/Binaries/Win64/<exe>: hand-installed paks were in <game>/MultiVersus/Content/Paks.
         string? exeDirectory = Path.GetDirectoryName(Environment.ProcessPath);
         string? gameDirectory = exeDirectory == null ? null : Path.GetDirectoryName(Path.GetDirectoryName(exeDirectory));
-        string? paksDirectory = gameDirectory == null ? null : Path.Combine(gameDirectory, "Content", "Paks");
-        if (paksDirectory == null || !System.IO.Directory.Exists(paksDirectory))
-        {
-            Log.Warn($"[Update] No Content/Paks beside the game ({paksDirectory ?? "unknown"}); paks cannot be updated");
-            paksDirectory = null;
-        }
+        string? contentPaks = gameDirectory == null ? null : Path.Combine(gameDirectory, "Content", "Paks");
 
         var download = new WinHttpTransport(useSystemProxy: true);
         var plugins = new AutoUpdate(Settings.ServerUrl, _pluginPath, _installDirectory, Http, download, Log, Log.Close);
-        var paks = paksDirectory == null ? null : new PakUpdate(paksDirectory, Path.Combine(Directory, "update-staging"),
-            Path.Combine(Directory, "pak-backup"), Path.Combine(Directory, "PakHashes.txt"), download, Log, Settings.ReleaseOwner);
+        string work = saved == null ? "" : Path.Combine(saved, Layout.FolderName);
+        var paks = saved == null ? null : new PakUpdate(Path.Combine(saved, "Paks"), Path.Combine(work, "update-staging"),
+            Path.Combine(work, "pak-backup"), Path.Combine(work, "PakHashes.txt"), download, Log, Settings.ReleaseOwner)
+        {
+            LegacyDirectory = contentPaks,
+            LegacyBackupDirectory = Path.Combine(work, "old-content-paks"),
+        };
         if (paks != null && paks.ReleaseOwner != PakUpdate.DefaultOwner)
         {
             Log.Warn($"[Update] Testing: paks may download from {paks.ReleaseOwner}'s releases ([Settings.Debug] ReleaseOwner)");
