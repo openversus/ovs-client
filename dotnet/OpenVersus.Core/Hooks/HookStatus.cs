@@ -28,12 +28,14 @@ public sealed class HookStatus
     public bool SunsetCallers { get; set; }
     /// <summary>The game's WB telemetry is stopped: its send function never sends (<see cref="TelemetryPatch"/>).</summary>
     public bool TelemetryOff { get; set; }
+    /// <summary>RecordEventWithAttributes records nothing: it frees what it is given and returns (<see cref="TelemetryPatch.ApplyRecord"/>).</summary>
+    public bool TelemetryRecordOff { get; set; }
     /// <summary>The game's requests to the OpenVersus server carry the client's headers (<see cref="RequestHeadersHook"/>).</summary>
     public bool RequestHeaders { get; set; }
 
     /// <summary>Every flag as name=value on one line, for the log.</summary>
     public override string ToString() =>
-        $"sigcheck={AntiSigCheck} gameEndpoint={GameEndpointSwap} prodEndpoint={ProdEndpointSwap} sunset={SunsetDate} ue={UeFuncs} dialog={Dialog} notifs={Notifications} postMatchFreeze={PostMatchFreeze} sunsetCallers={SunsetCallers} requestHeaders={RequestHeaders} telemetryOff={TelemetryOff}";
+        $"sigcheck={AntiSigCheck} gameEndpoint={GameEndpointSwap} prodEndpoint={ProdEndpointSwap} sunset={SunsetDate} ue={UeFuncs} dialog={Dialog} notifs={Notifications} postMatchFreeze={PostMatchFreeze} sunsetCallers={SunsetCallers} requestHeaders={RequestHeaders} telemetryOff={TelemetryOff} telemetryRecordOff={TelemetryRecordOff}";
 }
 
 /// <summary>What every hook needs: the image, the pattern resolver, the settings and the log.</summary>
