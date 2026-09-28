@@ -2,33 +2,33 @@ using OpenVersus.Game;
 
 namespace OpenVersus.Tests;
 
-public class FfaStocksTests
+public class StockRulesTests
 {
     [Theory]
     [InlineData(3, 3)]
     [InlineData(1, 1)]
     [InlineData(5, 5)]
-    [InlineData(0, FfaStocks.DefaultLives)]
-    [InlineData(-1, FfaStocks.DefaultLives)]
-    [InlineData(100, FfaStocks.DefaultLives)]
+    [InlineData(0, StockRules.DefaultLives)]
+    [InlineData(-1, StockRules.DefaultLives)]
+    [InlineData(100, StockRules.DefaultLives)]
     public void LivesAreTheServersRingoutsWhenUsable(int ringouts, int lives)
     {
-        Assert.Equal(lives, FfaStocks.LivesFromRingouts(ringouts));
+        Assert.Equal(lives, StockRules.LivesFromRingouts(ringouts));
     }
 
     [Fact]
     public void OnlyTheFfaModeTurnsTheRulesOn()
     {
-        Assert.True(FfaStocks.IsFfa("FFA"));
-        Assert.True(FfaStocks.IsFfa("ffa"));
-        Assert.False(FfaStocks.IsFfa("2v2"));
-        Assert.False(FfaStocks.IsFfa(null));
+        Assert.True(StockRules.IsFfa("FFA"));
+        Assert.True(StockRules.IsFfa("ffa"));
+        Assert.False(StockRules.IsFfa("2v2"));
+        Assert.False(StockRules.IsFfa(null));
     }
 
     [Fact]
     public void TheLastFighterStandingWinsForTheirTeam()
     {
-        var match = new FfaStocks(3);
+        var match = new StockRules(3);
         match.Register(1, playerIndex: 0, team: 0);
         match.Register(2, playerIndex: 1, team: 1);
         match.Register(3, playerIndex: 2, team: 2);
@@ -49,7 +49,7 @@ public class FfaStocksTests
     [Fact]
     public void TheWinningTeamIsTheSurvivors()
     {
-        var match = new FfaStocks(1);
+        var match = new StockRules(1);
         match.Register(10, playerIndex: 0, team: 4);
         match.Register(20, playerIndex: 1, team: 7);
         Assert.Equal(0, match.InitialRespawns);
@@ -63,7 +63,7 @@ public class FfaStocksTests
     [Fact]
     public void OnlyARegisteredFighterAtZeroSkipsItsRespawn()
     {
-        var match = new FfaStocks(3);
+        var match = new StockRules(3);
         match.Register(1, playerIndex: 0, team: 0);
         Assert.True(match.SkipsRespawn(1, 0));
         Assert.False(match.SkipsRespawn(1, 1));
@@ -74,7 +74,7 @@ public class FfaStocksTests
     [Fact]
     public void LivesLeftFollowTheDeaths()
     {
-        var match = new FfaStocks(3);
+        var match = new StockRules(3);
         match.Register(1, playerIndex: 0, team: 0);
         match.Register(2, playerIndex: 1, team: 1);
         match.Died(2, respawnsRemaining: 2);
@@ -86,7 +86,7 @@ public class FfaStocksTests
     [Fact]
     public void RegisteringAgainStartsTheFighterOverAndBadIndexesAreIgnored()
     {
-        var match = new FfaStocks(2);
+        var match = new StockRules(2);
         match.Register(1, playerIndex: 0, team: 0);
         match.Register(2, playerIndex: 1, team: 1);
         match.Died(1, respawnsRemaining: 0);
@@ -97,8 +97,56 @@ public class FfaStocksTests
         Assert.Equal(2, match.FighterCount);
 
         match.Register(3, playerIndex: -1, team: 0);
-        match.Register(4, playerIndex: FfaStocks.MaxFighters, team: 0);
+        match.Register(4, playerIndex: StockRules.MaxFighters, team: 0);
         match.Register(0, playerIndex: 2, team: 0);
         Assert.Equal(2, match.FighterCount);
+    }
+
+    [Theory]
+    [InlineData(4, 2)]
+    [InlineData(3, 2)]
+    [InlineData(5, 3)]
+    [InlineData(1, 1)]
+    [InlineData(0, StockRules.DefaultIndividualLives)]
+    [InlineData(100, StockRules.DefaultIndividualLives)]
+    public void IndividualStocksLivesAreHalfTheRingoutsRoundedUp(int ringouts, int lives)
+    {
+        Assert.Equal(lives, StockRules.IndividualLivesFromRingouts(ringouts));
+    }
+
+    [Fact]
+    public void TheRulesComeFromTheModeAndTheSelectedMutator()
+    {
+        var ffa = StockRules.For(new MatchSettings("FFA", 4, [], 5, true));
+        Assert.NotNull(ffa);
+        Assert.True(ffa.LastFighterWins);
+        Assert.Equal(4, ffa.Lives);
+
+        var individual = StockRules.For(new MatchSettings("2v2", 4, ["ovs_friendly_fire", "OVS_2v2_Individual_Stocks"], 5, true));
+        Assert.NotNull(individual);
+        Assert.False(individual.LastFighterWins);
+        Assert.Equal(2, individual.Lives);
+
+        Assert.Null(StockRules.For(new MatchSettings("2v2", 4, ["ovs_friendly_fire"], 5, true)));
+        Assert.Null(StockRules.For(new MatchSettings("1v1", 3, [], 1, true)));
+    }
+
+    [Fact]
+    public void IndividualStocksKeepFightersDownButLeaveTheEndToTheGame()
+    {
+        var match = new StockRules(2, lastFighterWins: false);
+        match.Register(1, playerIndex: 0, team: 0);
+        match.Register(2, playerIndex: 1, team: 0);
+        match.Register(3, playerIndex: 2, team: 1);
+        match.Register(4, playerIndex: 3, team: 1);
+
+        Assert.Null(match.Died(1, respawnsRemaining: 1));
+        Assert.Null(match.Died(1, respawnsRemaining: 0));
+        Assert.True(match.SkipsRespawn(1, 0));
+        Assert.Null(match.Died(2, respawnsRemaining: 0));
+        Assert.Null(match.Died(3, respawnsRemaining: 0));
+        // Three of four out: FFA would end it; the game's team score does here.
+        Assert.Equal(3, match.EliminatedCount);
+        Assert.False(match.Ended);
     }
 }

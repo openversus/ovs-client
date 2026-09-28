@@ -46,6 +46,58 @@ public static unsafe class EntryHook
         return gatewayAddress;
     }
 
+    /// <summary>Where the watched value sits in a <see cref="BuildFilter"/> stub.</summary>
+    public const int FilterSlotOffset = 40;
+
+    /// <summary>
+    /// <see cref="Install"/> for a function called far too often to enter the hook on every call
+    /// (UObject::ProcessEvent), when only calls with one second argument matter. The function
+    /// jumps to a filter that compares its second argument (rdx) with a watched value and goes
+    /// straight to the gateway unless they are equal, so every other call costs a load, a compare
+    /// and two jumps and never reaches managed code. The watched value starts at 0, which no real
+    /// argument is, and is changed with <see cref="SetWatched"/> at <paramref name="watchSlot"/>.
+    /// Returns the gateway. Throws a <see cref="PatchException"/> as <see cref="Install"/> does.
+    /// </summary>
+    public static nint InstallFiltered(nint function, ReadOnlySpan<byte> prologue, nint hook, out nint watchSlot)
+    {
+        CodeWriter.Expect(function, prologue);
+        var trampoline = Trampoline.Near(function);
+        nint gatewayAddress = trampoline.Place(BuildGateway(function, prologue, endsInConditionalJump: false), align: 16);
+        nint filterAddress = trampoline.Place(BuildFilter(hook, gatewayAddress), align: 16);
+        watchSlot = filterAddress + FilterSlotOffset;
+
+        CallSite.Inject(function, filterAddress, jump: true);
+        if (prologue.Length > CallSite.Length)
+        {
+            byte[] fill = new byte[prologue.Length - CallSite.Length];
+            Array.Fill(fill, (byte)0xCC);
+            CodeWriter.Write(function + CallSite.Length, fill, code: true);
+        }
+
+        return gatewayAddress;
+    }
+
+    /// <summary>Sets the value an <see cref="InstallFiltered"/> filter sends to the hook; 0 sends nothing.</summary>
+    public static void SetWatched(nint watchSlot, nint value) => CodeWriter.Write(watchSlot, BitConverter.GetBytes((long)value), code: true);
+
+    /// <summary>
+    /// The filter stub: rax is free at a function's entry (the caller keeps nothing in it), so
+    /// <c>mov rax, [watched]; cmp rdx, rax; jne gateway; jmp hook</c>, with both jumps absolute and
+    /// the watched value, 0 at first, at <see cref="FilterSlotOffset"/>.
+    /// </summary>
+    public static byte[] BuildFilter(nint hook, nint gateway)
+    {
+        var code = new List<byte>(FilterSlotOffset + 8);
+        code.AddRange([0x48, 0x8B, 0x05]); // mov rax, [rip+disp32]
+        code.AddRange(BitConverter.GetBytes(FilterSlotOffset - 7));
+        code.AddRange([0x48, 0x39, 0xC2]); // cmp rdx, rax
+        code.AddRange([0x75, AbsoluteJumpLength]); // jne over the jump to the hook
+        AddAbsoluteJump(code, hook);
+        AddAbsoluteJump(code, gateway);
+        code.AddRange(new byte[8]);
+        return code.ToArray();
+    }
+
     /// <summary>
     /// The gateway for <paramref name="function"/>: the prologue, then an absolute jump to the
     /// instruction after it. A trailing rel32 conditional jump becomes the opposite short jump over

@@ -83,6 +83,8 @@ public sealed class Settings
         public static readonly SettingDef CountSunsetCalls = SettingDef.Bool("Settings.Debug", "CountSunsetCalls", false);
         /// <summary>The GitHub account whose releases paks may download from (<see cref="Net.PakUpdate.IsAllowedUrl"/>); another one only to test a fork's release.</summary>
         public static readonly SettingDef ReleaseOwner = SettingDef.Str("Settings.Debug", "ReleaseOwner", "openversus");
+        /// <summary>Writes logs/MatchRules.log: each match's settings, stock deaths and friendly-fire hits (<see cref="Hooks.MatchRulesLog"/>).</summary>
+        public static readonly SettingDef MatchRulesLog = SettingDef.Bool("Settings.Debug", "MatchRulesLog", false);
         // Settings
         /// <summary>
         /// The minimum log level: a name (trace, debug, info, warn, error, critical, none, or an alias such
@@ -191,6 +193,7 @@ public sealed class Settings
         Rows.NonMvsPatching,
         Rows.CountSunsetCalls,
         Rows.ReleaseOwner,
+        Rows.MatchRulesLog,
         Rows.ServerUrl,
         Rows.ProdServerUrl,
         Rows.EnableServerProxy,
@@ -457,6 +460,8 @@ public sealed class Settings
     public bool CountSunsetCalls => GetBool(Rows.CountSunsetCalls);
     /// <inheritdoc cref="Rows.ReleaseOwner"/>
     public string ReleaseOwner => Get(Rows.ReleaseOwner);
+    /// <inheritdoc cref="Rows.MatchRulesLog"/>
+    public bool MatchRulesLog => GetBool(Rows.MatchRulesLog);
     // Settings
     /// <inheritdoc cref="Rows.LogLevel"/>
     public string LogLevel => Get(Rows.LogLevel);

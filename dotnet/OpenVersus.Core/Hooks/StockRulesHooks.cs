@@ -7,23 +7,25 @@ using Microsoft.Extensions.Logging;
 namespace OpenVersus.Hooks;
 
 /// <summary>
-/// FFA stock rules in the game (<see cref="FfaStocks"/>): in a match whose mode is "FFA", every
-/// fighter gets the server's ringout count as lives, a fighter out of lives is not respawned,
-/// and the last one standing wins. Entry hooks on four native functions of this build; the C++
-/// client's StockDiagnostics, without its diagnostics.
+/// Stock rules in the game (<see cref="StockRules"/>): in Free For All, and in a 2v2 with the
+/// Individual Stocks mutator, every fighter has lives from the server's ringout count and a
+/// fighter out of lives is not respawned; in Free For All the last one standing wins. Entry hooks
+/// on four native functions of this build; the C++ client's StockDiagnostics, without its
+/// diagnostics. The game mode's first character is also where each match's settings are read, so
+/// <see cref="FriendlyFireHooks"/> is told of every match from here.
 /// <list type="bullet">
-/// <item>AMvsGameModeBase::RegisterCharacter: a new game mode starts a match (the mode and lives
-/// come from UMvsGameplayConfig); each fighter is recorded.</item>
+/// <item>AMvsGameModeBase::RegisterCharacter: a new game mode starts a match (the mode, lives and
+/// mutators come from UMvsGameplayConfig); each fighter is recorded.</item>
 /// <item>AMvsGameModeBase::PlayerDied: on a fighter's first death RespawnsRemaining (-1, unlimited)
-/// becomes lives - 1; a death at 0 puts it out; when one fighter is left, EndMatch(its team).</item>
+/// becomes lives - 1; a death at 0 puts it out; in FFA, when one fighter is left, EndMatch(its team).</item>
 /// <item>APfgFixedPawn::DoRespawn: skipped for a fighter at 0, which the native code would revive.</item>
-/// <item>UMvsGameModeDefaultGameEndHandlerComponent::AttemptEndMatch: the game's score-based end is
-/// skipped until these rules end the match.</item>
+/// <item>UMvsGameModeDefaultGameEndHandlerComponent::AttemptEndMatch: in FFA the game's score-based
+/// end is skipped until these rules end the match.</item>
 /// </list>
 /// Every peer runs the same rules on the same simulated state, so they agree. The hooks run on the
 /// game thread; the HUD update is posted to it to run after the simulation step.
 /// </summary>
-public static unsafe class FfaStocksHooks
+public static unsafe class StockRulesHooks
 {
     // RVAs and prologues from a disassembly of the final build (MultiVersus-Win64-Shipping.exe,
     // 2026-09-27); the RVAs are the C++ client's (StockDiagnostics.cpp).
@@ -53,7 +55,7 @@ public static unsafe class FfaStocksHooks
     private static ILogger? s_log;
     private static ObjectFinder? s_finder;
     private static nint s_gameMode;
-    private static FfaStocks? s_match;
+    private static StockRules? s_match;
     private static bool s_endBlockLogged;
     private static HudTargets? s_hud;
     private static nint s_hudLoggedFor;
@@ -72,7 +74,7 @@ public static unsafe class FfaStocksHooks
     public static bool Apply(HookContext c)
     {
         s_log = c.Log;
-        c.Log.Info("==FFA Stocks==");
+        c.Log.Info("==Stock Rules==");
         var image = c.Image;
         nint setRespawns = image.Address(SetRespawnsRemainingRva);
         CodeWriter.Expect(setRespawns, s_setRespawnsRemainingCode);
@@ -89,7 +91,7 @@ public static unsafe class FfaStocksHooks
         s_doRespawn = (delegate* unmanaged<nint, void>)Hook(image, "APfgFixedPawn::DoRespawn", DoRespawnRva, s_doRespawnPrologue, (nint)(delegate* unmanaged<nint, void>)&DoRespawn, "void APfgFixedPawn::DoRespawn(APfgFixedPawn* this)");
         s_attemptEndMatch = (delegate* unmanaged<nint, void>)Hook(image, "UMvsGameModeDefaultGameEndHandlerComponent::AttemptEndMatch", AttemptEndMatchRva, s_attemptEndMatchPrologue, (nint)(delegate* unmanaged<nint, void>)&AttemptEndMatch, "void UMvsGameModeDefaultGameEndHandlerComponent::AttemptEndMatch(UMvsGameModeDefaultGameEndHandlerComponent* this)");
 
-        c.Log.Success("FFA stock rules hooked");
+        c.Log.Success("Stock rules hooked");
         return true;
     }
 
@@ -107,24 +109,24 @@ public static unsafe class FfaStocksHooks
     private static void RegisterCharacter(nint gameMode, nint character)
     {
         s_registerCharacter(gameMode, character);
-        HookGuard.Run("FfaRegisterCharacter", (gameMode, character), static s => OnRegisterCharacter(s.gameMode, s.character));
+        HookGuard.Run("StocksRegisterCharacter", (gameMode, character), static s => OnRegisterCharacter(s.gameMode, s.character));
     }
 
     [UnmanagedCallersOnly]
     private static void PlayerDied(nint gameMode, nint victim, nint attacker)
     {
-        int respawns = HookGuard.Run("FfaPlayerDied", victim, static v => BeforeDeath(v), int.MinValue);
+        int respawns = HookGuard.Run("StocksPlayerDied", victim, static v => BeforeDeath(v), int.MinValue);
         s_playerDied(gameMode, victim, attacker);
         if (respawns != int.MinValue)
         {
-            HookGuard.Run("FfaPlayerDied", (gameMode, victim, respawns), static s => AfterDeath(s.gameMode, s.victim, s.respawns));
+            HookGuard.Run("StocksPlayerDied", (gameMode, victim, respawns), static s => AfterDeath(s.gameMode, s.victim, s.respawns));
         }
     }
 
     [UnmanagedCallersOnly]
     private static void DoRespawn(nint pawn)
     {
-        bool skip = HookGuard.Run("FfaDoRespawn", pawn, static p => s_match is { } match && TryReadInt(p + Mvs.PawnRespawnsRemaining, out int respawns) && match.SkipsRespawn(p, respawns), false);
+        bool skip = HookGuard.Run("StocksDoRespawn", pawn, static p => s_match is { } match && TryReadInt(p + Mvs.PawnRespawnsRemaining, out int respawns) && match.SkipsRespawn(p, respawns), false);
         if (!skip)
         {
             s_doRespawn(pawn);
@@ -134,7 +136,7 @@ public static unsafe class FfaStocksHooks
     [UnmanagedCallersOnly]
     private static void AttemptEndMatch(nint component)
     {
-        bool block = HookGuard.Run("FfaAttemptEndMatch", component, static _ => s_match is { Ended: false }, false);
+        bool block = HookGuard.Run("StocksAttemptEndMatch", component, static _ => s_match is { LastFighterWins: true, Ended: false }, false);
         if (block)
         {
             if (!s_endBlockLogged)
@@ -150,8 +152,8 @@ public static unsafe class FfaStocksHooks
     }
 
     /// <summary>
-    /// A new game mode is a new match: read its mode and ringouts, and turn the rules on for FFA.
-    /// Then record the character if it is a fighter.
+    /// A new game mode is a new match: read its settings, turn on the stock rules it has, and tell
+    /// <see cref="FriendlyFireHooks"/>. Then record the character if it is a fighter.
     /// </summary>
     private static void OnRegisterCharacter(nint gameMode, nint character)
     {
@@ -164,9 +166,11 @@ public static unsafe class FfaStocksHooks
         if (gameMode != s_gameMode)
         {
             s_gameMode = gameMode;
-            s_match = StartMatch(finder);
+            var settings = ReadSettings(finder);
+            s_match = settings != null ? StartMatch(finder, settings) : null;
+            FriendlyFireHooks.StartMatch(finder, gameMode, settings);
             s_endBlockLogged = false;
-            if (s_match != null)
+            if (s_match is { LastFighterWins: true })
             {
                 StartHudSeeding();
             }
@@ -181,30 +185,37 @@ public static unsafe class FfaStocksHooks
         match.Register(character, ReadInt(data + Mvs.GameplayPlayerDataPlayerIndex), ReadInt(data + Mvs.GameplayPlayerDataTeamIndex));
     }
 
-    private static FfaStocks? StartMatch(ObjectFinder finder)
+    /// <summary>The match's settings from UMvsGameplayConfig, or null (logged) when they cannot be read.</summary>
+    private static MatchSettings? ReadSettings(ObjectFinder finder)
     {
         nint config = finder.FindInstanceOfClass(finder.FindClass("MvsGameplayConfig"));
-        if (config == 0 || !GameStrings.TryReadFString(finder.Memory, config + Mvs.GameplayConfigModeString, out string mode))
+        if (!MatchSettings.TryRead(finder.Memory, config, out var settings))
         {
-            s_log?.Warn("[FFA] gameplay config unreadable; stock rules off for this match");
+            s_log?.Warn("[Stocks] gameplay config unreadable; stock rules and friendly fire off for this match");
+            MatchRulesLog.Line("match: gameplay config unreadable");
             return null;
         }
 
-        if (!FfaStocks.IsFfa(mode))
+        MatchRulesLog.Line($"match: {settings}");
+        return settings;
+    }
+
+    private static StockRules? StartMatch(ObjectFinder finder, MatchSettings settings)
+    {
+        if (StockRules.For(settings) is not { } match)
         {
             return null;
         }
 
-        int ringouts = ReadInt(config + Mvs.GameplayConfigNumRingouts);
-        var match = new FfaStocks(FfaStocks.LivesFromRingouts(ringouts));
         // Resolved now, not at the final death, so the object scan happens while the match loads.
-        if (Reflection.Find(finder, finder.Image, "MvsGameModeBase", "EndMatch") == null)
+        if (match.LastFighterWins && Reflection.Find(finder, finder.Image, "MvsGameModeBase", "EndMatch") == null)
         {
-            s_log?.Warn("[FFA] AMvsGameModeBase::EndMatch not found; stock rules off for this match");
+            s_log?.Warn("[Stocks] AMvsGameModeBase::EndMatch not found; stock rules off for this match");
             return null;
         }
 
-        s_log?.Info($"[FFA] stock rules on: {match.Lives} lives each (server ringouts {ringouts})");
+        s_log?.Info($"[Stocks] {match.Name} stock rules on: {match.Lives} lives each (server ringouts {settings.NumRingouts})");
+        MatchRulesLog.Line($"stocks: {match.Name}, {match.Lives} lives each");
         return match;
     }
 
@@ -242,12 +253,18 @@ public static unsafe class FfaStocksHooks
         }
 
         int? winningTeam = match.Died(victim, respawns);
+        MatchRulesLog.Line($"stocks: death, {respawns} lives left, {match.EliminatedCount}/{match.FighterCount} out");
         if (respawns == 0)
         {
-            s_log?.Info($"[FFA] fighter out ({match.EliminatedCount}/{match.FighterCount})");
+            s_log?.Info($"[Stocks] fighter out ({match.EliminatedCount}/{match.FighterCount})");
         }
 
-        PostLivesToHud(match);
+        // The HUD shows each FFA player's own score; a 2v2 HUD shows team scores, left to the game.
+        if (match.LastFighterWins)
+        {
+            PostLivesToHud(match);
+        }
+
         if (winningTeam is not int team)
         {
             return;
@@ -272,7 +289,7 @@ public static unsafe class FfaStocksHooks
     /// calls are posted to the game thread, after the simulation step. Whether the game overwrites
     /// the score afterwards is what the first matches are to show.
     /// </summary>
-    private static void PostLivesToHud(FfaStocks match)
+    private static void PostLivesToHud(StockRules match)
     {
         var update = new HudUpdate(s_gameMode, match.LivesLeft(), match.PlayerIndexes.ToArray(), match.Lives, Interlocked.Increment(ref s_hudSequence));
         ThreadPool.QueueUserWorkItem(static u => HookGuard.Run("FfaLivesHud", u, static u =>

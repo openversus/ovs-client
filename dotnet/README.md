@@ -232,8 +232,9 @@ What each key does is documented on its row in `Config/Settings.cs` (`Settings.R
 with the C++ client:
 
 - Added: `[Patches] PostMatchFreeze`, on by default, with its pattern under `[Patterns.MVS]`; and,
-  off by default, `[Patches] SunsetCallers`, `[Settings.Debug] CountSunsetCalls` and
-  `[Features] NetStats`.
+  off by default, `[Patches] SunsetCallers`, `[Settings.Debug] CountSunsetCalls`,
+  `[Settings.Debug] MatchRulesLog` (writes `logs/MatchRules.log` for testing the FFA, Individual
+  Stocks and Friendly Fire rules) and `[Features] NetStats`.
 - `[Settings] LogLevel` takes a level name as well as a number (see [Logs](#logs)).
 - No longer read: `LogSize`, `ModLoader`, `AntiCheatEngine`, `CurlSetOpt` and `CurlPerform` under
   `[Settings]` (`Settings.RetiredKeys`). They stay in files that have them, each logged at startup

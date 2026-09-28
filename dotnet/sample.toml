@@ -166,6 +166,9 @@ CountSunsetCalls = false
 # For testing updates from a fork; leave it. Game content only downloads from this GitHub account's releases.
 ReleaseOwner = "openversus"
 
+# For testing match rules; leave it off. Writes logs/MatchRules.log: each match's settings, stock-rule deaths and every friendly-fire hit.
+MatchRulesLog = false
+
 # ---------------------------------------------------------------------------
 # The OpenVersus server. Leave this section alone unless you run your own server.
 # ---------------------------------------------------------------------------

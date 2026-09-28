@@ -253,11 +253,25 @@ public sealed class Client
         Env = new EnvInfo(runtime) { InstallId = installId };
         Log.Info($"[OVS] Runtime: {Runtime.Name(runtime)}; hardware fingerprint {(Env.HardwareId.Length > 0 ? "v2" : "none")}");
 
+        if (Settings.MatchRulesLog)
+        {
+            // Beside the main log, with the same writer, archive and retention behavior.
+            var matchRules = Log.OpenSession(Path.GetDirectoryName(Log.Path)!, "MatchRules", fallbackDirectory: Directory);
+            matchRules.MinimumLevel = LogLevel.Information;
+            if (matchRules.Notice != null)
+            {
+                Log.Warn(matchRules.Notice);
+            }
+
+            MatchRulesLog.Attach(matchRules);
+            _shutdown.Add(matchRules.Dispose);
+        }
+
         ApplyHooks();
         GameThread.Attach(Log);
         SpawnP2PServer();
         Objects = new ObjectFinder(Image, ProcessMemory.Instance, EngineNames.Instance, Log, tryObjectArray: Status.UeFuncs);
-        FfaStocksHooks.Attach(Objects);
+        StockRulesHooks.Attach(Objects);
         StartBackgroundWork();
         return true;
     }
@@ -440,7 +454,8 @@ public sealed class Client
         if (Settings.HookUe)
         {
             Status.UeFuncs = Apply("UE Funcs", c, UeFunctionHooks.Apply);
-            Status.FfaStocks = Apply("FFA Stocks", c, FfaStocksHooks.Apply);
+            Status.Stocks = Apply("Stock Rules", c, StockRulesHooks.Apply);
+            Status.FriendlyFire = Apply("Friendly Fire", c, FriendlyFireHooks.Apply);
         }
 
         if (Settings.Dialog)

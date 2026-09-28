@@ -114,6 +114,7 @@ internal static class DefaultConfig
         [Settings.Rows.NonMvsPatching] = "Silences the warning shown when the mod is loaded by something that isn't MultiVersus.",
         [Settings.Rows.CountSunsetCalls] = "For profiling; leave it off. Counts calls to the end-of-service check and logs them once a minute.",
         [Settings.Rows.ReleaseOwner] = "For testing updates from a fork; leave it. Game content only downloads from this GitHub account's releases.",
+        [Settings.Rows.MatchRulesLog] = "For testing match rules; leave it off. Writes logs/MatchRules.log: each match's settings, stock-rule deaths and every friendly-fire hit.",
         [Settings.Rows.ServerUrl] = """
             TL;DR: The OpenVersus server.
 

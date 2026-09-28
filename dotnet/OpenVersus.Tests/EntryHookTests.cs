@@ -1,4 +1,5 @@
 using OpenVersus.Memory;
+using OpenVersus.Native;
 
 namespace OpenVersus.Tests;
 
@@ -45,5 +46,50 @@ public class EntryHookTests
         Assert.Throws<PatchException>(() => EntryHook.BuildGateway(Function, new byte[] { 0x90, 0x90, 0x90, 0x90 }, false));
         Assert.Throws<PatchException>(() => EntryHook.BuildGateway(Function, new byte[] { 0x40, 0x56, 0x48, 0x83, 0xEC, 0x50 }, true));
         Assert.Throws<PatchException>(() => EntryHook.BuildGateway(Function, new byte[] { 0x90, 0x90, 0x90, 0x90, 0x90 }, true));
+    }
+
+    [Fact]
+    public void TheFilterLoadsTheWatchedValueAndJumpsToTheHookOrTheGateway()
+    {
+        const long hook = 0x7FF6_0000_1000, gateway = 0x7FF6_0000_2000;
+        byte[] filter = EntryHook.BuildFilter(unchecked((nint)hook), unchecked((nint)gateway));
+
+        // mov rax, [rip+33]: the slot, 40 bytes in, from the end of the 7-byte mov
+        Assert.Equal(new byte[] { 0x48, 0x8B, 0x05, 0x21, 0, 0, 0 }, filter[..7]);
+        Assert.Equal(new byte[] { 0x48, 0x39, 0xC2, 0x75, 14 }, filter[7..12]);
+        Assert.Equal(hook, BitConverter.ToInt64(filter, 18));
+        Assert.Equal(gateway, BitConverter.ToInt64(filter, 32));
+        Assert.Equal(EntryHook.FilterSlotOffset + 8, filter.Length);
+        Assert.Equal(0, BitConverter.ToInt64(filter, EntryHook.FilterSlotOffset));
+    }
+
+    [SkippableFact]
+    public unsafe void OnlyTheWatchedSecondArgumentReachesTheHook()
+    {
+        Skip.IfNot(OperatingSystem.IsWindows(), "runs generated x64 code");
+        nint memory = Kernel32.VirtualAlloc(0, 4096, Kernel32.MEM_COMMIT | Kernel32.MEM_RESERVE, Kernel32.PAGE_EXECUTE_READWRITE);
+        Assert.NotEqual(0, memory);
+        try
+        {
+            // The "hook" returns 1 and the "gateway" 2: mov eax, n; ret
+            byte[] returnsOne = [0xB8, 1, 0, 0, 0, 0xC3], returnsTwo = [0xB8, 2, 0, 0, 0, 0xC3];
+            returnsOne.CopyTo(new Span<byte>((void*)memory, 6));
+            returnsTwo.CopyTo(new Span<byte>((void*)(memory + 16), 6));
+            byte[] filter = EntryHook.BuildFilter(memory, memory + 16);
+            filter.CopyTo(new Span<byte>((void*)(memory + 64), filter.Length));
+            var call = (delegate* unmanaged<nint, nint, int>)(memory + 64);
+            nint slot = memory + 64 + EntryHook.FilterSlotOffset;
+
+            Assert.Equal(2, call(0, 0x1234));
+            EntryHook.SetWatched(slot, 0x1234);
+            Assert.Equal(1, call(0, 0x1234));
+            Assert.Equal(2, call(0x1234, 0x999));
+            EntryHook.SetWatched(slot, 0);
+            Assert.Equal(2, call(0, 0x1234));
+        }
+        finally
+        {
+            Kernel32.VirtualFree(memory, 0, Kernel32.MEM_RELEASE);
+        }
     }
 }
