@@ -29,6 +29,10 @@ public static unsafe class FriendlyFireHooks
 {
     /// <summary>The mutator's slug.</summary>
     public const string Slug = "ovs_friendly_fire";
+    /// <summary>EMvsMatchType.LocalPlay: an offline match, which can have a teammate.</summary>
+    public const int LocalPlayMatchType = 2;
+    /// <summary>EMvsMatchType.Lab: training.</summary>
+    public const int LabMatchType = 4;
 
     // RVAs are the C++ client's; the bytes are from a disassembly of the final build
     // (MultiVersus-Win64-Shipping.exe, 2026-09-28).
@@ -71,6 +75,7 @@ public static unsafe class FriendlyFireHooks
     private static ILogger? s_log;
     private static ObjectFinder? s_finder;
     private static bool s_installed;
+    private static bool s_offlineTesting;
     private static volatile bool s_active;
     private static nint s_fighterClass;
     private static FName s_shine;
@@ -106,6 +111,7 @@ public static unsafe class FriendlyFireHooks
     public static bool Apply(HookContext c)
     {
         s_log = c.Log;
+        s_offlineTesting = c.Settings.FriendlyFireOffline;
         c.Log.Info("==Friendly Fire==");
         var image = c.Image;
         nint isSameTeam = image.Address(IsSameTeamRva);
@@ -172,7 +178,7 @@ public static unsafe class FriendlyFireHooks
         }
 
         SetWatched(0);
-        if (settings?.HasWorldBuff(Slug) != true)
+        if (settings == null || !IsOn(settings, s_offlineTesting))
         {
             MatchRulesLog.Line("friendly fire: off");
             return;
@@ -194,9 +200,18 @@ public static unsafe class FriendlyFireHooks
         CheckMatchStarted(finder);
         s_active = true;
         EnsureGameStateFlag();
-        s_log?.Info("[FF] friendly fire on");
+        s_log?.Info($"[FF] friendly fire on ({(settings.HasWorldBuff(Slug) ? "mutator" : "offline testing")})");
         MatchRulesLog.Line($"friendly fire: ON (support classes loaded: shine={s_shine.Index != 0} books={s_books.Count(b => b.Index != 0)} cork={s_cork.Index != 0} carriedJerry={s_carriedJerry.Index != 0})");
     }
+
+    /// <summary>
+    /// Whether friendly fire is on for a match: the server selected the mutator, or, with
+    /// <paramref name="offlineTesting"/> ([Settings.Debug] FriendlyFireOffline), the match is offline
+    /// Local Play or the Lab. An online match never gets it from the setting, so every player in one
+    /// always runs the same rules.
+    /// </summary>
+    public static bool IsOn(MatchSettings settings, bool offlineTesting) =>
+        settings.HasWorldBuff(Slug) || (offlineTesting && !settings.Online && settings.MatchType is LocalPlayMatchType or LabMatchType);
 
     /// <summary>Finds the game state through the game mode and checks that its field at the flag's offset is a plain bool.</summary>
     private static void CheckGameStateFlag(ObjectFinder finder, nint gameMode)

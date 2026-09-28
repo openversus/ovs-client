@@ -169,6 +169,9 @@ ReleaseOwner = "openversus"
 # For testing match rules; leave it off. Writes logs/MatchRules.log: each match's settings, stock-rule deaths and every friendly-fire hit.
 MatchRulesLog = false
 
+# For testing; leave it off. Friendly fire in offline matches (Local Play, the Lab) without the mutator. Online matches only ever get it from the server.
+FriendlyFireOffline = false
+
 # ---------------------------------------------------------------------------
 # The OpenVersus server. Leave this section alone unless you run your own server.
 # ---------------------------------------------------------------------------

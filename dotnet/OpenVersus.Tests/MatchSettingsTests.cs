@@ -1,5 +1,6 @@
 using System.Text;
 using OpenVersus.Game;
+using OpenVersus.Hooks;
 
 namespace OpenVersus.Tests;
 
@@ -59,6 +60,23 @@ public class MatchSettingsTests
         var memory = new FakeMemory();
         Assert.False(MatchSettings.TryRead(memory, 0, out _));
         Assert.False(MatchSettings.TryRead(memory, (nint)Config, out _));
+    }
+
+    [Fact]
+    public void FriendlyFireIsOnWithTheMutatorOrOfflineWhenTesting()
+    {
+        var withMutator = new MatchSettings("2v2", 4, ["ovs_friendly_fire"], 5, true);
+        var online = new MatchSettings("2v2", 4, [], 5, true);
+        var localPlay = new MatchSettings("2v2", 4, [], FriendlyFireHooks.LocalPlayMatchType, false);
+        var lab = new MatchSettings("1v1", 4, [], FriendlyFireHooks.LabMatchType, false);
+
+        Assert.True(FriendlyFireHooks.IsOn(withMutator, offlineTesting: false));
+        Assert.False(FriendlyFireHooks.IsOn(online, offlineTesting: true));
+        Assert.False(FriendlyFireHooks.IsOn(localPlay, offlineTesting: false));
+        Assert.True(FriendlyFireHooks.IsOn(localPlay, offlineTesting: true));
+        Assert.True(FriendlyFireHooks.IsOn(lab, offlineTesting: true));
+        // An online match never takes it from the setting, whatever its type says.
+        Assert.False(FriendlyFireHooks.IsOn(localPlay with { Online = true }, offlineTesting: true));
     }
 
     /// <summary>An FString at <paramref name="at"/>: data, count with the terminator, capacity.</summary>
