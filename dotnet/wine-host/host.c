@@ -36,6 +36,11 @@ __asm__(
     "answer:\n"
     "    mov eax, 1234\n"
     "    ret\n"
+    ".globl thrice\n"
+    "thrice:\n"
+    "    mov r11, 0x0102030405060708\n"
+    "    lea rax, [rcx+rcx*2]\n"
+    "    ret\n"
     ".att_syntax prefix\n"
 );
 
@@ -44,10 +49,21 @@ extern long long call_site(long long);
 extern long long jmp_site(long long);
 extern long long guard_site(long long);
 extern int answer(void);
+extern long long thrice(long long);
+
+/* A table of function pointers in read-only data, the way a vtable is, called through a slot
+   the compiler cannot fold: the plugin swaps slot 1 atomically. */
+long long (*const table[2])(long long) = {twice, thrice};
+volatile int table_slot = 1;
+
+static long long via_table(long long x)
+{
+    return table[table_slot](x);
+}
 
 int main(void)
 {
-    printf("before: call=%lld jmp=%lld guard=%lld answer=%d\n", call_site(21), jmp_site(5), guard_site(3), answer());
+    printf("before: call=%lld jmp=%lld guard=%lld answer=%d table=%lld\n", call_site(21), jmp_site(5), guard_site(3), answer(), via_table(7));
 
     HMODULE asi = LoadLibraryA("OpenVersus.HookTest.asi");
     if (!asi) {
@@ -63,13 +79,15 @@ int main(void)
 
     long long c = call_site(21), j = jmp_site(5), g = guard_site(3);
     int a = answer();
-    printf("after:  call=%lld jmp=%lld guard=%lld answer=%d\n", c, j, g, a);
+    long long t = via_table(7);
+    printf("after:  call=%lld jmp=%lld guard=%lld answer=%d table=%lld\n", c, j, g, a, t);
 
     int ok = 1;
     if (c != 43)   { printf("FAIL: call redirect (want 43)\n"); ok = 0; }
     if (j != 1010) { printf("FAIL: jmp redirect (want 1010)\n"); ok = 0; }
     if (g != 77)   { printf("FAIL: guard fallback (want 77)\n"); ok = 0; }
     if (a != 4321) { printf("FAIL: byte patch (want 4321)\n"); ok = 0; }
+    if (t != 121)  { printf("FAIL: pointer swap (want 121)\n"); ok = 0; }
     printf(ok ? "PASS\n" : "FAILED\n");
     return ok ? 0 : 1;
 }
