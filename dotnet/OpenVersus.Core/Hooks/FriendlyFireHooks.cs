@@ -62,8 +62,8 @@ public static unsafe class FriendlyFireHooks
     private const string JerryCork = "Mvs_JerryCork_Actor_C";
     private const string CarriedJerry = "Mvs_Jerry_Actor_NoHitbox_C";
 
-    /// <summary>The most hits one match writes to <see cref="MatchRulesLog"/>.</summary>
-    private const int MaxLoggedPerMatch = 400;
+    /// <summary>The most lines one match writes to <see cref="MatchRulesLog"/>; a repeat of the line before counts once.</summary>
+    private const int MaxLoggedPerMatch = 2000;
 
     private static delegate* unmanaged<nint, nint, void> s_processActiveHit;
     private static delegate* unmanaged<nint, nint, byte, int*, void> s_getHitResponseFlags;
@@ -86,6 +86,8 @@ public static unsafe class FriendlyFireHooks
     private static bool s_gameStateFlagOk;
     private static bool s_matchStartedParamOk;
     private static int s_logged;
+    private static string? s_lastLine;
+    private static int s_repeats;
     private static readonly Dictionary<nint, string> s_classNames = [];
 
     /// <summary>Which ally interactions keep the ally path, and why.</summary>
@@ -169,6 +171,8 @@ public static unsafe class FriendlyFireHooks
     {
         s_active = false;
         s_logged = 0;
+        s_lastLine = null;
+        s_repeats = 0;
         s_gameState = 0;
         s_gameStateFlagOk = false;
         s_matchStartedParamOk = false;
@@ -293,10 +297,9 @@ public static unsafe class FriendlyFireHooks
             return same;
         }
 
-        if (MatchRulesLog.On && s_logged < MaxLoggedPerMatch)
+        if (MatchRulesLog.On)
         {
-            s_logged++;
-            MatchRulesLog.Line("ff shield: a teammate's hit meets the shield as an opponent's");
+            LogLine("ff shield: a teammate's hit meets the shield as an opponent's");
         }
 
         return 0;
@@ -487,12 +490,39 @@ public static unsafe class FriendlyFireHooks
             return;
         }
 
-        s_logged++;
         var p = Parties.Read(hit);
         nint holder = Read(p.AttackerOwner, Mvs.ActorOwner);
         nint instigator = Read(p.AttackerOwner, Mvs.ActorInstigator);
-        MatchRulesLog.Line($"ff {where}: {(keep == Keep.No ? "enemy" : "ally, " + keep)} attacker={ClassName(p.AttackerOwner)} top={ClassName(p.TopOwner)} "
+        LogLine($"ff {where}: {(keep == Keep.No ? "enemy" : "ally, " + keep)} attacker={ClassName(p.AttackerOwner)} top={ClassName(p.TopOwner)} "
             + $"holder={ClassName(holder)} instigator={ClassName(instigator)} hitbox={ClassName(p.ColliderSet)}:{ObjectName(p.ColliderSet)} defender={ClassName(p.DefenderOwner)}{extra}");
+    }
+
+    /// <summary>
+    /// Writes <paramref name="line"/> unless it repeats the one before (a tether or lasso connects every
+    /// frame); the repeats are counted onto the next different line. At most <see cref="MaxLoggedPerMatch"/> lines.
+    /// </summary>
+    private static void LogLine(string line)
+    {
+        if (line == s_lastLine)
+        {
+            s_repeats++;
+            return;
+        }
+
+        if (s_logged >= MaxLoggedPerMatch)
+        {
+            return;
+        }
+
+        if (s_repeats > 0)
+        {
+            MatchRulesLog.Line($"  (the line above {s_repeats} more times)");
+        }
+
+        s_logged++;
+        s_lastLine = line;
+        s_repeats = 0;
+        MatchRulesLog.Line(line);
     }
 
     private static string ClassName(nint obj)
