@@ -56,6 +56,12 @@ public static unsafe class FfaStocksHooks
     private static FfaStocks? s_match;
     private static bool s_endBlockLogged;
     private static HudTargets? s_hud;
+    private static nint s_hudLoggedFor;
+    private static Timer? s_hudSeedTimer;
+    private static int s_hudSeedTicks;
+    // How long after a match starts the lives are sent to the HUD once a second: the HUD appears
+    // some seconds in (about 12 s in the first tests), and the game zeroes its scores when it does.
+    private const int HudSeedSeconds = 20;
     private static long s_hudSequence;
     private static long s_hudApplied;
 
@@ -160,6 +166,10 @@ public static unsafe class FfaStocksHooks
             s_gameMode = gameMode;
             s_match = StartMatch(finder);
             s_endBlockLogged = false;
+            if (s_match != null)
+            {
+                StartHudSeeding();
+            }
         }
 
         if (s_match is not { } match || !IsFighter(finder, character))
@@ -274,6 +284,29 @@ public static unsafe class FfaStocksHooks
         }), update, preferLocal: false);
     }
 
+    /// <summary>
+    /// Sends the lives to the HUD once a second for the first <see cref="HudSeedSeconds"/> seconds of
+    /// a match, so the scores show full lives from the start instead of the game's 0 until the first
+    /// death. Runs on a timer thread; each send is <see cref="PostLivesToHud"/>.
+    /// </summary>
+    private static void StartHudSeeding()
+    {
+        s_hudSeedTimer?.Dispose();
+        s_hudSeedTicks = 0;
+        s_hudSeedTimer = new Timer(static _ => HookGuard.Run("FfaLivesHudSeed", 0, static _ => SeedHudTick()), null, 1000, 1000);
+    }
+
+    private static void SeedHudTick()
+    {
+        if (s_match is not { Ended: false } match || ++s_hudSeedTicks > HudSeedSeconds)
+        {
+            Interlocked.Exchange(ref s_hudSeedTimer, null)?.Dispose();
+            return;
+        }
+
+        PostLivesToHud(match);
+    }
+
     /// <summary>The HUD objects for this match: cached while they are alive, otherwise found again. Off the game thread.</summary>
     private static HudTargets? FindHud(nint gameMode)
     {
@@ -296,6 +329,12 @@ public static unsafe class FfaStocksHooks
             Reflection.Find(finder, finder.Image, "UI_Broker_C", "SetScoreForPlayer"),
             Reflection.Find(finder, finder.Image, "UI_IGv3_PlayerScore_C", "OnScore"));
         s_hud = hud;
+        if (hud.Widgets.Length == 0 || s_hudLoggedFor == gameMode)
+        {
+            return hud;
+        }
+
+        s_hudLoggedFor = gameMode;
         s_log?.Info($"[FFA] HUD found: broker={(hud.Broker != 0 ? "yes" : "no")} score widgets={hud.Widgets.Length} "
             + $"setMax={TakesPlayerAndScore(hud.SetMax)} setScore={TakesPlayerAndScore(hud.SetScore)} onScore={TakesPlayerAndScore(hud.OnScore)}");
         return hud;
