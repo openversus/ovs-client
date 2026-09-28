@@ -117,15 +117,6 @@ CFName = "4C 8D 9C ? ? ? ? ? 49 8B ? ? 49 8B ? ? 4D 8B ? ? 4D 8B ? ? 41 ? ? ? ? 
 # The engine's wide-character name constructor.
 WCFName = "48 85 ? 74 1E 0F ? ? 66 85 C0 74 16 0F ? ?"
 
-# Where the engine gives curl a request's address.
-CurlUrl = "BA 12 27 00 00 48 8B 4F 60 E8 ? ? ? ?"
-
-# Where the engine gives curl a request's headers, so requests to the OpenVersus server carry your identity.
-CurlHeaders = "4C 8B 47 68 4D 85 C0 74 ? 48 8B 4F 60 BA 27 27 00 00 E8 ? ? ? ?"
-
-# The engine's call that adds one header to a request.
-CurlSlistAppend = "49 C7 C6 FF FF FF FF 48 8B 4F 68 E8 ? ? ? ?"
-
 # ---------------------------------------------------------------------------
 # More byte patterns: MultiVersus functions.
 # ---------------------------------------------------------------------------

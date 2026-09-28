@@ -233,9 +233,11 @@ with the C++ client:
 
 - Added: `[Patches] PostMatchFreeze`, on by default, with its pattern under `[Patterns.MVS]`; and,
   off by default, `[Patches] SunsetCallers`, `[Settings.Debug] CountSunsetCalls` and
-  `[Features] NetStats`. `CurlUrl`, `CurlHeaders` and `CurlSlistAppend` under `[Patterns.UE]`
-  find where the engine sets up a request, so requests to the OpenVersus server carry this
-  install's identity; that hook has no switch, since it is what ties a player to their own account.
+  `[Features] NetStats`. Two changes have no setting and no pattern in the file, so a player cannot
+  switch them off: requests to the OpenVersus server carry this install's identity
+  (`Hooks/RequestHeadersHook.cs`), which ties a player to their own account; and the game's WB
+  Analytics telemetry to event.wbinsights.com is stopped at its send function
+  (`Hooks/TelemetryPatch.cs`).
 - `[Settings] LogLevel` takes a level name as well as a number (see [Logs](#logs)).
 - No longer read: `LogSize`, `ModLoader`, `AntiCheatEngine`, `CurlSetOpt` and `CurlPerform` under
   `[Settings]` (`Settings.RetiredKeys`). They stay in files that have them, each logged at startup

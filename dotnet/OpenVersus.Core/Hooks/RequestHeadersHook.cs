@@ -23,6 +23,15 @@ public static unsafe class RequestHeadersHook
     /// <summary>The <see cref="GameFunctions"/> key for curl_slist_append, which the headers are appended with.</summary>
     public const string SlistAppendName = "CurlSlistAppend";
 
+    // The patterns live here, not in OpenVersus.toml: the identity headers are not something a player
+    // can switch off or point elsewhere. Each is unique in the game's only build.
+    /// <summary>The CURLOPT_URL call in SetupRequest.</summary>
+    internal const string UrlPattern = "BA 12 27 00 00 48 8B 4F 60 E8 ? ? ? ?";
+    /// <summary>The CURLOPT_HTTPHEADER call in SetupRequest.</summary>
+    internal const string HeadersPattern = "4C 8B 47 68 4D 85 C0 74 ? 48 8B 4F 60 BA 27 27 00 00 E8 ? ? ? ?";
+    /// <summary>The engine's call to curl_slist_append.</summary>
+    internal const string SlistAppendPattern = "49 C7 C6 FF FF FF FF 48 8B 4F 68 E8 ? ? ? ?";
+
     // Where each pattern's call instruction is.
     private const int UrlCall = 9;
     private const int HeadersCall = 18;
@@ -45,9 +54,9 @@ public static unsafe class RequestHeadersHook
             return false;
         }
 
-        var url = c.Patterns.Find("CurlUrl");
-        var list = c.Patterns.Find("CurlHeaders");
-        var append = c.Patterns.Find("CurlSlistAppend");
+        var url = c.Patterns.Find("CurlUrl", UrlPattern);
+        var list = c.Patterns.Find("CurlHeaders", HeadersPattern);
+        var append = c.Patterns.Find("CurlSlistAppend", SlistAppendPattern);
         if (!url.Found || !list.Found || !append.Found)
         {
             return false;

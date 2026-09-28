@@ -458,6 +458,10 @@ public sealed class Client
             Status.PostMatchFreeze = Apply("PostMatchFreeze", c, PostMatchFreezePatch.Apply);
         }
 
+        // Not a setting: the game's WB telemetry sends every click, with the player's session token,
+        // IP and Steam id, to a third party. It is stopped for everyone.
+        Status.TelemetryOff = Apply("Telemetry", c, TelemetryPatch.Apply);
+
         // Not a setting: the identity token on the game's login is what ties a player to their own
         // account rather than to whoever last registered from their IP. The game's /access has no
         // token of its own before login, so only-if-missing leaves a token it does have alone.
