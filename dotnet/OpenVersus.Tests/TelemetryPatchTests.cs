@@ -147,4 +147,27 @@ public class TelemetryPatchTests
         int record = s_record.AsSpan().IndexOf([(byte)0xFF, (byte)0xD3]);
         Assert.InRange(record, branch + 6, jeTarget - 1);
     }
+
+    // The Store's patterns are each function's first 32 bytes, read from the game's only build, where
+    // each is unique; that the functions return void and own nothing is from the reflected headers.
+    [Fact]
+    public void EveryStorePatternIsAnExact32ByteFunctionStartAndTheyAreAllDifferent()
+    {
+        var patterns = TelemetryPatch.ShopFunctions.Select(f => BytePattern.Parse(f.Pattern)).ToList();
+        Assert.All(patterns, p => Assert.Equal(32, p.Length));
+        Assert.All(patterns, p => Assert.All(p.Mask, m => Assert.Equal(0xFF, m)));
+        Assert.Equal(patterns.Count, patterns.Select(p => Convert.ToHexString(p.Bytes)).Distinct().Count());
+        Assert.Equal(TelemetryPatch.ShopFunctions.Length, TelemetryPatch.ShopFunctions.Select(f => f.Name).Distinct().Count());
+        Assert.Equal(0xC3, TelemetryPatch.Ret);
+    }
+
+    [Fact]
+    public void NoStoreFunctionIsAlsoTheRecordOrSendPatchSite()
+    {
+        foreach (var f in TelemetryPatch.ShopFunctions)
+        {
+            Assert.NotEqual(TelemetryPatch.RecordPattern, f.Pattern);
+            Assert.DoesNotContain(TelemetryPatch.Pattern, f.Pattern);
+        }
+    }
 }

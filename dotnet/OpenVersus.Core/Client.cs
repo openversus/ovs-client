@@ -459,10 +459,12 @@ public sealed class Client
         }
 
         // Not a setting: the game's WB telemetry sends every click, with the player's session token,
-        // IP and Steam id, to a third party. It is stopped for everyone: nothing is sent, and
-        // RecordEventWithAttributes records nothing.
+        // IP and Steam id, to a third party. It is stopped for everyone, in layers, so one pattern
+        // going missing does not bring it back: the Store's analytics return at once, the recorder
+        // records nothing, and nothing is sent.
         Status.TelemetryOff = Apply("Telemetry", c, TelemetryPatch.Apply);
         Status.TelemetryRecordOff = Apply("TelemetryRecord", c, TelemetryPatch.ApplyRecord);
+        Status.TelemetryShopOff = Apply("TelemetryShop", c, TelemetryPatch.ApplyShop);
 
         // Not a setting: the identity token on the game's login is what ties a player to their own
         // account rather than to whoever last registered from their IP. The game's /access has no

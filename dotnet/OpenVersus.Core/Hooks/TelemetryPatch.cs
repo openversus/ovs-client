@@ -115,4 +115,68 @@ public static class TelemetryPatch
         c.Log.Success($"TelemetryRecord: RecordEventWithAttributes records nothing (patched at 0x{site:X})");
         return true;
     }
+
+    /// <summary>A function made to return at once: the pattern is its first 32 bytes, unique in the game's only build.</summary>
+    /// <param name="Name">For the log.</param>
+    /// <param name="Pattern">The function's first 32 bytes.</param>
+    internal sealed record EntryReturn(string Name, string Pattern);
+
+    /// <summary>ret, over the function's first byte.</summary>
+    internal const byte Ret = 0xC3;
+
+    /// <summary>
+    /// The Store's analytics, outside the record and send layers. Every one is void and owns nothing its
+    /// caller does not free (an enum, const references, or no arguments), so returning at once is all there
+    /// is to it. The six interface implementations are only reached through their vtables; the two
+    /// recorders only from their Blueprint thunks and those implementations. Each ends up in
+    /// RecordEventWithAttributes, which is also cut.
+    /// </summary>
+    internal static readonly EntryReturn[] ShopFunctions =
+    [
+        // IMvsShopAnalyticsGameUiInteractable::OnMvsShopAnalyticsInteraction(EMvsShopAnalyticsInteracton), per widget.
+        new("the Store tile's interaction (MvsShopItemCellWidget)", "40 53 48 81 EC E0 00 00 00 48 8D 99 D8 FC FF FF 44 0F B6 C2 48 8B D3 48 8D 4C 24 20 E8 3F 96 BA"),
+        new("the product page's interaction (MvsShopItemDetailViewWidget)", "40 53 48 81 EC E0 00 00 00 48 8D 99 B8 FB FF FF 44 0F B6 C2 48 8B D3 48 8D 4C 24 20 E8 EF 40 BA"),
+        new("the purchase dialog's interaction (MvsShopPurchaseModalWidget)", "40 53 48 81 EC E0 00 00 00 48 8D 99 C8 FB FF FF 44 0F B6 C2 48 8B D3 48 8D 4C 24 20 E8 2F FF B9"),
+        // IMvsShopAnalyticsGameStore::OnMvsShopAnalyticsEnter/Exit(const FString&...), the interface's own, shared by every screen.
+        new("entering a Store screen (game_store_enter)", "48 89 5C 24 10 48 89 6C 24 18 56 57 41 56 48 81 EC D0 00 00 00 48 8B D9 49 8B F1 48 8D 8C 24 F0"),
+        new("leaving a Store screen (game_store_exit)", "48 89 5C 24 08 48 89 74 24 10 48 89 7C 24 18 41 56 48 81 EC A0 00 00 00 48 8B 01 49 8B D8 48 8B"),
+        // IMvsShopAnalyticsGameStoreUi::OnMvsShopAnalyticsGameStoreUiOpen(), per widget.
+        new("the product page opening (MvsShopItemDetailViewWidget)", "40 53 48 81 EC 90 00 00 00 48 8D 99 B0 FB FF FF 48 8B D3 48 8D 4C 24 20 E8 93 3E BA FF 48 8B 03"),
+        new("the Store opening (MvsShopWidget)", "48 89 5C 24 08 57 48 81 EC 90 00 00 00 48 8D 99 E8 FA FF FF 48 8B CB E8 24 83 30 00 48 8B D3 48"),
+        // UMvsShopAnalytics::RecordGameStoreUiInteract/Open(const FMvs...Attributes&, UFighterGameInstance*), static.
+        new("RecordGameStoreUiInteract (game_store_ui_interact)", "48 89 5C 24 08 57 48 83 EC 40 48 8B FA 48 8B D1 48 8D 4C 24 20 E8 A6 65 FF FF 48 8D 15 37 C5 7F"),
+        new("RecordGameStoreUiOpen (game_store_ui_open)", "48 89 5C 24 08 57 48 83 EC 40 48 8B FA 48 8B D1 48 8D 4C 24 20 E8 B6 6E FF FF 48 8D 15 0F C5 7F"),
+    ];
+
+    /// <summary>
+    /// Makes each of <see cref="ShopFunctions"/> return at once. True only when every one was patched; each
+    /// one missing or not as expected is logged and the rest are still patched.
+    /// </summary>
+    public static bool ApplyShop(HookContext c)
+    {
+        c.Log.Info("==TelemetryShop==");
+        int patched = 0;
+        foreach (var f in ShopFunctions)
+        {
+            var hit = c.Patterns.Find("TelemetryShop", f.Pattern);
+            if (!hit.Found)
+            {
+                c.Log.Error($"TelemetryShop: {f.Name} was not found; not patched");
+                continue;
+            }
+
+            try
+            {
+                CodeWriter.WriteIf(hit.Address, BytePattern.Parse(f.Pattern).Bytes, [Ret], code: true);
+                patched++;
+            }
+            catch (PatchException e)
+            {
+                c.Log.Error($"TelemetryShop: {f.Name}: {e.Message}");
+            }
+        }
+
+        c.Log.Success($"TelemetryShop: {patched} of {ShopFunctions.Length} Store analytics functions return at once");
+        return patched == ShopFunctions.Length;
+    }
 }
