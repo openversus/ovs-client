@@ -130,6 +130,12 @@ public sealed class Settings
         public static readonly SettingDef CFNamePattern = SettingDef.Pattern("Patterns.UE", "CFName", "4C 8D 9C ? ? ? ? ? 49 8B ? ? 49 8B ? ? 4D 8B ? ? 4D 8B ? ? 41 ? ? ? ? 49 8B ? ? C3 48 8D ? ? ? ? ? E8 ? ? ? ? 83 3D ? ? ? ? FF 0F 85 ? ? ? ? 41 B8 01 00 00 00 48 8D ? ? ? ? ? 48 8D ? ? ? ? ? E8 ? ? ? ? 48 8D ? ? ? ? ? E8 ? ? ? ? E9 ? ? ? ? CC CC CC CC CC CC CC CC");
         /// <summary>Finds the wide FName constructor, for <see cref="Hooks.UeFunctionHooks"/>.</summary>
         public static readonly SettingDef WCFNamePattern = SettingDef.Pattern("Patterns.UE", "WCFName", "48 85 ? 74 1E 0F ? ? 66 85 C0 74 16 0F ? ?");
+        /// <summary>Finds the CURLOPT_URL call in the engine's curl request setup, for <see cref="Hooks.RequestHeadersHook"/>, which always applies.</summary>
+        public static readonly SettingDef CurlUrlPattern = SettingDef.Pattern("Patterns.UE", "CurlUrl", "BA 12 27 00 00 48 8B 4F 60 E8 ? ? ? ?");
+        /// <summary>Finds the CURLOPT_HTTPHEADER call in the engine's curl request setup, for <see cref="Hooks.RequestHeadersHook"/>.</summary>
+        public static readonly SettingDef CurlHeadersPattern = SettingDef.Pattern("Patterns.UE", "CurlHeaders", "4C 8B 47 68 4D 85 C0 74 ? 48 8B 4F 60 BA 27 27 00 00 E8 ? ? ? ?");
+        /// <summary>Finds the engine's call to curl_slist_append, for <see cref="Hooks.RequestHeadersHook"/>.</summary>
+        public static readonly SettingDef CurlSlistAppendPattern = SettingDef.Pattern("Patterns.UE", "CurlSlistAppend", "49 C7 C6 FF FF FF FF 48 8B 4F 68 E8 ? ? ? ?");
         /// <summary>Finds UMvsFrontendManager::AddDialog and the frontend manager getter, for <see cref="Hooks.DialogHooks"/>.</summary>
         public static readonly SettingDef DialogPattern = SettingDef.Pattern("Patterns.MVS", "Dialog", "40 ? 48 83 ? ? 48 ? ? E8 ? ? ? ? 48 85 ? 75 ? 48 8B ? 48");
         /// <summary>Finds the FMvsDialogParameters constructor, for <see cref="Hooks.DialogHooks"/>; resolved for the log only.</summary>
@@ -178,6 +184,9 @@ public sealed class Settings
         Rows.FTextPattern,
         Rows.CFNamePattern,
         Rows.WCFNamePattern,
+        Rows.CurlUrlPattern,
+        Rows.CurlHeadersPattern,
+        Rows.CurlSlistAppendPattern,
         Rows.DialogPattern,
         Rows.DialogParamsPattern,
         Rows.DialogCallbackPattern,

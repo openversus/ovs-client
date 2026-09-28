@@ -37,6 +37,36 @@ public static unsafe class CodeWriter
         }
     }
 
+    /// <summary>
+    /// Replaces the pointer at <paramref name="slot"/> (a vtable entry, say) with <paramref name="replacement"/>
+    /// if it still holds <paramref name="expected"/>, in one atomic exchange, or throws a
+    /// <see cref="PatchException"/>. Another thread may be reading the slot to make a call, and
+    /// a byte-by-byte copy could hand it half of each pointer.
+    /// </summary>
+    public static void SwapPointer(nint slot, nint expected, nint replacement)
+    {
+        if (slot % sizeof(nint) != 0)
+        {
+            throw new PatchException($"pointer slot 0x{slot:X} is not aligned; not patching");
+        }
+
+        if (!Kernel32.VirtualProtect(slot, (nuint)sizeof(nint), Kernel32.PAGE_READWRITE, out uint oldProtect))
+        {
+            throw new PatchException($"VirtualProtect error {Marshal.GetLastPInvokeError()} at 0x{slot:X}");
+        }
+
+        nint found = Interlocked.CompareExchange(ref *(nint*)slot, replacement, expected);
+        if (!Kernel32.VirtualProtect(slot, (nuint)sizeof(nint), oldProtect, out _))
+        {
+            throw new PatchException($"swapped, but protection not restored (VirtualProtect error {Marshal.GetLastPInvokeError()}) at 0x{slot:X}");
+        }
+
+        if (found != expected)
+        {
+            throw new PatchException($"expected 0x{expected:X} at 0x{slot:X}, found 0x{found:X}; not patching");
+        }
+    }
+
     /// <summary>Writes only if the bytes there are <paramref name="expected"/>; throws a <see cref="PatchException"/> otherwise.</summary>
     public static void WriteIf(nint target, ReadOnlySpan<byte> expected, ReadOnlySpan<byte> bytes, bool code)
     {

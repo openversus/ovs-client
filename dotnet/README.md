@@ -233,7 +233,9 @@ with the C++ client:
 
 - Added: `[Patches] PostMatchFreeze`, on by default, with its pattern under `[Patterns.MVS]`; and,
   off by default, `[Patches] SunsetCallers`, `[Settings.Debug] CountSunsetCalls` and
-  `[Features] NetStats`.
+  `[Features] NetStats`. `CurlUrl`, `CurlHeaders` and `CurlSlistAppend` under `[Patterns.UE]`
+  find where the engine sets up a request, so requests to the OpenVersus server carry this
+  install's identity; that hook has no switch, since it is what ties a player to their own account.
 - `[Settings] LogLevel` takes a level name as well as a number (see [Logs](#logs)).
 - No longer read: `LogSize`, `ModLoader`, `AntiCheatEngine`, `CurlSetOpt` and `CurlPerform` under
   `[Settings]` (`Settings.RetiredKeys`). They stay in files that have them, each logged at startup
@@ -396,9 +398,10 @@ refused.
 
 The Wine harness (`build.sh harness` or `wine-host/run.sh`) checks the hooking layer without the
 game: the host calls three assembly sites before and after loading the test plugin, which
-redirects a call and a jmp into managed code, patches a byte, and makes one hook throw to prove the
-guard returns the fallback. It needs wine and mingw-w64 besides the publish toolchain, and uses its
-own prefix under `local/wine-host`.
+redirects a call and a jmp into managed code, patches a byte, makes one hook throw to prove the
+guard returns the fallback, and swaps a function pointer in read-only data, as in a vtable (and
+refuses a second swap whose expected value is stale). It needs wine and mingw-w64 besides the
+publish toolchain, and uses its own prefix under `local/wine-host`.
 
 ---
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # End-to-end test of the hooking layer: cross-compiles host.c, publishes the harness plugin, and
 # runs them together under Wine. The host calls three assembly sites before and after loading
-# the plugin; the plugin redirects a call and a jmp into managed code, patches a byte, and makes
-# one hook throw to prove the guard returns the fallback.
+# the plugin; the plugin redirects a call and a jmp into managed code, patches a byte, makes
+# one hook throw to prove the guard returns the fallback, and swaps a pointer in read-only data.
 #
 #   dotnet/wine-host/run.sh [workdir]        (default: <repo>/local/wine-host)
 #
@@ -31,7 +31,7 @@ wine host.exe > host.out 2>wine.err || status=$?
 echo "--- host output (exit $status)"; cat host.out
 echo "--- OpenVersus.HookTest.log"; cat OpenVersus.HookTest.log 2>/dev/null || echo "(no log written)"
 grep -q 'process-exit hook fired' OpenVersus.HookTest.log 2>/dev/null && echo "EXIT HOOK: fires under NativeAOT in a DLL" || echo "EXIT HOOK: did not fire (the next-launch archive covers it)"
-if [ $status = 0 ] && tr -d '\r' < host.out | grep -q '^PASS$' && grep -q 'guarded read: ok' OpenVersus.HookTest.log && grep -q 'trampoline page .* (as expected)' OpenVersus.HookTest.log; then
+if [ $status = 0 ] && tr -d '\r' < host.out | grep -q '^PASS$' && grep -q 'guarded read: ok' OpenVersus.HookTest.log && grep -q 'trampoline page .* (as expected)' OpenVersus.HookTest.log && grep -q 'stale swap refused, slot unchanged' OpenVersus.HookTest.log; then
     echo "WINE TEST: passed"
 else
     echo "WINE TEST: FAILED (see $work/wine.err)"; exit 1

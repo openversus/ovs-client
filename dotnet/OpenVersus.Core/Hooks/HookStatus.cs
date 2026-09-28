@@ -26,10 +26,12 @@ public sealed class HookStatus
     public bool PostMatchFreeze { get; set; }
     /// <summary>Every call to the sunset check is patched out (<see cref="SunsetCallersPatch"/>); false if any site failed.</summary>
     public bool SunsetCallers { get; set; }
+    /// <summary>The game's requests to the OpenVersus server carry the client's headers (<see cref="RequestHeadersHook"/>).</summary>
+    public bool RequestHeaders { get; set; }
 
     /// <summary>Every flag as name=value on one line, for the log.</summary>
     public override string ToString() =>
-        $"sigcheck={AntiSigCheck} gameEndpoint={GameEndpointSwap} prodEndpoint={ProdEndpointSwap} sunset={SunsetDate} ue={UeFuncs} dialog={Dialog} notifs={Notifications} postMatchFreeze={PostMatchFreeze} sunsetCallers={SunsetCallers}";
+        $"sigcheck={AntiSigCheck} gameEndpoint={GameEndpointSwap} prodEndpoint={ProdEndpointSwap} sunset={SunsetDate} ue={UeFuncs} dialog={Dialog} notifs={Notifications} postMatchFreeze={PostMatchFreeze} sunsetCallers={SunsetCallers} requestHeaders={RequestHeaders}";
 }
 
 /// <summary>What every hook needs: the image, the pattern resolver, the settings and the log.</summary>

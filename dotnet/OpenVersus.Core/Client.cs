@@ -41,6 +41,8 @@ public sealed class Client
     public EnvInfo? Env { get; private set; }
     /// <summary>The install id and token the client's own server calls carry.</summary>
     public ServerIdentity ServerIdentity { get; } = new();
+    /// <summary>The headers added to the game's requests to the OpenVersus server; null until the hooks are applied. Any part of the client can add a rule.</summary>
+    public RequestHeaders? RequestHeaders { get; private set; }
     /// <summary>The HTTP transport for the server, sending <see cref="ServerIdentity"/>'s headers; a host may replace it before <see cref="Initialize"/>.</summary>
     public IHttpTransport Http { get; set; }
 
@@ -455,6 +457,16 @@ public sealed class Client
         {
             Status.PostMatchFreeze = Apply("PostMatchFreeze", c, PostMatchFreezePatch.Apply);
         }
+
+        // Not a setting: the identity token on the game's login is what ties a player to their own
+        // account rather than to whoever last registered from their IP. The game's /access has no
+        // token of its own before login, so only-if-missing leaves a token it does have alone.
+        var identity = ServerIdentity;
+        var headers = new RequestHeaders([Settings.ServerUrl, Settings.ProdServerUrl], Log);
+        headers.Add(new HeaderRule(RequestHeaders.HydraAccessToken, () => identity.Token, Path: "/access", OnlyIfMissing: true));
+        headers.Add(new HeaderRule(RequestHeaders.OvsIdentity, () => identity.Token));
+        RequestHeaders = headers;
+        Status.RequestHeaders = Apply("RequestHeaders", c, ctx => RequestHeadersHook.Apply(ctx, headers));
 
         Log.Info($"hooks: {Status}");
         foreach (var f in GameFunctions.All)
