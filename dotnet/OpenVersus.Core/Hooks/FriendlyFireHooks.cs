@@ -29,10 +29,6 @@ public static unsafe class FriendlyFireHooks
 {
     /// <summary>The mutator's slug.</summary>
     public const string Slug = "ovs_friendly_fire";
-    /// <summary>EMvsMatchType.LocalPlay: an offline match, which can have a teammate.</summary>
-    public const int LocalPlayMatchType = 2;
-    /// <summary>EMvsMatchType.Lab: training.</summary>
-    public const int LabMatchType = 4;
 
     // RVAs are the C++ client's; the bytes are from a disassembly of the final build
     // (MultiVersus-Win64-Shipping.exe, 2026-09-28).
@@ -215,7 +211,7 @@ public static unsafe class FriendlyFireHooks
     /// always runs the same rules.
     /// </summary>
     public static bool IsOn(MatchSettings settings, bool offlineTesting) =>
-        settings.HasWorldBuff(Slug) || (offlineTesting && !settings.Online && settings.MatchType is LocalPlayMatchType or LabMatchType);
+        settings.HasWorldBuff(Slug) || (offlineTesting && !settings.Online && settings.MatchType is MatchSettings.LocalPlayMatchType or MatchSettings.LabMatchType);
 
     /// <summary>Finds the game state through the game mode and checks that its field at the flag's offset is a plain bool.</summary>
     private static void CheckGameStateFlag(ObjectFinder finder, nint gameMode)
@@ -299,7 +295,7 @@ public static unsafe class FriendlyFireHooks
 
         if (MatchRulesLog.On)
         {
-            LogLine("ff shield: a teammate's hit meets the shield as an opponent's");
+            LogLine("ff shield check: teammates count as opponents");
         }
 
         return 0;
@@ -494,8 +490,42 @@ public static unsafe class FriendlyFireHooks
         nint holder = Read(p.AttackerOwner, Mvs.ActorOwner);
         nint instigator = Read(p.AttackerOwner, Mvs.ActorInstigator);
         LogLine($"ff {where}: {(keep == Keep.No ? "enemy" : "ally, " + keep)} attacker={ClassName(p.AttackerOwner)} top={ClassName(p.TopOwner)} "
-            + $"holder={ClassName(holder)} instigator={ClassName(instigator)} hitbox={ClassName(p.ColliderSet)}:{ObjectName(p.ColliderSet)} defender={ClassName(p.DefenderOwner)}{extra}");
+            + $"holder={ClassName(holder)} instigator={ClassName(instigator)} defender={ClassName(p.DefenderOwner)} {DescribeHitbox(p.ColliderSet)}{extra}");
     }
+
+    /// <summary>
+    /// What names the move behind a hitbox (a UPfgColliderSetComponent, whose own name is a throwaway):
+    /// its collider-set asset (InitData), the object that created it (UpdateObject) and that object's
+    /// outer, and the first shape's name. Offsets from PfgFixed2DGame in the CXXHeaderDump.
+    /// </summary>
+    private static string DescribeHitbox(nint colliderSet)
+    {
+        if (colliderSet == 0)
+        {
+            return "hitbox=-";
+        }
+
+        nint initData = Read(colliderSet, ColliderSetInitData);
+        nint updateObject = Read(colliderSet, ColliderSetUpdateObject);
+        nint updateOuter = Read(updateObject, Mvs.ObjectOuterPrivate);
+        return $"hitbox={ObjectName(initData)} by={ClassName(updateObject)}:{ObjectName(updateObject)} in={ClassName(updateOuter)}:{ObjectName(updateOuter)} "
+            + $"shape={FirstShapeName(colliderSet, ColliderSetShapeEntries)}/{FirstShapeName(colliderSet, ColliderSetInitDataDirect)}";
+    }
+
+    private static string FirstShapeName(nint colliderSet, int entriesOffset)
+    {
+        // TArray<FPfgColliderSetEntry>: data, count; each entry starts with its shape's FName.
+        nint data = Read(colliderSet, entriesOffset);
+        return data != 0 && CodeWriter.TryRead(colliderSet + entriesOffset + 8, out int count) && count > 0 && CodeWriter.TryRead(data, out FName name)
+            ? s_finder?.Names.ToString(name) ?? $"#{name.Index}"
+            : "-";
+    }
+
+    // UPfgColliderSetComponent (PfgFixed2DGame, CXXHeaderDump).
+    private const int ColliderSetUpdateObject = 0x520;
+    private const int ColliderSetInitData = 0x558;
+    private const int ColliderSetShapeEntries = 0x560;
+    private const int ColliderSetInitDataDirect = 0x580;
 
     /// <summary>
     /// Writes <paramref name="line"/> unless it repeats the one before (a tether or lasso connects every

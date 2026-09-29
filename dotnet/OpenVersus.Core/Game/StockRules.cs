@@ -70,10 +70,16 @@ public sealed class StockRules
 
     /// <summary>
     /// The rules for a match, or null when it has none: Free For All by its mode, Individual Stocks
-    /// only when the server selected its mutator.
+    /// only when the server selected its mutator. Never in the Lab, whose mode can read "ffa" too
+    /// but whose fighters must never stay down.
     /// </summary>
     public static StockRules? For(MatchSettings match)
     {
+        if (match.MatchType == MatchSettings.LabMatchType)
+        {
+            return null;
+        }
+
         if (IsFfa(match.Mode))
         {
             return new StockRules(LivesFromRingouts(match.NumRingouts));

@@ -15,6 +15,11 @@ namespace OpenVersus.Game;
 /// <param name="Online">bIsOnlineMatch.</param>
 public sealed record MatchSettings(string Mode, int NumRingouts, IReadOnlyList<string> WorldBuffs, int MatchType, bool Online)
 {
+    /// <summary>EMvsMatchType.LocalPlay: an offline match, which can have a teammate.</summary>
+    public const int LocalPlayMatchType = 2;
+    /// <summary>EMvsMatchType.Lab: training, where a fighter is never out.</summary>
+    public const int LabMatchType = 4;
+
     /// <summary>The most world buffs read; a count above it means the array is not what it should be.</summary>
     public const int MaxWorldBuffs = 64;
 

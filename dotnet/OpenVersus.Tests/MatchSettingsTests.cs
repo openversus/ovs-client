@@ -67,8 +67,8 @@ public class MatchSettingsTests
     {
         var withMutator = new MatchSettings("2v2", 4, ["ovs_friendly_fire"], 5, true);
         var online = new MatchSettings("2v2", 4, [], 5, true);
-        var localPlay = new MatchSettings("2v2", 4, [], FriendlyFireHooks.LocalPlayMatchType, false);
-        var lab = new MatchSettings("1v1", 4, [], FriendlyFireHooks.LabMatchType, false);
+        var localPlay = new MatchSettings("2v2", 4, [], MatchSettings.LocalPlayMatchType, false);
+        var lab = new MatchSettings("1v1", 4, [], MatchSettings.LabMatchType, false);
 
         Assert.True(FriendlyFireHooks.IsOn(withMutator, offlineTesting: false));
         Assert.False(FriendlyFireHooks.IsOn(online, offlineTesting: true));

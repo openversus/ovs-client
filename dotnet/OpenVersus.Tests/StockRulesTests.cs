@@ -129,6 +129,8 @@ public class StockRulesTests
 
         Assert.Null(StockRules.For(new MatchSettings("2v2", 4, ["ovs_friendly_fire"], 5, true)));
         Assert.Null(StockRules.For(new MatchSettings("1v1", 3, [], 1, true)));
+        // The Lab can read "ffa" too, and must never keep a fighter down.
+        Assert.Null(StockRules.For(new MatchSettings("ffa", -1, [], MatchSettings.LabMatchType, false)));
     }
 
     [Fact]
