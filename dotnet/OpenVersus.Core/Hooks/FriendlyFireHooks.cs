@@ -22,8 +22,9 @@ namespace OpenVersus.Hooks;
 /// </list>
 /// Some ally interactions keep the ally path: a fighter's own objects and what it holds (thrown
 /// items, caught projectiles, a carried helper), hits on anything that is not a fighter, Raven's
-/// link pulse, Velma's books (the game decides from her marks), and Jerry's cork while Jerry is
-/// carried. Every peer applies the same rule to the same simulated hit, so they agree.
+/// link pulse, Velma's books (the game decides from her marks), Taz's dogpile with his perk (which
+/// a teammate joins), and Jerry's cork while Jerry is carried. Every peer applies the same rule to
+/// the same simulated hit, so they agree.
 /// </summary>
 public static unsafe class FriendlyFireHooks
 {
@@ -53,8 +54,15 @@ public static unsafe class FriendlyFireHooks
     private static readonly byte[] s_processEventPrologue = [0x40, 0x55, 0x56, 0x57, 0x41, 0x54];
 
     // Actors that keep the ally path, by exact class (the C++ client's list).
-    private const string RavenShine = "Mvs_C025_Shine_Actor_C";
-    private static readonly string[] s_velmaBooks = ["Mvs_Velma_Mark_Projectile_C", "Mvs_Velma_NoMark_Projectile_C", "Mvs_Velma_Book_Projectile_C"];
+    // Raven's link pulse and Velma's books are the C++ client's; the game decides from Velma's marks.
+    // Taz's dogpile with his "I Gotta Get In There!" perk is its own class (logged in the Lab,
+    // 2026-09-28), and a teammate must be able to join it; the dogpile without the perk hits them.
+    private static readonly string[] s_supportClassNames =
+    [
+        "Mvs_C025_Shine_Actor_C",
+        "Mvs_Velma_Mark_Projectile_C", "Mvs_Velma_NoMark_Projectile_C", "Mvs_Velma_Book_Projectile_C",
+        "MVS_TazPerkDogPile_SpawnedActor_C",
+    ];
     private const string JerryCork = "Mvs_JerryCork_Actor_C";
     private const string CarriedJerry = "Mvs_Jerry_Actor_NoHitbox_C";
 
@@ -74,8 +82,7 @@ public static unsafe class FriendlyFireHooks
     private static bool s_offlineTesting;
     private static volatile bool s_active;
     private static nint s_fighterClass;
-    private static FName s_shine;
-    private static FName[] s_books = [];
+    private static FName[] s_supportClasses = [];
     private static FName s_cork;
     private static FName s_carriedJerry;
     private static nint s_gameState;
@@ -186,8 +193,7 @@ public static unsafe class FriendlyFireHooks
 
         s_finder = finder;
         s_fighterClass = finder.FindClass("MvsFixedCharacter");
-        s_shine = finder.Names.Find(RavenShine);
-        s_books = s_velmaBooks.Select(finder.Names.Find).ToArray();
+        s_supportClasses = s_supportClassNames.Select(finder.Names.Find).ToArray();
         s_cork = finder.Names.Find(JerryCork);
         s_carriedJerry = finder.Names.Find(CarriedJerry);
         if (s_fighterClass == 0)
@@ -201,7 +207,7 @@ public static unsafe class FriendlyFireHooks
         s_active = true;
         EnsureGameStateFlag();
         s_log?.Info($"[FF] friendly fire on ({(settings.HasWorldBuff(Slug) ? "mutator" : "offline testing")})");
-        MatchRulesLog.Line($"friendly fire: ON (support classes loaded: shine={s_shine.Index != 0} books={s_books.Count(b => b.Index != 0)} cork={s_cork.Index != 0} carriedJerry={s_carriedJerry.Index != 0})");
+        MatchRulesLog.Line($"friendly fire: ON (support classes loaded: {string.Join(", ", s_supportClassNames.Where((_, i) => s_supportClasses[i].Index != 0))}; cork={s_cork.Index != 0} carriedJerry={s_carriedJerry.Index != 0})");
     }
 
     /// <summary>
@@ -405,7 +411,7 @@ public static unsafe class FriendlyFireHooks
             || IsAttachedTo(p.TopOwner, defender) || IsAttachedTo(topHolder, defender);
     }
 
-    /// <summary>Raven's link pulse, Velma's books, or Jerry's cork while Jerry is carried.</summary>
+    /// <summary>One of <see cref="s_supportClassNames"/> (Raven's pulse, Velma's books, Taz's perk dogpile), or Jerry's cork while Jerry is carried.</summary>
     private static bool IsSupport(nint attacker)
     {
         if (attacker == 0 || !CodeWriter.TryRead(attacker + Mvs.ObjectClassPrivate, out nint cls) || !CodeWriter.TryRead(cls + Mvs.ObjectNamePrivate, out FName name))
@@ -413,7 +419,7 @@ public static unsafe class FriendlyFireHooks
             return false;
         }
 
-        if (Is(name, s_shine) || s_books.Any(b => Is(name, b)))
+        if (s_supportClasses.Any(c => Is(name, c)))
         {
             return true;
         }
