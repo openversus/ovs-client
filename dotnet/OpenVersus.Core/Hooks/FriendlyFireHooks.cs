@@ -67,6 +67,14 @@ public static unsafe class FriendlyFireHooks
         "Mvs_LeBron_Basketball_C", // LeBron's pass: the same ball as his throw, so it never hurts a teammate
     ];
 
+    // Actors that, attached to a teammate (their equip component's AttachedComponents), make hits on
+    // them ally interactions. Garnet's star over a teammate's head (Lab log 2026-09-29: her down
+    // special through a starred teammate must not hurt; through one without the star it does).
+    private static readonly string[] s_supportAttachmentNames =
+    [
+        "Mvs_Garnet_Star_Actor_C",
+    ];
+
     // Moves a fighter makes with their own body, which do something to a teammate instead of hurting
     // them, by the animation montage their hitbox comes from (the hitbox's creating anim notify
     // state's outer). Jacob's list, each checked in the Lab log (2026-09-29).
@@ -98,6 +106,11 @@ public static unsafe class FriendlyFireHooks
     private static nint s_fighterClass;
     private static FName[] s_supportClasses = [];
     private static FName[] s_supportMontages = [];
+    private static FName[] s_supportAttachments = [];
+    // The last hit kept for a support attachment, by attacker and defender component: the move's
+    // follow-up hit (no hitbox of its own) comes right after, once the star is already used up.
+    private static nint s_attachmentKeptAttacker;
+    private static nint s_attachmentKeptDefender;
     private static FName s_cork;
     private static FName s_carriedJerry;
     private static nint s_gameState;
@@ -123,6 +136,8 @@ public static unsafe class FriendlyFireHooks
         SupportMove,
         /// <summary>One of the two is riding, following or puppet-driven (Gizmo's backpack).</summary>
         Riding,
+        /// <summary>The defender carries one of the listed attachments (Garnet's star), or this is that hit's follow-up.</summary>
+        SupportAttachment,
     }
 
     /// <summary>
@@ -214,6 +229,8 @@ public static unsafe class FriendlyFireHooks
         s_fighterClass = finder.FindClass("MvsFixedCharacter");
         s_supportClasses = s_supportClassNames.Select(finder.Names.Find).ToArray();
         s_supportMontages = s_supportMontageNames.Select(finder.Names.Find).ToArray();
+        s_supportAttachments = s_supportAttachmentNames.Select(finder.Names.Find).ToArray();
+        s_attachmentKeptAttacker = s_attachmentKeptDefender = 0;
         s_cork = finder.Names.Find(JerryCork);
         s_carriedJerry = finder.Names.Find(CarriedJerry);
         if (s_fighterClass == 0)
@@ -425,6 +442,11 @@ public static unsafe class FriendlyFireHooks
             return Keep.Support;
         }
 
+        if (IsSupportAttachmentHit(parties))
+        {
+            return Keep.SupportAttachment;
+        }
+
         return IsSupportMove(parties.ColliderSet) ? Keep.SupportMove : Keep.No;
     }
 
@@ -488,6 +510,42 @@ public static unsafe class FriendlyFireHooks
     private const int FixedCharacterRiderComponent = 0x480;
     private const int RiderCurrentRide = 0x108;
     private const int RiderCurrentRideStatus = 0x110;
+
+    /// <summary>
+    /// A hit on a teammate carrying one of <see cref="s_supportAttachmentNames"/>, or the follow-up of
+    /// such a hit: a hit from the same attacker component on the same defender with no hitbox of its
+    /// own, until that attacker lands a hit that has one (its next move). The same answer however
+    /// often one hit is asked about, and decided by the order of the hits, which every peer
+    /// simulates alike.
+    /// </summary>
+    private static bool IsSupportAttachmentHit(Parties p)
+    {
+        if (HasSupportAttachment(p.DefenderOwner))
+        {
+            s_attachmentKeptAttacker = p.Attacker;
+            s_attachmentKeptDefender = p.DefenderOwner;
+            return true;
+        }
+
+        if (p.Attacker != s_attachmentKeptAttacker)
+        {
+            return false;
+        }
+
+        if (p.ColliderSet != 0)
+        {
+            s_attachmentKeptAttacker = s_attachmentKeptDefender = 0;
+            return false;
+        }
+
+        return p.DefenderOwner == s_attachmentKeptDefender;
+    }
+
+    /// <summary>Whether fighter <paramref name="fighter"/> has an actor of one of <see cref="s_supportAttachmentNames"/> attached through its equip component.</summary>
+    private static bool HasSupportAttachment(nint fighter) =>
+        IsFighterObject(fighter)
+        && ReadArray(Read(Read(fighter, PawnComponentCache), ComponentCacheEquip), EquipAttachedComponents, 16)
+            .Any(component => s_supportAttachments.Any(a => ClassIs(Read(component, Mvs.ActorComponentOwner), a)));
 
     /// <summary>Whether the hitbox comes from one of <see cref="s_supportMontageNames"/>.</summary>
     private static bool IsSupportMove(nint colliderSet)
@@ -624,7 +682,11 @@ public static unsafe class FriendlyFireHooks
         nint cache = Read(fighter, PawnComponentCache);
         var buffs = ReadArray(Read(cache, ComponentCacheBuff), BuffActiveBuffs, 16).Select(ClassName);
         var tags = ReadNames(Read(cache, ComponentCacheTags) + StateTagsTags, 40);
+        nint equip = Read(cache, ComponentCacheEquip);
+        nint item = Read(equip, EquipPrimaryItemSlot);
+        var attachedToIt = ReadArray(equip, EquipAttachedComponents, 16).Select(c => $"{ClassName(c)}({ClassName(Read(c, Mvs.ActorComponentOwner))})");
         return $"{ClassName(fighter)} puppet(state{puppetState} driver={ClassName(Read(Read(puppet, PuppetDriver), Mvs.ActorComponentOwner))} victims={victims}) "
+            + $"item={ClassName(item)}({ClassName(Read(item, Mvs.ActorComponentOwner))}) equipAttached=[{string.Join(",", attachedToIt)}] "
             + $"buffs=[{string.Join(",", buffs)}] tags=[{string.Join(",", tags)}]";
     }
 
@@ -670,6 +732,10 @@ public static unsafe class FriendlyFireHooks
     private const int PuppetState = 0x158;
     private const int PuppetDriver = 0x1B0;
     private const int ComponentCacheBuff = 0x138;
+    private const int ComponentCacheEquip = 0x130;
+    // UMvsEquipComponent.AttachedComponents / PrimaryItemSlot (CXXHeaderDump).
+    private const int EquipAttachedComponents = 0xF0;
+    private const int EquipPrimaryItemSlot = 0x100;
     private const int ComponentCacheTags = 0xB0;
     private const int BuffActiveBuffs = 0xF8;
     private const int StateTagsTags = 0x130;
