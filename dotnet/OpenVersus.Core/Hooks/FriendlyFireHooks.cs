@@ -118,7 +118,7 @@ public static unsafe class FriendlyFireHooks
         Support,
         /// <summary>A move from one of the listed montages.</summary>
         SupportMove,
-        /// <summary>One of the two is riding or following the other (Gizmo's backpack).</summary>
+        /// <summary>One of the two is riding, following or puppet-driven (Gizmo's backpack).</summary>
         Riding,
     }
 
@@ -405,7 +405,8 @@ public static unsafe class FriendlyFireHooks
         }
 
         if (Rides(parties.TopOwner, parties.DefenderOwner) || Rides(parties.DefenderOwner, parties.TopOwner)
-            || Follows(parties.TopOwner, parties.DefenderOwner) || Follows(parties.DefenderOwner, parties.TopOwner))
+            || Follows(parties.TopOwner, parties.DefenderOwner) || Follows(parties.DefenderOwner, parties.TopOwner)
+            || IsPuppeted(parties.TopOwner) || IsPuppeted(parties.DefenderOwner))
         {
             return Keep.Riding;
         }
@@ -455,6 +456,15 @@ public static unsafe class FriendlyFireHooks
         leader != 0 && FollowerComponent(follower) is var component and not 0
         && CodeWriter.TryRead(component + FollowerIsFollowing, out byte following) && following != 0
         && Read(component, FollowerLeaderActor) == leader;
+
+    /// <summary>
+    /// Whether fighter <paramref name="fighter"/> is being driven through its puppet component, as
+    /// Gizmo is on a teammate's back (driver MvsSpawnedActor_GizmoBackpack_C, puppet state 2; Lab log
+    /// 2026-09-29). Only ally interactions get here, so this keeps the two teammates' hits on each
+    /// other on the ally path while the link lasts.
+    /// </summary>
+    private static bool IsPuppeted(nint fighter) =>
+        IsFighterObject(fighter) && Read(Read(fighter, PawnPuppet), PuppetDriver) != 0;
 
     /// <summary>A fighter's UMvsFollowerComponentBase, or 0.</summary>
     private static nint FollowerComponent(nint fighter) =>
