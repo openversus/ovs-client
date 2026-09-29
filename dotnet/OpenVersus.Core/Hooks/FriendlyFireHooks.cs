@@ -118,7 +118,7 @@ public static unsafe class FriendlyFireHooks
         Support,
         /// <summary>A move from one of the listed montages.</summary>
         SupportMove,
-        /// <summary>One of the two is riding the other (Gizmo's backpack).</summary>
+        /// <summary>One of the two is riding or following the other (Gizmo's backpack).</summary>
         Riding,
     }
 
@@ -404,7 +404,8 @@ public static unsafe class FriendlyFireHooks
             return Keep.Own;
         }
 
-        if (Rides(parties.TopOwner, parties.DefenderOwner) || Rides(parties.DefenderOwner, parties.TopOwner))
+        if (Rides(parties.TopOwner, parties.DefenderOwner) || Rides(parties.DefenderOwner, parties.TopOwner)
+            || Follows(parties.TopOwner, parties.DefenderOwner) || Follows(parties.DefenderOwner, parties.TopOwner))
         {
             return Keep.Riding;
         }
@@ -444,6 +445,31 @@ public static unsafe class FriendlyFireHooks
 
         return Read(Read(fighter, FixedCharacterRiderComponent), RiderCurrentRide);
     }
+
+    /// <summary>
+    /// Whether fighter <paramref name="follower"/> is following <paramref name="leader"/>: its
+    /// UMvsFollowerComponentBase (through the pawn's component cache) is following and its
+    /// LeaderActor is the leader. The rider component stays empty on Gizmo's backpack (Lab, 2026-09-29).
+    /// </summary>
+    private static bool Follows(nint follower, nint leader) =>
+        leader != 0 && FollowerComponent(follower) is var component and not 0
+        && CodeWriter.TryRead(component + FollowerIsFollowing, out byte following) && following != 0
+        && Read(component, FollowerLeaderActor) == leader;
+
+    /// <summary>A fighter's UMvsFollowerComponentBase, or 0.</summary>
+    private static nint FollowerComponent(nint fighter) =>
+        IsFighterObject(fighter) ? Read(Read(fighter, PawnComponentCache), ComponentCacheFollower) : 0;
+
+    private static bool IsFighterObject(nint obj) =>
+        obj != 0 && s_finder is { } finder && ObjectHeader.TryRead(finder.Memory, obj, out var header)
+        && ObjectFinder.Inherits(finder.Memory, header.ClassPrivate, s_fighterClass);
+
+    // APfgFixedPawn.ComponentCache, UMvsComponentCache.FollowerComponent, and
+    // UMvsFollowerComponentBase.LeaderActor / bIsFollowing (CXXHeaderDump).
+    private const int PawnComponentCache = 0x388;
+    private const int ComponentCacheFollower = 0x128;
+    private const int FollowerLeaderActor = 0xF8;
+    private const int FollowerIsFollowing = 0x13A;
 
     // AMvsFixedCharacter.RiderComponent and UMvsRiderComponent.CurrentRide / CurrentRideStatus (CXXHeaderDump).
     private const int FixedCharacterRiderComponent = 0x480;
@@ -522,6 +548,9 @@ public static unsafe class FriendlyFireHooks
         return false;
     }
 
+    /// <summary>The actor <paramref name="actor"/>'s root component is attached to, or 0.</summary>
+    private static nint AttachParentActor(nint actor) => Read(Read(Read(actor, Mvs.ActorRootComponent), Mvs.SceneComponentAttachParent), Mvs.ActorComponentOwner);
+
     private static nint Read(nint obj, int offset) => obj != 0 && CodeWriter.TryRead(obj + offset, out nint value) ? value : 0;
 
     /// <summary>The actors behind one hit: the attacker component's owner, its top-level attacker's owner, and the defender's.</summary>
@@ -558,7 +587,8 @@ public static unsafe class FriendlyFireHooks
         nint instigator = Read(p.AttackerOwner, Mvs.ActorInstigator);
         LogLine($"ff {where}: {(keep == Keep.No ? "enemy" : "ally, " + keep)} attacker={ClassName(p.AttackerOwner)} top={ClassName(p.TopOwner)} "
             + $"holder={ClassName(holder)} instigator={ClassName(instigator)} defender={ClassName(p.DefenderOwner)} {DescribeHitbox(p.ColliderSet)} "
-            + $"rides={DescribeRide(p.TopOwner)}/{DescribeRide(p.DefenderOwner)}{extra}");
+            + $"rides={DescribeRide(p.TopOwner)}/{DescribeRide(p.DefenderOwner)} follows={DescribeFollow(p.TopOwner)}/{DescribeFollow(p.DefenderOwner)} "
+            + $"attached={ClassName(AttachParentActor(p.TopOwner))}/{ClassName(AttachParentActor(p.DefenderOwner))}{extra}");
     }
 
     /// <summary>
@@ -578,6 +608,19 @@ public static unsafe class FriendlyFireHooks
         nint updateOuter = Read(updateObject, Mvs.ObjectOuterPrivate);
         return $"hitbox={ObjectName(initData)} by={ClassName(updateObject)}:{ObjectName(updateObject)} in={ClassName(updateOuter)}:{ObjectName(updateOuter)} "
             + $"shape={FirstShapeName(colliderSet, ColliderSetShapeEntries)}/{FirstShapeName(colliderSet, ColliderSetInitDataDirect)}";
+    }
+
+    /// <summary>Whom a fighter's follower component follows, and whether it is following, for the log; "-" without one.</summary>
+    private static string DescribeFollow(nint fighter)
+    {
+        nint component = FollowerComponent(fighter);
+        if (component == 0)
+        {
+            return "-";
+        }
+
+        CodeWriter.TryRead(component + FollowerIsFollowing, out byte following);
+        return $"{ClassName(Read(component, FollowerLeaderActor))},following{following}";
     }
 
     /// <summary>What a fighter rides, and the ride status, for the log; "-" when nothing.</summary>
