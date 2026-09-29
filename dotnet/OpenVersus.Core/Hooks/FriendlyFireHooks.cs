@@ -589,7 +589,77 @@ public static unsafe class FriendlyFireHooks
             + $"holder={ClassName(holder)} instigator={ClassName(instigator)} defender={ClassName(p.DefenderOwner)} {DescribeHitbox(p.ColliderSet)} "
             + $"rides={DescribeRide(p.TopOwner)}/{DescribeRide(p.DefenderOwner)} follows={DescribeFollow(p.TopOwner)}/{DescribeFollow(p.DefenderOwner)} "
             + $"attached={ClassName(AttachParentActor(p.TopOwner))}/{ClassName(AttachParentActor(p.DefenderOwner))}{extra}");
+        if (keep == Keep.No && where == "hit" && IsFighterObject(p.TopOwner))
+        {
+            // Until the backpack's link is known: the state each fighter carries, to find it.
+            LogLine($"ff state: attacker {DescribeState(p.TopOwner)}");
+            LogLine($"ff state: defender {DescribeState(p.DefenderOwner)}");
+        }
     }
+
+    /// <summary>A fighter's puppet link, active buffs and state tags, for the log.</summary>
+    private static string DescribeState(nint fighter)
+    {
+        if (!IsFighterObject(fighter))
+        {
+            return "-";
+        }
+
+        nint puppet = Read(fighter, PawnPuppet);
+        CodeWriter.TryRead(puppet + PuppetState, out byte puppetState);
+        CodeWriter.TryRead(puppet + PuppetCurrentVictims + 8, out int victims);
+        nint cache = Read(fighter, PawnComponentCache);
+        var buffs = ReadArray(Read(cache, ComponentCacheBuff), BuffActiveBuffs, 16).Select(ClassName);
+        var tags = ReadNames(Read(cache, ComponentCacheTags) + StateTagsTags, 40);
+        return $"{ClassName(fighter)} puppet(state{puppetState} driver={ClassName(Read(Read(puppet, PuppetDriver), Mvs.ActorComponentOwner))} victims={victims}) "
+            + $"buffs=[{string.Join(",", buffs)}] tags=[{string.Join(",", tags)}]";
+    }
+
+    /// <summary>The pointers of a TArray at <paramref name="obj"/> + <paramref name="offset"/>, at most <paramref name="max"/>.</summary>
+    private static List<nint> ReadArray(nint obj, int offset, int max)
+    {
+        var items = new List<nint>();
+        nint data = Read(obj, offset);
+        if (data != 0 && CodeWriter.TryRead(obj + offset + 8, out int count))
+        {
+            for (int i = 0; i < Math.Min(count, max); i++)
+            {
+                items.Add(Read(data, i * nint.Size));
+            }
+        }
+
+        return items;
+    }
+
+    /// <summary>The FNames of a TArray of FGameplayTag (an FName each) at <paramref name="array"/>, at most <paramref name="max"/>.</summary>
+    private static List<string> ReadNames(nint array, int max)
+    {
+        var names = new List<string>();
+        if (CodeWriter.TryRead(array, out nint data) && data != 0 && CodeWriter.TryRead(array + 8, out int count))
+        {
+            for (int i = 0; i < Math.Min(count, max); i++)
+            {
+                if (CodeWriter.TryRead(data + i * 8, out FName name))
+                {
+                    names.Add(s_finder?.Names.ToString(name) ?? $"#{name.Index}");
+                }
+            }
+        }
+
+        return names;
+    }
+
+    // APfgFixedPawn.Puppet; UPfgPuppetComponent.CurrentVictims / PuppetState / PuppetDriver;
+    // UMvsComponentCache.BuffComponent, UPfgComponentCache.TagComponent; UMvsBuffComponent.ActiveBuffs;
+    // UPfgStateTagComponent.Tags (FGameplayTagContainer: GameplayTags first) (CXXHeaderDump).
+    private const int PawnPuppet = 0x370;
+    private const int PuppetCurrentVictims = 0x140;
+    private const int PuppetState = 0x158;
+    private const int PuppetDriver = 0x1B0;
+    private const int ComponentCacheBuff = 0x138;
+    private const int ComponentCacheTags = 0xB0;
+    private const int BuffActiveBuffs = 0xF8;
+    private const int StateTagsTags = 0x130;
 
     /// <summary>
     /// What names the move behind a hitbox (a UPfgColliderSetComponent, whose own name is a throwaway):
