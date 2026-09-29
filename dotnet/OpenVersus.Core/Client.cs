@@ -340,6 +340,11 @@ public sealed class Client
             Start("OVS startup notices", () => StartupNotices.Run(state, problem, Log, updated));
         }
 
+        if (Status.PvPBotsOff)
+        {
+            Start("OVS PvPBots", () => PvPBotsPatch.Run(Log));
+        }
+
         var env = Env!;
         var serverIdentity = ServerIdentity;
         Start("OVS identity", () => IdentityRegistration.Run(env, Settings.ServerUrl, Http, serverIdentity, Log));
@@ -465,6 +470,10 @@ public sealed class Client
         Status.TelemetryOff = Apply("Telemetry", c, TelemetryPatch.Apply);
         Status.TelemetryRecordOff = Apply("TelemetryRecord", c, TelemetryPatch.ApplyRecord);
         Status.TelemetryShopOff = Apply("TelemetryShop", c, TelemetryPatch.ApplyShop);
+
+        // Not a setting: 1v1 and 2v2 queues wait for a real opponent instead of switching to a bot
+        // match after about two minutes. Casual and arena keep their bot fallback.
+        Status.PvPBotsOff = Apply("PvPBots", c, PvPBotsPatch.Apply);
 
         // Not a setting: the identity token on the game's login is what ties a player to their own
         // account rather than to whoever last registered from their IP. The game's /access has no
