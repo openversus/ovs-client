@@ -62,6 +62,8 @@ public static unsafe class FriendlyFireHooks
         "Mvs_C025_Shine_Actor_C",
         "Mvs_Velma_Mark_Projectile_C", "Mvs_Velma_NoMark_Projectile_C", "Mvs_Velma_Book_Projectile_C",
         "MVS_TazPerkDogPile_SpawnedActor_C",
+        "Mvs_Stripe_Buzzsaw_V2_C", // circles a teammate it passes through
+        "MVS_C036_AgentAssist_Projectile_C", // Agent Smith's clone: touching a teammate makes it their assist
     ];
 
     // Moves a fighter makes with their own body, which do something to a teammate instead of hurting
