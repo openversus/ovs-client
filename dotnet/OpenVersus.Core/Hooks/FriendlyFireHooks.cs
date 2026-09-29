@@ -71,6 +71,8 @@ public static unsafe class FriendlyFireHooks
     [
         "Mvs_Jake_Special_N_Montage", // bite
         "Mvs_Jake_Horse_Intro_Montage", // horse
+        "Mvs_Gizmo_Ground_Special_Up_Montage", // backpack (mount a teammate)
+        "Mvs_Gizmo_Air_Special_Up_Montage", // backpack, in the air
     ];
     private const string JerryCork = "Mvs_JerryCork_Actor_C";
     private const string CarriedJerry = "Mvs_Jerry_Actor_NoHitbox_C";
@@ -116,6 +118,8 @@ public static unsafe class FriendlyFireHooks
         Support,
         /// <summary>A move from one of the listed montages.</summary>
         SupportMove,
+        /// <summary>One of the two is riding the other (Gizmo's backpack).</summary>
+        Riding,
     }
 
     /// <summary>
@@ -400,6 +404,11 @@ public static unsafe class FriendlyFireHooks
             return Keep.Own;
         }
 
+        if (Rides(parties.TopOwner, parties.DefenderOwner) || Rides(parties.DefenderOwner, parties.TopOwner))
+        {
+            return Keep.Riding;
+        }
+
         if (s_finder is { } finder && ObjectHeader.TryRead(finder.Memory, parties.DefenderOwner, out var defender)
             && !ObjectFinder.Inherits(finder.Memory, defender.ClassPrivate, s_fighterClass))
         {
@@ -413,6 +422,33 @@ public static unsafe class FriendlyFireHooks
 
         return IsSupportMove(parties.ColliderSet) ? Keep.SupportMove : Keep.No;
     }
+
+    /// <summary>
+    /// Whether fighter <paramref name="rider"/> is riding <paramref name="mount"/> (Gizmo on a
+    /// teammate's back): its rider component's CurrentRide is the mount or one of its components.
+    /// </summary>
+    private static bool Rides(nint rider, nint mount)
+    {
+        nint ride = CurrentRide(rider);
+        return ride != 0 && mount != 0 && (ride == mount || Read(ride, Mvs.ActorComponentOwner) == mount);
+    }
+
+    /// <summary>What fighter <paramref name="fighter"/> is riding (UMvsRiderComponent.CurrentRide), or 0; 0 for anything that is not a fighter.</summary>
+    private static nint CurrentRide(nint fighter)
+    {
+        if (fighter == 0 || s_finder is not { } finder || !ObjectHeader.TryRead(finder.Memory, fighter, out var header)
+            || !ObjectFinder.Inherits(finder.Memory, header.ClassPrivate, s_fighterClass))
+        {
+            return 0;
+        }
+
+        return Read(Read(fighter, FixedCharacterRiderComponent), RiderCurrentRide);
+    }
+
+    // AMvsFixedCharacter.RiderComponent and UMvsRiderComponent.CurrentRide / CurrentRideStatus (CXXHeaderDump).
+    private const int FixedCharacterRiderComponent = 0x480;
+    private const int RiderCurrentRide = 0x108;
+    private const int RiderCurrentRideStatus = 0x110;
 
     /// <summary>Whether the hitbox comes from one of <see cref="s_supportMontageNames"/>.</summary>
     private static bool IsSupportMove(nint colliderSet)
@@ -521,7 +557,8 @@ public static unsafe class FriendlyFireHooks
         nint holder = Read(p.AttackerOwner, Mvs.ActorOwner);
         nint instigator = Read(p.AttackerOwner, Mvs.ActorInstigator);
         LogLine($"ff {where}: {(keep == Keep.No ? "enemy" : "ally, " + keep)} attacker={ClassName(p.AttackerOwner)} top={ClassName(p.TopOwner)} "
-            + $"holder={ClassName(holder)} instigator={ClassName(instigator)} defender={ClassName(p.DefenderOwner)} {DescribeHitbox(p.ColliderSet)}{extra}");
+            + $"holder={ClassName(holder)} instigator={ClassName(instigator)} defender={ClassName(p.DefenderOwner)} {DescribeHitbox(p.ColliderSet)} "
+            + $"rides={DescribeRide(p.TopOwner)}/{DescribeRide(p.DefenderOwner)}{extra}");
     }
 
     /// <summary>
@@ -541,6 +578,19 @@ public static unsafe class FriendlyFireHooks
         nint updateOuter = Read(updateObject, Mvs.ObjectOuterPrivate);
         return $"hitbox={ObjectName(initData)} by={ClassName(updateObject)}:{ObjectName(updateObject)} in={ClassName(updateOuter)}:{ObjectName(updateOuter)} "
             + $"shape={FirstShapeName(colliderSet, ColliderSetShapeEntries)}/{FirstShapeName(colliderSet, ColliderSetInitDataDirect)}";
+    }
+
+    /// <summary>What a fighter rides, and the ride status, for the log; "-" when nothing.</summary>
+    private static string DescribeRide(nint fighter)
+    {
+        nint ride = CurrentRide(fighter);
+        if (ride == 0)
+        {
+            return "-";
+        }
+
+        CodeWriter.TryRead(Read(fighter, FixedCharacterRiderComponent) + RiderCurrentRideStatus, out byte status);
+        return $"{ClassName(ride)}({ClassName(Read(ride, Mvs.ActorComponentOwner))}),status{status}";
     }
 
     private static string FirstShapeName(nint colliderSet, int entriesOffset)
