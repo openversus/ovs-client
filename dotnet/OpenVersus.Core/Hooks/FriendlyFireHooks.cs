@@ -64,6 +64,7 @@ public static unsafe class FriendlyFireHooks
         "MVS_TazPerkDogPile_SpawnedActor_C",
         "Mvs_Stripe_Buzzsaw_V2_C", // circles a teammate it passes through
         "MVS_C036_AgentAssist_Projectile_C", // Agent Smith's clone: touching a teammate makes it their assist
+        "Mvs_LeBron_Basketball_C", // LeBron's pass: the same ball as his throw, so it never hurts a teammate
     ];
 
     // Moves a fighter makes with their own body, which do something to a teammate instead of hurting
