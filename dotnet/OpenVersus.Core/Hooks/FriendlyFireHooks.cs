@@ -63,6 +63,15 @@ public static unsafe class FriendlyFireHooks
         "Mvs_Velma_Mark_Projectile_C", "Mvs_Velma_NoMark_Projectile_C", "Mvs_Velma_Book_Projectile_C",
         "MVS_TazPerkDogPile_SpawnedActor_C",
     ];
+
+    // Moves a fighter makes with their own body, which do something to a teammate instead of hurting
+    // them, by the animation montage their hitbox comes from (the hitbox's creating anim notify
+    // state's outer). Jacob's list, each checked in the Lab log (2026-09-29).
+    private static readonly string[] s_supportMontageNames =
+    [
+        "Mvs_Jake_Special_N_Montage", // bite
+        "Mvs_Jake_Horse_Intro_Montage", // horse
+    ];
     private const string JerryCork = "Mvs_JerryCork_Actor_C";
     private const string CarriedJerry = "Mvs_Jerry_Actor_NoHitbox_C";
 
@@ -83,6 +92,7 @@ public static unsafe class FriendlyFireHooks
     private static volatile bool s_active;
     private static nint s_fighterClass;
     private static FName[] s_supportClasses = [];
+    private static FName[] s_supportMontages = [];
     private static FName s_cork;
     private static FName s_carriedJerry;
     private static nint s_gameState;
@@ -104,6 +114,8 @@ public static unsafe class FriendlyFireHooks
         NotFighter,
         /// <summary>One of the listed support actors.</summary>
         Support,
+        /// <summary>A move from one of the listed montages.</summary>
+        SupportMove,
     }
 
     /// <summary>
@@ -194,6 +206,7 @@ public static unsafe class FriendlyFireHooks
         s_finder = finder;
         s_fighterClass = finder.FindClass("MvsFixedCharacter");
         s_supportClasses = s_supportClassNames.Select(finder.Names.Find).ToArray();
+        s_supportMontages = s_supportMontageNames.Select(finder.Names.Find).ToArray();
         s_cork = finder.Names.Find(JerryCork);
         s_carriedJerry = finder.Names.Find(CarriedJerry);
         if (s_fighterClass == 0)
@@ -207,7 +220,7 @@ public static unsafe class FriendlyFireHooks
         s_active = true;
         EnsureGameStateFlag();
         s_log?.Info($"[FF] friendly fire on ({(settings.HasWorldBuff(Slug) ? "mutator" : "offline testing")})");
-        MatchRulesLog.Line($"friendly fire: ON (support classes loaded: {string.Join(", ", s_supportClassNames.Where((_, i) => s_supportClasses[i].Index != 0))}; cork={s_cork.Index != 0} carriedJerry={s_carriedJerry.Index != 0})");
+        MatchRulesLog.Line($"friendly fire: ON (support classes loaded: {string.Join(", ", s_supportClassNames.Where((_, i) => s_supportClasses[i].Index != 0))}; montages: {string.Join(", ", s_supportMontageNames.Where((_, i) => s_supportMontages[i].Index != 0))}; cork={s_cork.Index != 0} carriedJerry={s_carriedJerry.Index != 0})");
     }
 
     /// <summary>
@@ -393,7 +406,19 @@ public static unsafe class FriendlyFireHooks
             return Keep.NotFighter;
         }
 
-        return IsSupport(parties.AttackerOwner) ? Keep.Support : Keep.No;
+        if (IsSupport(parties.AttackerOwner))
+        {
+            return Keep.Support;
+        }
+
+        return IsSupportMove(parties.ColliderSet) ? Keep.SupportMove : Keep.No;
+    }
+
+    /// <summary>Whether the hitbox comes from one of <see cref="s_supportMontageNames"/>.</summary>
+    private static bool IsSupportMove(nint colliderSet)
+    {
+        nint montage = Read(Read(colliderSet, ColliderSetUpdateObject), Mvs.ObjectOuterPrivate);
+        return montage != 0 && CodeWriter.TryRead(montage + Mvs.ObjectNamePrivate, out FName name) && s_supportMontages.Any(m => Is(name, m));
     }
 
     /// <summary>
