@@ -65,6 +65,7 @@ public static unsafe class FriendlyFireHooks
         "Mvs_Stripe_Buzzsaw_V2_C", // circles a teammate it passes through
         "MVS_C036_AgentAssist_Projectile_C", // Agent Smith's clone: touching a teammate makes it their assist
         "Mvs_LeBron_Basketball_C", // LeBron's pass: the same ball as his throw, so it never hurts a teammate
+        "Mvs_WonderWoman_LassoProjectile_C", // Wonder Woman's lasso pulls a teammate in
     ];
 
     // Actors that, attached to a teammate (their equip component's AttachedComponents), make hits on
@@ -120,6 +121,13 @@ public static unsafe class FriendlyFireHooks
     private static bool s_gameStateFlagOk;
     private static bool s_matchStartedParamOk;
     private static int s_logged;
+    // The last hit's answer (Classify), and the cost of the checks this match.
+    private static nint s_lastHit, s_lastHitAttacker, s_lastHitDefender;
+    private static Keep s_lastHitKeep;
+    private static long s_checks, s_checkTicks, s_checkMaxTicks;
+    private const int CostReportEvery = 2000;
+    // Class pointer -> whether it is a fighter class, so the class chain is walked once per class.
+    private static readonly Dictionary<nint, bool> s_fighterClasses = [];
     private static string? s_lastLine;
     private static int s_repeats;
     private static readonly Dictionary<nint, string> s_classNames = [];
@@ -209,8 +217,12 @@ public static unsafe class FriendlyFireHooks
     /// </summary>
     public static void StartMatch(ObjectFinder finder, nint gameMode, MatchSettings? settings)
     {
+        LogCost("last match");
         s_active = false;
         s_logged = 0;
+        s_checks = s_checkTicks = s_checkMaxTicks = 0;
+        s_lastHit = 0;
+        s_fighterClasses.Clear();
         s_lastLine = null;
         s_repeats = 0;
         s_gameState = 0;
@@ -413,44 +425,103 @@ public static unsafe class FriendlyFireHooks
         }
     }
 
-    /// <summary>Whether an ally interaction keeps the ally path, and why; <see cref="Keep.No"/> when it does not.</summary>
+    /// <summary>
+    /// Whether an ally interaction keeps the ally path, and why; <see cref="Keep.No"/> when it does
+    /// not. One hit is asked about up to three times (the hit, its response flags, the log), so the
+    /// answer for the last hit is kept and given again. Every check reads game memory through a
+    /// guarded call, so the cheap and common ones come first: a fighter's own actor touching them
+    /// (most ally interactions), a defender that is not a fighter, then the listed classes, moves
+    /// and attachments, and the ride and attachment walks last. Timed for <see cref="MatchRulesLog"/>.
+    /// </summary>
     private static Keep Classify(nint hit)
     {
-        var parties = Parties.Read(hit);
-        if (parties.DefenderOwner == 0)
+        nint attacker = Read(hit, Mvs.HitInteractionAttacker);
+        nint defender = Read(hit, Mvs.HitInteractionDefender);
+        if (hit == s_lastHit && attacker == s_lastHitAttacker && defender == s_lastHitDefender)
+        {
+            return s_lastHitKeep;
+        }
+
+        long started = System.Diagnostics.Stopwatch.GetTimestamp();
+        var keep = Decide(Parties.Read(hit));
+        long ticks = System.Diagnostics.Stopwatch.GetTimestamp() - started;
+        s_checks++;
+        s_checkTicks += ticks;
+        s_checkMaxTicks = Math.Max(s_checkMaxTicks, ticks);
+        if (s_checks % CostReportEvery == 0)
+        {
+            LogCost("so far");
+        }
+
+        (s_lastHit, s_lastHitAttacker, s_lastHitDefender, s_lastHitKeep) = (hit, attacker, defender, keep);
+        return keep;
+    }
+
+    private static Keep Decide(Parties p)
+    {
+        nint defender = p.DefenderOwner;
+        if (defender == 0)
         {
             return Keep.No;
         }
 
-        if (IsOwn(parties) || IsEquipAttachedTo(parties.AttackerOwner, parties.DefenderOwner))
+        // The Garnet follow-up memory ends when its attacker lands a hit that has a hitbox, whichever check answers first.
+        if (p.Attacker == s_attachmentKeptAttacker && p.ColliderSet != 0 && !HasSupportAttachment(defender))
+        {
+            s_attachmentKeptAttacker = s_attachmentKeptDefender = 0;
+        }
+
+        if (p.TopOwner == defender)
         {
             return Keep.Own;
         }
 
-        if (Rides(parties.TopOwner, parties.DefenderOwner) || Rides(parties.DefenderOwner, parties.TopOwner)
-            || Follows(parties.TopOwner, parties.DefenderOwner) || Follows(parties.DefenderOwner, parties.TopOwner)
-            || IsPuppeted(parties.TopOwner) || IsPuppeted(parties.DefenderOwner))
-        {
-            return Keep.Riding;
-        }
-
-        if (s_finder is { } finder && ObjectHeader.TryRead(finder.Memory, parties.DefenderOwner, out var defender)
-            && !ObjectFinder.Inherits(finder.Memory, defender.ClassPrivate, s_fighterClass))
+        if (!IsFighterObject(defender))
         {
             return Keep.NotFighter;
         }
 
-        if (IsSupport(parties.AttackerOwner))
+        if (IsSupport(p.AttackerOwner))
         {
             return Keep.Support;
         }
 
-        if (IsSupportAttachmentHit(parties))
+        if (IsSupportMove(p.ColliderSet))
+        {
+            return Keep.SupportMove;
+        }
+
+        if (Read(p.AttackerOwner, Mvs.ActorOwner) == defender || Read(p.TopOwner, Mvs.ActorOwner) == defender
+            || IsEquipAttachedTo(p.AttackerOwner, defender))
+        {
+            return Keep.Own;
+        }
+
+        if (IsSupportAttachmentHit(p))
         {
             return Keep.SupportAttachment;
         }
 
-        return IsSupportMove(parties.ColliderSet) ? Keep.SupportMove : Keep.No;
+        if (IsPuppeted(p.TopOwner) || IsPuppeted(defender)
+            || Rides(p.TopOwner, defender) || Rides(defender, p.TopOwner)
+            || Follows(p.TopOwner, defender) || Follows(defender, p.TopOwner))
+        {
+            return Keep.Riding;
+        }
+
+        return IsOwn(p) ? Keep.Own : Keep.No;
+    }
+
+    /// <summary>How long the checks took this match, for <see cref="MatchRulesLog"/>.</summary>
+    private static void LogCost(string when)
+    {
+        if (s_checks == 0)
+        {
+            return;
+        }
+
+        double us = 1_000_000.0 / System.Diagnostics.Stopwatch.Frequency;
+        MatchRulesLog.Line($"ff cost ({when}): {s_checks} checks, {s_checkTicks * us / s_checks:F1} us each, worst {s_checkMaxTicks * us:F1} us, {s_checkTicks * us / 1000:F1} ms in all");
     }
 
     /// <summary>
@@ -466,8 +537,7 @@ public static unsafe class FriendlyFireHooks
     /// <summary>What fighter <paramref name="fighter"/> is riding (UMvsRiderComponent.CurrentRide), or 0; 0 for anything that is not a fighter.</summary>
     private static nint CurrentRide(nint fighter)
     {
-        if (fighter == 0 || s_finder is not { } finder || !ObjectHeader.TryRead(finder.Memory, fighter, out var header)
-            || !ObjectFinder.Inherits(finder.Memory, header.ClassPrivate, s_fighterClass))
+        if (!IsFighterObject(fighter))
         {
             return 0;
         }
@@ -498,9 +568,21 @@ public static unsafe class FriendlyFireHooks
     private static nint FollowerComponent(nint fighter) =>
         IsFighterObject(fighter) ? Read(Read(fighter, PawnComponentCache), ComponentCacheFollower) : 0;
 
-    private static bool IsFighterObject(nint obj) =>
-        obj != 0 && s_finder is { } finder && ObjectHeader.TryRead(finder.Memory, obj, out var header)
-        && ObjectFinder.Inherits(finder.Memory, header.ClassPrivate, s_fighterClass);
+    private static bool IsFighterObject(nint obj)
+    {
+        if (obj == 0 || s_finder is not { } finder || !CodeWriter.TryRead(obj + Mvs.ObjectClassPrivate, out nint cls) || cls == 0)
+        {
+            return false;
+        }
+
+        if (!s_fighterClasses.TryGetValue(cls, out bool fighter))
+        {
+            fighter = ObjectFinder.Inherits(finder.Memory, cls, s_fighterClass);
+            s_fighterClasses[cls] = fighter;
+        }
+
+        return fighter;
+    }
 
     // APfgFixedPawn.ComponentCache, UMvsComponentCache.FollowerComponent, and
     // UMvsFollowerComponentBase.LeaderActor / bIsFollowing (CXXHeaderDump).
