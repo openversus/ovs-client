@@ -422,7 +422,7 @@ public static unsafe class FriendlyFireHooks
             return Keep.No;
         }
 
-        if (IsOwn(parties))
+        if (IsOwn(parties) || IsEquipAttachedTo(parties.AttackerOwner, parties.DefenderOwner))
         {
             return Keep.Own;
         }
@@ -543,6 +543,16 @@ public static unsafe class FriendlyFireHooks
 
         return p.DefenderOwner == s_attachmentKeptDefender;
     }
+
+    /// <summary>
+    /// Whether <paramref name="actor"/> is attached to fighter <paramref name="fighter"/> through the
+    /// fighter's equip component: Steven's tether, while connected to a teammate, explodes on them
+    /// (Lab log 2026-09-29: must not hurt connected, does unconnected).
+    /// </summary>
+    private static bool IsEquipAttachedTo(nint actor, nint fighter) =>
+        actor != 0 && IsFighterObject(fighter)
+        && ReadArray(Read(Read(fighter, PawnComponentCache), ComponentCacheEquip), EquipAttachedComponents, 16)
+            .Any(component => Read(component, Mvs.ActorComponentOwner) == actor);
 
     /// <summary>Whether fighter <paramref name="fighter"/> has an actor of one of <see cref="s_supportAttachmentNames"/> attached through its equip component.</summary>
     private static bool HasSupportAttachment(nint fighter) =>
