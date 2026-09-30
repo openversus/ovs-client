@@ -485,6 +485,10 @@ public sealed class Client
         RequestHeaders = headers;
         Status.RequestHeaders = Apply("RequestHeaders", c, ctx => RequestHeadersHook.Apply(ctx, headers));
 
+        // Not a setting: the server sends hiss_amalgamation's sections as zstd only to clients from this version on,
+        // and the game cannot unpack them without this.
+        Status.HydraZstd = Apply("HydraZstd", c, HydraZstdHook.Apply);
+
         Log.Info($"hooks: {Status}");
         foreach (var f in GameFunctions.All)
         {
