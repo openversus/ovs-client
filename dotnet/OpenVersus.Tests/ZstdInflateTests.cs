@@ -254,6 +254,31 @@ public sealed unsafe class ZstdInflateTests
         Assert.NotEqual(0, BinaryPrimitives.ReadUInt16BigEndian([0x28, 0xB5]) % 31);
     }
 
+    // One line per finished section (none for the calls in the middle), with the codec, the sizes and the running total.
+    [Fact]
+    public void EachSectionGetsOneTimingLine()
+    {
+        var log = new ListLogger();
+        InflateTiming.Attach(log);
+        long tick = System.Diagnostics.Stopwatch.Frequency / 1000;
+        try
+        {
+            InflateTiming.Record(0x1000, first: true, zstd: true, ZstdInflate.Ok, started: 0, ticks: 2 * tick, 100, 400);
+            InflateTiming.Record(0x1000, first: false, zstd: true, ZstdInflate.StreamEnd, started: 5 * tick, ticks: 1 * tick, 150, 900);
+            InflateTiming.Record(0x1000, first: true, zstd: false, ZstdInflate.StreamEnd, started: 10 * tick, ticks: 4 * tick, 60, 94);
+        }
+        finally
+        {
+            InflateTiming.Attach(new ListLogger());
+        }
+
+        var lines = log.Lines.Where(l => l.Contains("[HydraZstd] section", StringComparison.Ordinal)).ToList();
+        Assert.Equal(2, lines.Count);
+        Assert.Contains("(zstd): 150 -> 900 bytes, 3.00 ms decoding in 2 calls, 6.00 ms first call to last", lines[0]);
+        Assert.Contains("(zlib): 60 -> 94 bytes, 4.00 ms decoding in 1 calls", lines[1]);
+        Assert.Contains("7.00 ms decoding so far", lines[1]);
+    }
+
     [SkippableFact]
     public void ThePatternIsTheOneInflateCallInTheFinalBuild()
     {

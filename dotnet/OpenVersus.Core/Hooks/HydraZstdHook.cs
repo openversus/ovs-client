@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using OpenVersus.Hooking;
 using OpenVersus.Memory;
@@ -33,6 +34,7 @@ public static unsafe class HydraZstdHook
 
         nint call = site.Address + Call;
         ZstdInflate.Attach(c.Log);
+        InflateTiming.Attach(c.Log);
         s_inflate = (delegate* unmanaged<nint, int, int>)CallSite.Destination(call);
         CallSite.Redirect(call, (nint)(delegate* unmanaged<nint, int, int>)&Inflate);
         c.Log.Success($"HydraZstd: zstd sections are decoded at 0x{call:X}; zlib ones go to inflate at 0x{(nint)s_inflate:X}");
@@ -42,8 +44,20 @@ public static unsafe class HydraZstdHook
     [UnmanagedCallersOnly]
     private static int Inflate(nint strm, int flush)
     {
+        var z = (ZstdInflate.ZStream*)strm;
+        bool first = z->TotalIn == 0;
+        long started = Stopwatch.GetTimestamp();
         // A failure inside the decoder fails the section the way corrupt zlib data would.
         int result = HookGuard.Run("HydraZstd", strm, static s => ZstdInflate.Step(s), ZstdInflate.DataError);
-        return result == ZstdInflate.NotZstd ? s_inflate(strm, flush) : result;
+        bool zstd = result != ZstdInflate.NotZstd;
+        if (!zstd)
+        {
+            result = s_inflate(strm, flush);
+        }
+
+        long ticks = Stopwatch.GetTimestamp() - started;
+        HookGuard.Run("HydraZstd.Timing", (strm, first, zstd, result, started, ticks, totalIn: z->TotalIn, totalOut: z->TotalOut),
+            static s => InflateTiming.Record(s.strm, s.first, s.zstd, s.result, s.started, s.ticks, s.totalIn, s.totalOut));
+        return result;
     }
 }
