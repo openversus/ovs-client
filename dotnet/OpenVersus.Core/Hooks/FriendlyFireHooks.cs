@@ -84,6 +84,9 @@ public static unsafe class FriendlyFireHooks
         "Mvs_Jake_Horse_Intro_Montage", // horse
         "Mvs_Gizmo_Ground_Special_Up_Montage", // backpack (mount a teammate)
         "Mvs_Gizmo_Air_Special_Up_Montage", // backpack, in the air
+        "Mvs_C027_Ground_Special_Air_AllyDash_Montage", // Nubia's teleport to a teammate
+        "Mvs_C027_Air_Special_D_Montage", // Nubia's down special: to the teammate, then the circle
+        "Mvs_C027_Ground_Special_D_Montage", // the circle after Nubia's teleport, on the ground
     ];
     private const string JerryCork = "Mvs_JerryCork_Actor_C";
     private const string CarriedJerry = "Mvs_Jerry_Actor_NoHitbox_C";
