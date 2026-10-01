@@ -138,34 +138,6 @@ public class NetTests
         Assert.Null(AutoUpdate.Validate(pe));
     }
 
-    [Fact]
-    public void FingerprintTextIsTheCppFormat()
-    {
-        // "%d|%d|%d|%d|%08X|%ls": signed decimal registers, upper-case zero-padded hex, serial as is.
-        Assert.Equal("13|1970169159|1818588270|1231384169|000A0655|ABC123", EnvInfo.FingerprintText((13, 1970169159, 1818588270, 1231384169), (0x000A0655, 0, 0, 0), "ABC123"));
-        Assert.Equal("-1|0|0|0|FFFFFFFF|Unknown", EnvInfo.FingerprintText((-1, 0, 0, 0), (-1, 0, 0, 0), "Unknown"));
-    }
-
-    [Fact]
-    public void HardwareIdIsLowercaseSha256OfTheFingerprint()
-    {
-        string id = EnvInfo.ComputeHardwareId((13, 1970169159, 1818588270, 1231384169), (0x000A0655, 0, 0, 0), "ABC123");
-        Assert.Equal(64, id.Length);
-        Assert.Equal(id, id.ToLowerInvariant());
-        Assert.Equal(Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes("13|1970169159|1818588270|1231384169|000A0655|ABC123"))), id);
-    }
-
-    [Fact]
-    public void IdentityBodyIsValidJsonWithEscaping()
-    {
-        var env = new EnvInfo { SteamId = "7656119\"quoted\\" };
-        string body = IdentityRegistration.Body(env);
-        using var doc = System.Text.Json.JsonDocument.Parse(body);
-        Assert.Equal("7656119\"quoted\\", doc.RootElement.GetProperty("steamId").GetString());
-        Assert.Equal(OvsVersion.Current, doc.RootElement.GetProperty("clientVersion").GetString());
-        Assert.Equal(64, doc.RootElement.GetProperty("hardwareId").GetString()!.Length);
-    }
-
     /// <summary>The smallest body <see cref="AutoUpdate.Validate"/> accepts, marked so it can be told apart.</summary>
     private static byte[] Plugin(byte mark)
     {

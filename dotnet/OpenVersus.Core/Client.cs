@@ -39,8 +39,12 @@ public sealed class Client
     public ObjectFinder Objects { get; private set; } = null!;
     /// <summary>The player's identity and hardware fingerprint, collected during <see cref="Initialize"/>.</summary>
     public EnvInfo? Env { get; private set; }
-    /// <summary>The HTTP transport for the server; a host may replace it before <see cref="Initialize"/>.</summary>
-    public IHttpTransport Http { get; set; } = new WinHttpTransport();
+    /// <summary>The install id and token the client's own server calls carry.</summary>
+    public ServerIdentity ServerIdentity { get; } = new();
+    /// <summary>The headers added to the game's requests to the OpenVersus server; null until the hooks are applied. Any part of the client can add a rule.</summary>
+    public RequestHeaders? RequestHeaders { get; private set; }
+    /// <summary>The HTTP transport for the server, sending <see cref="ServerIdentity"/>'s headers; a host may replace it before <see cref="Initialize"/>.</summary>
+    public IHttpTransport Http { get; set; }
 
     private string _pluginPath;
     /// <summary>Where updates install: plugins/OpenVersus/ when the loader loads it, else beside the plugin.</summary>
@@ -48,6 +52,8 @@ public sealed class Client
 
     private readonly nint _module;
     private readonly List<Action> _shutdown = [];
+    /// <summary>Whether the startup update got the server's answer, which makes the background plugin check redundant.</summary>
+    private bool _startupCheckAnswered;
 
     /// <summary>A client for the plugin at <paramref name="pluginPath"/>, loaded as <paramref name="module"/>. Nothing runs until <see cref="Initialize"/>.</summary>
     public Client(Log log, string pluginPath, nint module)
@@ -57,6 +63,7 @@ public sealed class Client
         _pluginPath = pluginPath;
         _installDirectory = Directory;
         _module = module;
+        Http = new WinHttpTransport(headers: ServerIdentity.Headers);
     }
 
     /// <summary>
@@ -201,6 +208,28 @@ public sealed class Client
 
         Log.Info($"host {Environment.ProcessPath}, pid {Environment.ProcessId}, {Environment.OSVersion}{(Wine.IsWine ? $", Wine {Wine.Version}" : "")}");
 
+        // The install id is created before the first request to the server, the startup check
+        // below, so every call carries it. "" when it cannot be stored, and the check still runs.
+        string installId = State.LoadOrCreateInstallId();
+        ServerIdentity.InstallId = installId;
+        Log.Info($"[OVS] Install identity {(installId.Length > 0 ? "verified" : "unavailable")}");
+
+        // The required update runs before anything is patched: the engine has not opened its
+        // paks yet, so they can be replaced. When it installs something it closes the game.
+        // Nothing it throws may stop the hooks below; the background check then runs as it
+        // does when the server gives no answer.
+        if (isGame && !string.IsNullOrEmpty(Settings.ServerUrl))
+        {
+            try
+            {
+                _startupCheckAnswered = RunStartupUpdate() != StartupUpdate.Outcome.NoAnswer;
+            }
+            catch (Exception e)
+            {
+                Log.Error($"[Update] The startup check failed: {e}");
+            }
+        }
+
         if (Settings.EnableKeyboardHotkeys && KeyboardHook.Install(Log, _module))
         {
             _shutdown.Add(KeyboardHook.Remove);
@@ -219,9 +248,12 @@ public sealed class Client
         Patterns = new PatternResolver(Image, cache, Settings, Log);
         Log.Info("Parsed Settings");
 
-        // Collect Steam/Epic identity and hardware fingerprint. It makes accounts "sticky", so
-        // nobody resets their name and perks when their IP changes or they switch to Proton.
-        Env = new EnvInfo();
+        // Collect Steam/Epic identity, the install id and the hardware fingerprint. They make
+        // accounts "sticky", so nobody resets their name and perks when their IP changes or they
+        // switch to Proton.
+        var runtime = Runtime.Detect();
+        Env = new EnvInfo(runtime) { InstallId = installId };
+        Log.Info($"[OVS] Runtime: {Runtime.Name(runtime)}; hardware fingerprint {(Env.HardwareId.Length > 0 ? "v2" : "none")}");
 
         ApplyHooks();
         GameThread.Attach(Log);
@@ -229,6 +261,47 @@ public sealed class Client
         Objects = new ObjectFinder(Image, ProcessMemory.Instance, EngineNames.Instance, Log, tryObjectArray: Status.UeFuncs);
         StartBackgroundWork();
         return true;
+    }
+
+    /// <summary>
+    /// <see cref="StartupUpdate"/> for this install: paks in %LOCALAPPDATA%\MultiVersus\Saved\Paks
+    /// (skipped when there is no local AppData folder), staging, backup and the hash cache beside it
+    /// in Saved\OpenVersus, hand-installed paks moved out of the game's Content\Paks, and the plugin
+    /// updater's own checks for a newer .asi.
+    /// </summary>
+    private StartupUpdate.Outcome RunStartupUpdate()
+    {
+        // OVS paks live in the game's Saved folder, %LOCALAPPDATA%\MultiVersus\Saved\Paks: one of
+        // the folders the engine mounts paks from (verified in game 2026-09-26), always writable,
+        // and left alone by Steam. The updater's own files sit beside it in Saved\OpenVersus, on
+        // the same drive, so installing is a rename. Under Proton this is the prefix's AppData.
+        string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        string? saved = string.IsNullOrEmpty(localAppData) ? null : Path.Combine(localAppData, "MultiVersus", "Saved");
+        if (saved == null)
+        {
+            Log.Warn("[Update] No local AppData folder; paks cannot be updated");
+        }
+
+        // <game>/MultiVersus/Binaries/Win64/<exe>: hand-installed paks were in <game>/MultiVersus/Content/Paks.
+        string? exeDirectory = Path.GetDirectoryName(Environment.ProcessPath);
+        string? gameDirectory = exeDirectory == null ? null : Path.GetDirectoryName(Path.GetDirectoryName(exeDirectory));
+        string? contentPaks = gameDirectory == null ? null : Path.Combine(gameDirectory, "Content", "Paks");
+
+        var download = new WinHttpTransport(useSystemProxy: true);
+        var plugins = new AutoUpdate(Settings.ServerUrl, _pluginPath, _installDirectory, Http, download, Log, Log.Close);
+        string work = saved == null ? "" : Path.Combine(saved, Layout.FolderName);
+        var paks = saved == null ? null : new PakUpdate(Path.Combine(saved, "Paks"), Path.Combine(work, "update-staging"),
+            Path.Combine(work, "pak-backup"), Path.Combine(work, "PakHashes.txt"), download, Log, Settings.ReleaseOwner)
+        {
+            LegacyDirectory = contentPaks,
+            LegacyBackupDirectory = Path.Combine(work, "old-content-paks"),
+        };
+        if (paks != null && paks.ReleaseOwner != PakUpdate.DefaultOwner)
+        {
+            Log.Warn($"[Update] Testing: paks may download from {paks.ReleaseOwner}'s releases ([Settings.Debug] ReleaseOwner)");
+        }
+        var state = State;
+        return new StartupUpdate(Settings.ServerUrl, Settings.AutoUpdate, Http, plugins, paks, Log, Log.Close, state.SetUpdateNotice).Run();
     }
 
     /// <summary>Kept from the C++ client for the planned peer-to-peer rollback experiment.</summary>
@@ -254,17 +327,33 @@ public sealed class Client
             _shutdown.Add(poller.Stop);
         }
 
+        string? updated = State.TakeUpdateNotice();
+        if (updated != null)
+        {
+            Log.Info($"[Update] The last launch installed an update: {updated}");
+        }
+
         if (Status.UeFuncs && Status.Dialog)
         {
             var state = State;
             var problem = Settings.Problem;
-            Start("OVS startup notices", () => StartupNotices.Run(state, problem, Log));
+            Start("OVS startup notices", () => StartupNotices.Run(state, problem, Log, updated));
+        }
+
+        if (Status.PvPBotsOff)
+        {
+            Start("OVS PvPBots", () => PvPBotsPatch.Run(Log));
         }
 
         var env = Env!;
-        Start("OVS identity", () => IdentityRegistration.Run(env, Settings.ServerUrl, Http, Log));
+        var serverIdentity = ServerIdentity;
+        Start("OVS identity", () => IdentityRegistration.Run(env, Settings.ServerUrl, Http, serverIdentity, Log));
 
-        if (Settings.AutoUpdate)
+        if (Settings.AutoUpdate && _startupCheckAnswered)
+        {
+            Log.Info("[AutoUpdate] Auto-update is enabled; the startup check already asked the server for this launch.");
+        }
+        else if (Settings.AutoUpdate)
         {
             Log.Info("[AutoUpdate] Auto-update is enabled. OVS will check for updates automatically and download/apply them when available.");
             var update = new AutoUpdate(Settings.ServerUrl, _pluginPath, _installDirectory, Http, new WinHttpTransport(useSystemProxy: true), Log, Log.Close);
@@ -373,6 +462,32 @@ public sealed class Client
         {
             Status.PostMatchFreeze = Apply("PostMatchFreeze", c, PostMatchFreezePatch.Apply);
         }
+
+        // Not a setting: the game's WB telemetry sends every click, with the player's session token,
+        // IP and Steam id, to a third party. It is stopped for everyone, in layers, so one pattern
+        // going missing does not bring it back: the Store's analytics return at once, the recorder
+        // records nothing, and nothing is sent.
+        Status.TelemetryOff = Apply("Telemetry", c, TelemetryPatch.Apply);
+        Status.TelemetryRecordOff = Apply("TelemetryRecord", c, TelemetryPatch.ApplyRecord);
+        Status.TelemetryShopOff = Apply("TelemetryShop", c, TelemetryPatch.ApplyShop);
+
+        // Not a setting: 1v1 and 2v2 queues wait for a real opponent instead of switching to a bot
+        // match after about two minutes. Casual and arena keep their bot fallback.
+        Status.PvPBotsOff = Apply("PvPBots", c, PvPBotsPatch.Apply);
+
+        // Not a setting: the identity token on the game's login is what ties a player to their own
+        // account rather than to whoever last registered from their IP. The game's /access has no
+        // token of its own before login, so only-if-missing leaves a token it does have alone.
+        var identity = ServerIdentity;
+        var headers = new RequestHeaders([Settings.ServerUrl, Settings.ProdServerUrl], Log);
+        headers.Add(new HeaderRule(RequestHeaders.HydraAccessToken, () => identity.Token, Path: "/access", OnlyIfMissing: true));
+        headers.Add(new HeaderRule(RequestHeaders.OvsIdentity, () => identity.Token));
+        RequestHeaders = headers;
+        Status.RequestHeaders = Apply("RequestHeaders", c, ctx => RequestHeadersHook.Apply(ctx, headers));
+
+        // Not a setting: the server sends hiss_amalgamation's sections as zstd only to clients from this version on,
+        // and the game cannot unpack them without this.
+        Status.HydraZstd = Apply("HydraZstd", c, HydraZstdHook.Apply);
 
         Log.Info($"hooks: {Status}");
         foreach (var f in GameFunctions.All)
