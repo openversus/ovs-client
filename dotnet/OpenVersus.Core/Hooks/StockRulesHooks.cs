@@ -149,6 +149,7 @@ public static unsafe class StockRulesHooks
         }
 
         s_attemptEndMatch(component);
+        HookGuard.Run("StocksAttemptEndMatch", 0, static _ => FriendlyFireHooks.ReportCost("match end"));
     }
 
     /// <summary>
@@ -169,10 +170,6 @@ public static unsafe class StockRulesHooks
             var settings = ReadSettings(finder);
             s_match = settings != null ? StartMatch(finder, settings) : null;
             FriendlyFireHooks.StartMatch(finder, gameMode, settings);
-            if (MatchRulesLog.On)
-            {
-                LogDebugColliderRenderer(gameMode);
-            }
             s_endBlockLogged = false;
             if (s_match is { LastFighterWins: true })
             {
@@ -187,39 +184,6 @@ public static unsafe class StockRulesHooks
 
         nint data = character + Mvs.FixedCharacterGameplayPlayerData;
         match.Register(character, ReadInt(data + Mvs.GameplayPlayerDataPlayerIndex), ReadInt(data + Mvs.GameplayPlayerDataTeamIndex));
-    }
-
-    /// <summary>
-    /// For the hitbox view: whether this match's game state has the engine's debug collider renderer
-    /// (APfgFixedGameStateBase.DebugColliderRenderer, 0x460), its mesh, how many collision types have
-    /// a material, and each type's show switch (TMap&lt;EPfgCollisionType, bool&gt; CollisionTypeShowState
-    /// at 0x2F8: 12-byte set elements, the key byte then the bool). CXXHeaderDump offsets.
-    /// </summary>
-    private static void LogDebugColliderRenderer(nint gameMode)
-    {
-        nint gameState = TryReadPointer(gameMode + Mvs.GameModeGameState);
-        nint renderer = TryReadPointer(gameState + 0x460);
-        if (renderer == 0)
-        {
-            MatchRulesLog.Line($"hitbox view: no debug collider renderer on the game state (state {(gameState != 0 ? "found" : "missing")})");
-            return;
-        }
-
-        nint mesh = TryReadPointer(renderer + 0x2A0);
-        TryReadInt(renderer + 0x2A8 + 8, out int materials);
-        nint showData = TryReadPointer(renderer + 0x2F8);
-        TryReadInt(renderer + 0x2F8 + 8, out int shows);
-        string[] types = ["World", "Player", "WorldJumpThrough", "Hit", "Hurt", "BlastBox", "WorldSensor", "Projectile", "ProjectileShield", "GameplayTrigger", "SpawnedObject", "Invalid"];
-        var states = new List<string>();
-        for (int i = 0; showData != 0 && i < Math.Min(shows, 16); i++)
-        {
-            if (CodeWriter.TryRead(showData + i * 12, out byte type) && CodeWriter.TryRead(showData + i * 12 + 1, out byte on))
-            {
-                states.Add($"{(type < types.Length ? types[type] : type.ToString())}={on}");
-            }
-        }
-
-        MatchRulesLog.Line($"hitbox view: renderer 0x{renderer:X} mesh={(mesh != 0 ? "yes" : "no")} materials={materials} show=[{string.Join(", ", states)}]");
     }
 
     private static nint TryReadPointer(nint address) => address != 0 && CodeWriter.TryRead(address, out nint value) ? value : 0;

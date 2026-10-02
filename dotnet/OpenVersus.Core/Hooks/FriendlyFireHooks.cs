@@ -126,6 +126,7 @@ public static unsafe class FriendlyFireHooks
     private static Keep s_lastHitKeep;
     private static long s_checks, s_checkTicks, s_checkMaxTicks;
     private const int CostReportEvery = 2000;
+    private static bool s_costReported;
     // Class pointer -> whether it is a fighter class, so the class chain is walked once per class.
     private static readonly Dictionary<nint, bool> s_fighterClasses = [];
     private static string? s_lastLine;
@@ -217,7 +218,8 @@ public static unsafe class FriendlyFireHooks
     /// </summary>
     public static void StartMatch(ObjectFinder finder, nint gameMode, MatchSettings? settings)
     {
-        LogCost("last match");
+        ReportCost("last match");
+        s_costReported = false;
         s_active = false;
         s_logged = 0;
         s_checks = s_checkTicks = s_checkMaxTicks = 0;
@@ -510,6 +512,19 @@ public static unsafe class FriendlyFireHooks
         }
 
         return IsOwn(p) ? Keep.Own : Keep.No;
+    }
+
+    /// <summary>
+    /// Writes this match's check cost once it ends (the game's match end, or the game closing), so a
+    /// session that ends after one match still has it. Once per match; the next match starts over.
+    /// </summary>
+    public static void ReportCost(string when)
+    {
+        if (!s_costReported)
+        {
+            LogCost(when);
+            s_costReported = s_checks > 0;
+        }
     }
 
     /// <summary>How long the checks took this match, for <see cref="MatchRulesLog"/>.</summary>
