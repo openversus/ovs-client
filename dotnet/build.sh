@@ -15,7 +15,10 @@
 #                      as the C++ client did (default: read-execute except while a stub is written)
 #   --install DIR      copy the published OpenVersus_<version>.asi into DIR/OpenVersus (DIR is the
 #                      game's plugins folder), renaming any OpenVersus*.asi in DIR or DIR/OpenVersus
-#                      to .bak, since the ASI loader would otherwise load both
+#                      to .bak, since the ASI loader would otherwise load both. Also copies the rollback
+#                      node builds into DIR/OpenVersus/node/{win-x64,linux-x64} when the server repo has
+#                      published them (NODE_OUT, default <repo>/../ovs-rollback-server/out), replacing
+#                      what is there; without them the node folder is left alone and a note says so
 #   --skip-tests       do not run the tests in the default command
 #
 # Needs the .NET 10 SDK. Publishing a Windows binary from Linux also needs lld-link (package
@@ -123,6 +126,19 @@ do_publish() {
         done
         cp -f "$published" "$home/"
         say "installed to $home/$(basename "$published")"
+        # The rollback node the mod starts beside the game (see README, "Rollback node"): published by
+        # ovs-rollback-server's OVSRollbackNode/publish.sh, one folder per platform.
+        node_out=${NODE_OUT:-$here/../../ovs-rollback-server/out}
+        for rid in win-x64 linux-x64; do
+            if [ -d "$node_out/node-$rid" ]; then
+                rm -rf "$home/node/$rid"
+                mkdir -p "$home/node/$rid"
+                cp -r "$node_out/node-$rid/." "$home/node/$rid/"
+                say "installed the $rid rollback node to $home/node/$rid"
+            else
+                echo "no $rid rollback node at $node_out/node-$rid; $home/node/$rid left as it is (publish it with ovs-rollback-server/OVSRollbackNode/publish.sh)"
+            fi
+        done
     fi
 }
 

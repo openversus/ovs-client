@@ -18,7 +18,9 @@ Publish with trampoline pages read-write-execute for their whole life, as the C+
 .PARAMETER Install
 Copy the published OpenVersus_<version>.asi into OpenVersus inside this directory (the game's
 plugins folder), renaming any OpenVersus*.asi in either to .bak, since the ASI loader would
-otherwise load both.
+otherwise load both. Also copies the rollback node builds into OpenVersus\node\{win-x64,linux-x64}
+when ..\..\ovs-rollback-server\out (or NODE_OUT) has them, replacing what is there; without them
+the node folder is left alone and a note says so.
 
 .PARAMETER SkipTests
 Do not run the tests in the default command.
@@ -82,6 +84,21 @@ function Publish-Plugin {
         }
         Copy-Item $published $modDir -Force
         Say "installed to $(Join-Path $modDir (Split-Path $published -Leaf))"
+        # The rollback node the mod starts beside the game (see README, "Rollback node"): published by
+        # ovs-rollback-server's OVSRollbackNode/publish.sh, one folder per platform.
+        $nodeOut = if ($env:NODE_OUT) { $env:NODE_OUT } else { Join-Path $here "..\..\ovs-rollback-server\out" }
+        foreach ($rid in @("win-x64", "linux-x64")) {
+            $src = Join-Path $nodeOut "node-$rid"
+            $dst = Join-Path (Join-Path $modDir "node") $rid
+            if (Test-Path $src -PathType Container) {
+                if (Test-Path $dst) { Remove-Item $dst -Recurse -Force }
+                New-Item -ItemType Directory -Force -Path $dst | Out-Null
+                Copy-Item (Join-Path $src "*") $dst -Recurse -Force
+                Say "installed the $rid rollback node to $dst"
+            } else {
+                Write-Host "no $rid rollback node at $src; $dst left as it is (publish it with ovs-rollback-server/OVSRollbackNode/publish.sh)"
+            }
+        }
     }
 }
 
