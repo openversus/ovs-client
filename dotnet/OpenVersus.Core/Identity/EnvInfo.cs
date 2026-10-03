@@ -29,6 +29,8 @@ public sealed class EnvInfo
     public string EpicId { get; } = "Unknown";
     /// <summary>This install's random id from <see cref="Config.State.LoadOrCreateInstallId"/>, or "" when none could be stored.</summary>
     public string InstallId { get; set; } = "";
+    /// <summary>The UDP port of this machine's rollback node, or 0 when it has none running: where the server sends this player's game for a match between players.</summary>
+    public int NodePort { get; set; }
     /// <summary>cpuid leaf 0; all zero off native Windows or where cpuid is not available.</summary>
     public (int Eax, int Ebx, int Ecx, int Edx) CpuLeaf0 { get; }
     /// <summary>cpuid leaf 1; all zero off native Windows or where cpuid is not available.</summary>

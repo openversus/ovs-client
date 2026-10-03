@@ -3,6 +3,7 @@ using OpenVersus;
 using OpenVersus.Hooking;
 using OpenVersus.Memory;
 using OpenVersus.Native;
+using OpenVersus.P2P;
 using Microsoft.Extensions.Logging;
 
 namespace OpenVersus.HookTest;
@@ -34,7 +35,7 @@ public static unsafe class Plugin
                 captured.Info("process-exit hook fired");
                 captured.Close();
             };
-            Run(log);
+            Run(log, Path.GetDirectoryName(pluginPath)!);
             log.Flush();
         }
         catch (Exception e)
@@ -60,7 +61,7 @@ public static unsafe class Plugin
     [UnmanagedCallersOnly]
     private static long GuardHook(long x) => HookGuard.Run("guard", x, static x => throw new InvalidOperationException($"deliberate failure for {x}"), 77L);
 
-    private static void Run(ILogger log)
+    private static void Run(ILogger log, string pluginDirectory)
     {
         byte* image = (byte*)Kernel32.GetModuleHandle(null);
         ReadOnlySpan<byte> bytes = PeImage.ImageInMemory(image);
@@ -95,6 +96,7 @@ public static unsafe class Plugin
         }
 
         SwapTableSlot(log, image, bytes);
+        RunNode(log, pluginDirectory);
 
         // The guarded read must refuse an unmapped address instead of taking the process down.
         bool unmapped = CodeWriter.TryRead(0x10, out long _);
@@ -109,6 +111,36 @@ public static unsafe class Plugin
         log.Info($"trampoline page 0x{page:X} protect 0x{mbi.Protect:X} ({(mbi.Protect == Trampoline.RestingProtection ? "as expected" : "WRONG")})");
 
         log.Info("done");
+    }
+
+    /// <summary>
+    /// When node binaries sit beside the plugin (run.sh copies the Linux build in when it has been
+    /// published), starts the rollback node the way the mod does (under Wine: the Linux build through
+    /// start.exe), waits for its port, keeps it alive for a few seconds and stops it. run.sh then checks
+    /// that the node process ends once the keepalives stop.
+    /// </summary>
+    private static void RunNode(ILogger log, string pluginDirectory)
+    {
+        if (!File.Exists(NodeFiles.LinuxPath(pluginDirectory)) && !File.Exists(NodeFiles.WindowsPath(pluginDirectory)))
+        {
+            log.Info("node: no binaries beside the plugin; skipped");
+            return;
+        }
+
+        using var node = new RollbackNode(pluginDirectory, "http://127.0.0.1:1", Wine.IsWine, log, Wine.IsWine ? Wine.UnixPath : null);
+        if (!node.Start())
+        {
+            log.Error("node: WRONG (did not start)");
+            return;
+        }
+
+        ushort port = node.WaitForPort(TimeSpan.FromSeconds(30));
+        log.Info(port == 0 ? "node: WRONG (no port reported in 30 s)" : $"node: port {port} reported");
+        // Longer than the node's keepalive timeout (10 s): a node still running at the end of this wait was kept
+        // alive by the keepalives, and the exit delay run.sh measures after Stop is the timeout alone.
+        Thread.Sleep(TimeSpan.FromSeconds(ParentKeepAlive.TimeoutSeconds + 5));
+        node.Stop();
+        log.Info("node: stopped");
     }
 
     /// <summary>

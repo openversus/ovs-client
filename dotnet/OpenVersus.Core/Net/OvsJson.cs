@@ -153,7 +153,8 @@ public sealed record Notification(string? Type, string Title = "", string Messag
 /// <param name="HardwareIdQuality">hardwareIdQuality: "strong" with a fingerprint, else "".</param>
 /// <param name="InstallId">installId: this install's random id, or "".</param>
 /// <param name="ClientVersion">clientVersion: the running client's version.</param>
-public sealed record IdentityBody(string SteamId, string EpicId, string HardwareId, string HardwareIdVersion, string HardwareIdQuality, string InstallId, string ClientVersion);
+/// <param name="NodePort">nodePort: the UDP port of this machine's rollback node, 0 for none.</param>
+public sealed record IdentityBody(string SteamId, string EpicId, string HardwareId, string HardwareIdVersion, string HardwareIdQuality, string InstallId, string ClientVersion, int NodePort);
 
 /// <summary>What /api/identify sends back. The server also sends accountId, which the client has no use for.</summary>
 /// <param name="Ok">ok: whether the identity was registered.</param>

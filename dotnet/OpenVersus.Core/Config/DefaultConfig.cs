@@ -94,6 +94,13 @@ internal static class DefaultConfig
             Once a second during a match, writes the rollback session's statistics to a log in logs/,
             one file per match, named for the match and your opponents.
             """,
+        [Settings.Rows.RollbackNode] = """
+            TL;DR: Needed for matches that run directly between players. Leave it on.
+
+            Starts the OpenVersus rollback node, a small program that runs beside the game and
+            closes with it. When the server runs a match on the players' own machines instead of
+            on a server, the game connects to this node. Without it, those matches can't be played.
+            """,
         [Settings.Rows.SigCheckPattern] = "The pak signature check (PakLoader).",
         [Settings.Rows.EndpointLoaderPattern] = "Where the game stores its game-server address ([Server.Game]).",
         [Settings.Rows.ProdEndpointLoaderPattern] = "Where the game stores its WB network address ([Server.Prod]).",

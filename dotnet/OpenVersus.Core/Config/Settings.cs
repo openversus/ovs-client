@@ -115,6 +115,8 @@ public sealed class Settings
         public static readonly SettingDef Notifications = SettingDef.Bool("Features", "Notifications", true);
         /// <summary>Logs the rollback session's stats once a second during a match, one file per match (<see cref="OpenVersus.NetStats.NetStatsLogger"/>).</summary>
         public static readonly SettingDef NetStats = SettingDef.Bool("Features", "NetStats", false);
+        /// <summary>Runs the rollback node beside the game, for matches the server puts on the players' own machines (<see cref="P2P.RollbackNode"/>).</summary>
+        public static readonly SettingDef RollbackNode = SettingDef.Bool("Features", "RollbackNode", true);
         // Patterns, valid for the final patch of the game (Unreal Engine 5.1.1.0)
         /// <summary>Finds the pak signature check's tail jump, for <see cref="Hooks.SigCheckPatch"/>.</summary>
         public static readonly SettingDef SigCheckPattern = SettingDef.Pattern("Patterns", "SigCheck", "48 8D 0D ? ? ? ? E9 ? ? ? ? CC CC CC CC 48 83 EC 28 E8 ? ? ? ? 48 89 05 ? ? ? ? 48 83 C4 28 C3 CC CC CC CC CC CC CC CC CC CC CC 48 8D 0D ? ? ? ? E9 ? ? ? ? CC CC CC CC 48 8D 0D ? ? ? ? E9 ? ? ? ? CC CC CC CC");
@@ -171,6 +173,7 @@ public sealed class Settings
         Rows.Dialog,
         Rows.Notifications,
         Rows.NetStats,
+        Rows.RollbackNode,
         Rows.SigCheckPattern,
         Rows.EndpointLoaderPattern,
         Rows.ProdEndpointLoaderPattern,
@@ -484,6 +487,8 @@ public sealed class Settings
     public bool Notifications => GetBool(Rows.Notifications);
     /// <inheritdoc cref="Rows.NetStats"/>
     public bool NetStats => GetBool(Rows.NetStats);
+    /// <inheritdoc cref="Rows.RollbackNode"/>
+    public bool RollbackNode => GetBool(Rows.RollbackNode);
     // Servers
     /// <inheritdoc cref="Rows.ServerUrl"/>
     public string ServerUrl => Get(Rows.ServerUrl);

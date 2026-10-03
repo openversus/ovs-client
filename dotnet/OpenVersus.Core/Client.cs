@@ -9,6 +9,7 @@ using OpenVersus.Memory;
 using OpenVersus.Native;
 using OpenVersus.Net;
 using OpenVersus.NetStats;
+using OpenVersus.P2P;
 
 namespace OpenVersus;
 
@@ -52,6 +53,8 @@ public sealed class Client
 
     private readonly nint _module;
     private readonly List<Action> _shutdown = [];
+    /// <summary>The rollback node running beside the game; null when none was started.</summary>
+    private RollbackNode? _node;
     /// <summary>Whether the startup update got the server's answer, which makes the background plugin check redundant.</summary>
     private bool _startupCheckAnswered;
 
@@ -257,7 +260,7 @@ public sealed class Client
 
         ApplyHooks();
         GameThread.Attach(Log);
-        SpawnP2PServer();
+        StartRollbackNode(isGame);
         Objects = new ObjectFinder(Image, ProcessMemory.Instance, EngineNames.Instance, Log, tryObjectArray: Status.UeFuncs);
         StartBackgroundWork();
         return true;
@@ -304,12 +307,31 @@ public sealed class Client
         return new StartupUpdate(Settings.ServerUrl, Settings.AutoUpdate, Http, plugins, paks, Log, Log.Close, state.SetUpdateNotice).Run();
     }
 
-    /// <summary>Kept from the C++ client for the planned peer-to-peer rollback experiment.</summary>
-    private void SpawnP2PServer()
+    /// <summary>
+    /// Starts the rollback node beside the game (<see cref="RollbackNode"/>) when the setting is on and
+    /// the game's server connection is pointed at an OpenVersus server; the node is told that server.
+    /// Its port reaches the server with the identity registration, which waits for it.
+    /// </summary>
+    private void StartRollbackNode(bool isGame)
     {
-    }
-    private void DespawnP2PServer()
-    {
+        if (!Settings.RollbackNode)
+        {
+            Log.Info("[Node] Not started: [Features] RollbackNode is off");
+            return;
+        }
+
+        if (!isGame || !Settings.EnableServerProxy || string.IsNullOrEmpty(Settings.ServerUrl))
+        {
+            Log.Info("[Node] Not started: the game's server connection is not pointed at an OpenVersus server");
+            return;
+        }
+
+        var node = new RollbackNode(Directory, Settings.ServerUrl, Wine.IsWine, Log, Wine.IsWine ? Wine.UnixPath : null);
+        if (node.Start())
+        {
+            _node = node;
+            _shutdown.Add(node.Stop);
+        }
     }
 
     private void StartBackgroundWork()
@@ -347,7 +369,9 @@ public sealed class Client
 
         var env = Env!;
         var serverIdentity = ServerIdentity;
-        Start("OVS identity", () => IdentityRegistration.Run(env, Settings.ServerUrl, Http, serverIdentity, Log));
+        var node = _node;
+        Start("OVS identity", () => IdentityRegistration.Run(env, Settings.ServerUrl, Http, serverIdentity, Log,
+            waitForNodePort: node == null ? null : timeout => node.WaitForPort(timeout)));
 
         if (Settings.AutoUpdate && _startupCheckAnswered)
         {
@@ -573,8 +597,6 @@ public sealed class Client
             }
             catch (Exception e) { Log.Error($"shutdown: {e}"); }
         }
-
-        DespawnP2PServer();
     }
 }
 
@@ -603,6 +625,34 @@ public static class Wine
 
     /// <summary>Whether this process runs under Wine or Proton.</summary>
     public static bool IsWine => s_version.Value != null;
+
+    /// <summary>
+    /// The Linux path for a Windows path, through kernel32's wine_get_unix_file_name (every Wine and
+    /// Proton has it); null outside Wine or when the path has no Linux side. The result is freed from
+    /// the process heap, where Wine allocates it.
+    /// </summary>
+    public static unsafe string? UnixPath(string windowsPath)
+    {
+        nint kernel32 = Kernel32.GetModuleHandle("kernel32.dll");
+        nint fn = kernel32 == 0 ? 0 : Kernel32.GetProcAddress(kernel32, "wine_get_unix_file_name");
+        if (fn == 0)
+        {
+            return null;
+        }
+
+        fixed (char* path = windowsPath)
+        {
+            byte* result = ((delegate* unmanaged<char*, byte*>)fn)(path);
+            if (result == null)
+            {
+                return null;
+            }
+
+            string unix = Marshal.PtrToStringUTF8((nint)result) ?? "";
+            Kernel32.HeapFree(Kernel32.GetProcessHeap(), 0, (nint)result);
+            return unix.Length > 0 ? unix : null;
+        }
+    }
     /// <summary>The Wine version, or null when not under Wine.</summary>
     public static string? Version => s_version.Value;
 }
