@@ -53,8 +53,14 @@ ovs-rollback-server repository) must be listening. The mod runs that node:
   server names it in the match-found notification. A node that cannot be started leaves the port at
   0 and the server uses its default.
 - Everything the node needs travels on its command line (`--port-file`, `--parent-token`,
-  `--parent-timeout`, `--server`), because Wine does not pass the Windows environment to a Linux
-  program.
+  `--parent-timeout`, `--server`, `--rendezvous`), because Wine does not pass the Windows environment
+  to a Linux program.
+- `[Server.Game] P2PRegistry` and `P2PRegistryPort` name the rendezvous service the nodes find each
+  other through (defaults `p2p.openversus.org` and 41235). The host is a DNS name the server side
+  points wherever the service runs, so moving it needs no client release; the port has its own row
+  for the same reason, and a value that is not a port falls back to 41235 with a warning. An empty
+  host sends every P2P match through a relay. The node resolves the name once at startup, so a change
+  takes effect at the next launch of the game.
 - The mod sends the node a keepalive every second (its P2P protocol's Parent message, with a token
   only this launch knows). On Windows the node is also in a kill-on-close job, so a game crash ends it
   at once; through `start /unix` it is not the mod's child, and the keepalive stopping is what ends

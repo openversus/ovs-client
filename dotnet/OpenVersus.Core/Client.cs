@@ -326,7 +326,20 @@ public sealed class Client
             return;
         }
 
-        var node = new RollbackNode(Directory, Settings.ServerUrl, Wine.IsWine, Log, Wine.IsWine ? Wine.UnixPath : null);
+        ulong port = Settings.P2PRegistryPort;
+        if (RendezvousAddress.PortOrDefault(port) != port)
+        {
+            Log.Warn($"[Node] [Server.Game] P2PRegistryPort = {port} is not a port from 1 to 65535; using {RendezvousAddress.DefaultPort}");
+        }
+
+        string? rendezvous = RendezvousAddress.Normalize(Settings.P2PRegistry, port);
+        if (rendezvous == null)
+        {
+            Log.Warn($"[Node] [Server.Game] P2PRegistry = \"{Settings.P2PRegistry}\" is not a host name (the port goes in P2PRegistryPort); the node runs without a rendezvous");
+            rendezvous = "";
+        }
+
+        var node = new RollbackNode(Directory, Settings.ServerUrl, rendezvous, Wine.IsWine, Log, Wine.IsWine ? Wine.UnixPath : null);
         if (node.Start())
         {
             _node = node;

@@ -101,6 +101,14 @@ internal static class DefaultConfig
             closes with it. When the server runs a match on the players' own machines instead of
             on a server, the game connects to this node. Without it, those matches can't be played.
             """,
+        [Settings.Rows.P2PRegistry] = """
+            TL;DR: Where the rollback node finds the other player for a match run between players. Leave it.
+
+            A host name (or an IP address). The OpenVersus server points this name wherever the
+            service runs. Empty turns direct matches off: every such match goes through an OpenVersus
+            relay instead.
+            """,
+        [Settings.Rows.P2PRegistryPort] = "The UDP port of that service.",
         [Settings.Rows.SigCheckPattern] = "The pak signature check (PakLoader).",
         [Settings.Rows.EndpointLoaderPattern] = "Where the game stores its game-server address ([Server.Game]).",
         [Settings.Rows.ProdEndpointLoaderPattern] = "Where the game stores its WB network address ([Server.Prod]).",
@@ -166,7 +174,8 @@ internal static class DefaultConfig
             {
                 Line("");
                 CommentLines(Comments[def]);
-                string value = def.Kind == SettingKind.Bool ? def.Default : SettingsMigration.Quote(def.Default);
+                // Booleans and integers are bare TOML values; everything else is a string.
+                string value = def.Kind is SettingKind.Bool or SettingKind.Int ? def.Default : SettingsMigration.Quote(def.Default);
                 Line($"{def.Key} = {value}");
             }
         }

@@ -127,7 +127,7 @@ public static unsafe class Plugin
             return;
         }
 
-        using var node = new RollbackNode(pluginDirectory, "http://127.0.0.1:1", Wine.IsWine, log, Wine.IsWine ? Wine.UnixPath : null);
+        using var node = new RollbackNode(pluginDirectory, "http://127.0.0.1:1", "127.0.0.1:41235", Wine.IsWine, log, Wine.IsWine ? Wine.UnixPath : null);
         if (!node.Start())
         {
             log.Error("node: WRONG (did not start)");

@@ -155,6 +155,14 @@ public sealed class Settings
         public static readonly SettingDef EnableServerProxy = SettingDef.Bool("Server.Game", "Enabled", true);
         /// <summary>Points the prod endpoint at <see cref="ProdServerUrl"/>.</summary>
         public static readonly SettingDef EnableProdServerProxy = SettingDef.Bool("Server.Prod", "Enabled", true);
+        /// <summary>
+        /// The host of the P2P rendezvous service the rollback node pairs with the other player through; empty sends
+        /// every P2P match to the relay (<see cref="P2P.RendezvousAddress"/>). Named "registry" rather than "rendezvous"
+        /// in the file because players sometimes have to type it (Christopher, 2026-10-03).
+        /// </summary>
+        public static readonly SettingDef P2PRegistry = SettingDef.Str("Server.Game", "P2PRegistry", "p2p.openversus.org");
+        /// <summary>The UDP port of the P2P rendezvous service, its own row so a server-side move needs no client release.</summary>
+        public static readonly SettingDef P2PRegistryPort = SettingDef.Int("Server.Game", "P2PRegistryPort", P2P.RendezvousAddress.DefaultPort);
     }
 
     /// <summary>Every row in file order; the order a new file is written in. [Settings.Debug]
@@ -198,6 +206,8 @@ public sealed class Settings
         Rows.ProdServerUrl,
         Rows.EnableServerProxy,
         Rows.EnableProdServerProxy,
+        Rows.P2PRegistry,
+        Rows.P2PRegistryPort,
     ];
 
     /// <summary>Keys the C++ client read and this one does not.</summary>
@@ -496,6 +506,10 @@ public sealed class Settings
     public string ProdServerUrl => Get(Rows.ProdServerUrl);
     /// <inheritdoc cref="Rows.EnableServerProxy"/>
     public bool EnableServerProxy => GetBool(Rows.EnableServerProxy);
+    /// <inheritdoc cref="Rows.P2PRegistry"/>
+    public string P2PRegistry => Get(Rows.P2PRegistry);
+    /// <inheritdoc cref="Rows.P2PRegistryPort"/>
+    public ulong P2PRegistryPort => GetInt(Rows.P2PRegistryPort);
     /// <inheritdoc cref="Rows.EnableProdServerProxy"/>
     public bool EnableProdServerProxy => GetBool(Rows.EnableProdServerProxy);
 }

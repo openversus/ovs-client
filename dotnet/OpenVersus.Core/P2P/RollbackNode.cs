@@ -25,13 +25,45 @@ public static class NodeFiles
     public static string LinuxPath(string modDirectory) => Path.Combine(modDirectory, Folder, "linux-x64", LinuxExe);
 }
 
+/// <summary>The P2P rendezvous settings ([Server.Game] P2PRegistry and P2PRegistryPort), as the node wants them: host:port.</summary>
+public static class RendezvousAddress
+{
+    /// <summary>The rendezvous service's usual UDP port, the port row's default and what an unusable port falls back to.</summary>
+    public const ulong DefaultPort = 41235;
+
+    /// <summary><paramref name="port"/> when it is one (1..65535), else <see cref="DefaultPort"/>. A value the file could not parse never gets here: the settings loader already read it as the default.</summary>
+    public static ulong PortOrDefault(ulong port) => port is >= 1 and <= 65535 ? port : DefaultPort;
+
+    /// <summary>
+    /// <paramref name="host"/> and <paramref name="port"/> (through <see cref="PortOrDefault"/>) as host:port,
+    /// surrounding spaces gone. "" for an empty host (P2P off), and null for a host the node could not take: a
+    /// quote, a space, or a colon (the port has its own row).
+    /// </summary>
+    public static string? Normalize(string? host, ulong port)
+    {
+        string value = (host ?? "").Trim();
+        if (value.Length == 0)
+        {
+            return "";
+        }
+
+        if (value.Contains('"') || value.Contains(':') || value.Any(char.IsWhiteSpace))
+        {
+            return null;
+        }
+
+        return $"{value}:{PortOrDefault(port).ToString(CultureInfo.InvariantCulture)}";
+    }
+}
+
 /// <summary>What the mod tells the node on its command line (see the node's Program.cs).</summary>
 /// <param name="Port">The UDP port to bind; 0 for any free one.</param>
 /// <param name="PortFile">Where the node writes the port it took, as a Windows path.</param>
 /// <param name="ParentToken">The watchdog token the keepalives carry.</param>
 /// <param name="ParentTimeoutSeconds">Seconds without a keepalive before the node exits.</param>
 /// <param name="ServerUrl">The OpenVersus server the node fetches match configs from and reports to.</param>
-public sealed record NodeOptions(ushort Port, string PortFile, ulong ParentToken, int ParentTimeoutSeconds, string ServerUrl)
+/// <param name="Rendezvous">The rendezvous as host:port (<see cref="RendezvousAddress.Normalize"/>); "" passes nothing, and the node sends every match to the relay.</param>
+public sealed record NodeOptions(ushort Port, string PortFile, ulong ParentToken, int ParentTimeoutSeconds, string ServerUrl, string Rendezvous = "")
 {
     /// <summary>
     /// The arguments, with <paramref name="portFile"/> in place of <see cref="PortFile"/> (the Linux
@@ -39,7 +71,8 @@ public sealed record NodeOptions(ushort Port, string PortFile, ulong ParentToken
     /// is refused by <see cref="NodeLaunch.Plan"/>.
     /// </summary>
     public string Arguments(string portFile) =>
-        $"{Port.ToString(CultureInfo.InvariantCulture)} --port-file \"{portFile}\" --parent-token {ParentToken.ToString(CultureInfo.InvariantCulture)} --parent-timeout {ParentTimeoutSeconds.ToString(CultureInfo.InvariantCulture)} --server \"{ServerUrl}\"";
+        $"{Port.ToString(CultureInfo.InvariantCulture)} --port-file \"{portFile}\" --parent-token {ParentToken.ToString(CultureInfo.InvariantCulture)} --parent-timeout {ParentTimeoutSeconds.ToString(CultureInfo.InvariantCulture)} --server \"{ServerUrl}\""
+        + (Rendezvous.Length > 0 ? $" --rendezvous \"{Rendezvous}\"" : "");
 }
 
 /// <summary>How the node is started: which executable, with which command line, from where.</summary>
@@ -69,9 +102,9 @@ public static class NodeLaunch
     {
         string windows = NodeFiles.WindowsPath(modDirectory);
         string linux = NodeFiles.LinuxPath(modDirectory);
-        if (options.PortFile.Contains('"') || options.ServerUrl.Contains('"'))
+        if (options.PortFile.Contains('"') || options.ServerUrl.Contains('"') || options.Rendezvous.Contains('"'))
         {
-            why = "the port file path or the server URL contains a quote, which cannot be passed on a command line";
+            why = "the port file path, the server URL or the rendezvous contains a quote, which cannot be passed on a command line";
             return null;
         }
 
@@ -193,6 +226,7 @@ public sealed class RollbackNode : IDisposable
 {
     private readonly string _modDirectory;
     private readonly string _serverUrl;
+    private readonly string _rendezvous;
     private readonly bool _underWine;
     private readonly ILogger _log;
     private readonly Func<string, string?> _unixPath;
@@ -204,12 +238,13 @@ public sealed class RollbackNode : IDisposable
     private volatile bool _stopping;
     private Thread? _keepAlive;
 
-    /// <summary>A node for the mod in <paramref name="modDirectory"/>, told to reach the OpenVersus server at <paramref name="serverUrl"/>.</summary>
+    /// <summary>A node for the mod in <paramref name="modDirectory"/>, told to reach the OpenVersus server at <paramref name="serverUrl"/> and the rendezvous at <paramref name="rendezvous"/> (host:port, or "" for none).</summary>
     /// <param name="unixPath">Turns a Windows path into Wine's Linux path; null outside Wine.</param>
-    public RollbackNode(string modDirectory, string serverUrl, bool underWine, ILogger log, Func<string, string?>? unixPath = null)
+    public RollbackNode(string modDirectory, string serverUrl, string rendezvous, bool underWine, ILogger log, Func<string, string?>? unixPath = null)
     {
         _modDirectory = modDirectory;
         _serverUrl = serverUrl;
+        _rendezvous = rendezvous;
         _underWine = underWine;
         _log = log;
         _unixPath = unixPath ?? (_ => null);
@@ -229,7 +264,11 @@ public sealed class RollbackNode : IDisposable
     /// </summary>
     public unsafe bool Start()
     {
-        var options = new NodeOptions(Port: 0, _portFile, _token, ParentKeepAlive.TimeoutSeconds, _serverUrl);
+        var options = new NodeOptions(Port: 0, _portFile, _token, ParentKeepAlive.TimeoutSeconds, _serverUrl, _rendezvous);
+        if (_rendezvous.Length == 0)
+        {
+            _log.Warn("[Node] No rendezvous ([Server.Game] P2PRegistry is empty or unusable): every match run between players will go through a relay");
+        }
         var plan = NodeLaunch.Plan(_modDirectory, _underWine, options, File.Exists, _unixPath, Environment.SystemDirectory, out string why);
         if (plan == null)
         {

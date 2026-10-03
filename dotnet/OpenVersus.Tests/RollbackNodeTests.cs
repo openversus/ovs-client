@@ -14,6 +14,44 @@ public class RollbackNodeTests
     private static readonly NodeOptions Options = new(0, Path.Combine(Mod, "node", "port-4242.txt"), 0xDEADBEEF, 10, "https://prod.openversus.org/");
     private static string Unix(string windows) => "/home/deck/game/plugins/OpenVersus/" + windows[(Mod.Length + 1)..].Replace('\\', '/');
 
+    [Theory]
+    [InlineData("p2p.openversus.org", 41235UL, "p2p.openversus.org:41235")]
+    [InlineData("  p2p.openversus.org  ", 5000UL, "p2p.openversus.org:5000")]
+    [InlineData("203.0.113.9", 1UL, "203.0.113.9:1")]
+    [InlineData("203.0.113.9", 65535UL, "203.0.113.9:65535")]
+    [InlineData("p2p.openversus.org", 0UL, "p2p.openversus.org:41235")]
+    [InlineData("p2p.openversus.org", 65536UL, "p2p.openversus.org:41235")]
+    [InlineData("p2p.openversus.org", ulong.MaxValue, "p2p.openversus.org:41235")]
+    [InlineData("", 41235UL, "")]
+    [InlineData("   ", 0UL, "")]
+    [InlineData(null, 70000UL, "")]
+    public void TheRegistryHostAndPortBecomeTheNodesRendezvous_AnUnusablePortFallsBackToTheDefault(string? host, ulong port, string expected) =>
+        Assert.Equal(expected, RendezvousAddress.Normalize(host, port));
+
+    [Theory]
+    [InlineData("p2p.openversus.org:41235")]
+    [InlineData(":41235")]
+    [InlineData("p2p.open versus.org")]
+    [InlineData("p2p.openversus.org\"")]
+    public void AHostTheNodeCannotTakeIsRefused(string host) => Assert.Null(RendezvousAddress.Normalize(host, 41235));
+
+    [Fact]
+    public void TheRegistryPortRowDefaultsToTheRendezvousPort_AndAnUnparseableValueReadsAsIt()
+    {
+        Assert.Equal("41235", OpenVersus.Config.Settings.Rows.P2PRegistryPort.Default);
+        var s = OpenVersus.Config.Settings.FromValues(new Dictionary<OpenVersus.Config.SettingDef, string> { [OpenVersus.Config.Settings.Rows.P2PRegistryPort] = "forty" });
+        Assert.Equal(41235UL, s.P2PRegistryPort);
+    }
+
+    [Fact]
+    public void TheRendezvousIsPassedOnlyWhenThereIsOne()
+    {
+        Assert.DoesNotContain("--rendezvous", Options.Arguments("/p"));
+        Assert.EndsWith(" --rendezvous \"p2p.openversus.org:41235\"", (Options with { Rendezvous = "p2p.openversus.org:41235" }).Arguments("/p"));
+        Assert.Null(NodeLaunch.Plan(Mod, underWine: false, Options with { Rendezvous = "a\"b:1" }, Files(WindowsExe), _ => null, System32, out string why));
+        Assert.Contains("quote", why);
+    }
+
     [Fact]
     public void TheOptionsBecomeTheNodesCommandLine()
     {
