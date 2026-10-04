@@ -237,6 +237,79 @@ public class LogTests
         Assert.Null(note);
     }
 
+    [Fact]
+    public void AnotherProcessLogIsArchivedLikeASessionLog_FromItsOwnFirstLine()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "ovs-logtest-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            // Nothing there yet (no node has run): the fixed name, and no file made for it.
+            Assert.Equal(Path.Combine(dir, "RollbackNode.log"), Log.PrepareForeignSession(dir, "RollbackNode", out string? notice));
+            Assert.Null(notice);
+            Assert.Empty(Directory.GetFiles(dir));
+
+            // The last run's node log: a byte order mark, then its own stamp format. Archived under that stamp, emptied.
+            DateTime previous = DateTime.Now.AddHours(-1);
+            string running = Path.Combine(dir, "RollbackNode.log");
+            File.WriteAllText(running, $"[{previous.ToString("yyyy-MM-dd HH:mm:ss.fff", System.Globalization.CultureInfo.InvariantCulture)} -04:00][INF] (): started \nsomething\n", new System.Text.UTF8Encoding(true));
+            Assert.Equal(running, Log.PrepareForeignSession(dir, "RollbackNode", out notice));
+            Assert.Null(notice);
+            string archive = Path.Combine(dir, $"RollbackNode_{previous:yyyy-MM-dd-HH.mm.ss}.log");
+            Assert.True(File.Exists(archive), "the last run's node log was not archived under its first line's time");
+            Assert.Contains("something", File.ReadAllText(archive));
+            Assert.Equal(0, new FileInfo(running).Length);
+            Assert.Equal(2, Directory.GetFiles(dir).Length);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [SkippableFact]
+    public void AnotherProcessLogThatCannotBeEmptiedLeavesThisRunItsArchiveName()
+    {
+        UnixPermissions.SkipUnlessUnix();
+        string dir = Directory.CreateTempSubdirectory("ovs-logtest-").FullName;
+        string running = Path.Combine(dir, "RollbackNode.log");
+        File.WriteAllText(running, "still held by the last node\n");
+        UnixPermissions.MakeReadOnly(running);
+        try
+        {
+            DateTime before = DateTime.Now.AddSeconds(-1);
+            string? path = Log.PrepareForeignSession(dir, "RollbackNode", out string? notice);
+            Assert.NotNull(path);
+            Assert.Equal(dir, Path.GetDirectoryName(path));
+            DateTime named = DateTime.ParseExact(Path.GetFileNameWithoutExtension(path)["RollbackNode_".Length..], "yyyy-MM-dd-HH.mm.ss", System.Globalization.CultureInfo.InvariantCulture);
+            Assert.InRange(named, before, DateTime.Now);
+            Assert.Contains("cannot be emptied", notice);
+            Assert.Contains("still held", File.ReadAllText(running));
+        }
+        finally
+        {
+            UnixPermissions.Restore(running);
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [SkippableFact]
+    public void AnotherProcessLogInADirectoryThatCannotBeMadeIsNone()
+    {
+        UnixPermissions.SkipUnlessUnix();
+        string dir = Directory.CreateTempSubdirectory("ovs-logtest-").FullName;
+        UnixPermissions.MakeReadOnly(dir);
+        try
+        {
+            Assert.Null(Log.PrepareForeignSession(Path.Combine(dir, "logs"), "RollbackNode", out string? notice));
+            Assert.Contains("cannot create", notice);
+        }
+        finally
+        {
+            UnixPermissions.Restore(dir);
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
     [SkippableFact]
     public void AnUnwritableLogsDirectoryFallsBackToThePluginDirectory()
     {

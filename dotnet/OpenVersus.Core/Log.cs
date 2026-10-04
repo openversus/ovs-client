@@ -104,25 +104,69 @@ public sealed class Log : ILogger, IDisposable
         var log = new Log(path, name, error) { Notice = notice };
         if (error == null)
         {
-            // Off the launch path and below it in priority; nothing it can hit may reach the
-            // game, since an unhandled exception on any thread is a fail-fast under NativeAOT.
-            string archiveDirectory = System.IO.Path.GetDirectoryName(path)!;
-            new Thread(() =>
-            {
-                try
-                {
-                    CompressColdArchives(archiveDirectory, name, DateTime.Now);
-                }
-                catch (Exception e)
-                {
-                    log.Warn($"log retention stopped: {e.Message}");
-                }
-            })
-            { IsBackground = true, Name = "OVS log retention", Priority = ThreadPriority.BelowNormal }.Start();
+            StartRetention(System.IO.Path.GetDirectoryName(path)!, name, message => log.Warn($"log retention stopped: {message}"));
         }
 
         AppDomain.CurrentDomain.ProcessExit += (_, _) => log.Close();
         return log;
+    }
+
+    /// <summary>
+    /// Readies "&lt;directory&gt;/&lt;name&gt;.log" for another process to write, as <see cref="OpenSession"/> readies its
+    /// own: the last run's file is archived under its launch time (from its first line, which may be this log's stamp
+    /// or the rollback node's "[yyyy-MM-dd HH:mm:ss.fff ...]") and emptied, and older archives are compressed in the
+    /// background. No file is created; the other process does that. Returns the path to hand it: the fixed name, or,
+    /// when the last run's file cannot be emptied (on Windows a node outlives its game by up to ten seconds and holds
+    /// its log until then), this launch's archive name, which the next launch leaves alone. Null when the directory
+    /// cannot be created. <paramref name="notice"/> says why when it is not the fixed name.
+    /// </summary>
+    public static string? PrepareForeignSession(string directory, string name, out string? notice)
+    {
+        notice = null;
+        string path = System.IO.Path.Combine(directory, name + ".log");
+        try
+        {
+            Directory.CreateDirectory(directory);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            notice = $"cannot create {directory} ({e.Message})";
+            return null;
+        }
+
+        if (File.Exists(path))
+        {
+            ArchiveLeftover(path, name);
+            if (Truncate(path) is { } error)
+            {
+                string archive = ArchivePath(path, name, DateTime.Now);
+                notice = $"{path} cannot be emptied ({error.Message}); this run's log is {archive}";
+                path = archive;
+            }
+        }
+
+        // CompressColdArchives already leaves alone any file it cannot handle; there is nobody to tell about the rest.
+        StartRetention(directory, name, _ => { });
+        return path;
+    }
+
+    /// <summary>Runs <see cref="CompressColdArchives"/> on a background thread; <paramref name="stopped"/> hears why, if it throws.</summary>
+    private static void StartRetention(string directory, string name, Action<string> stopped)
+    {
+        // Off the launch path and below it in priority; nothing it can hit may reach the
+        // game, since an unhandled exception on any thread is a fail-fast under NativeAOT.
+        new Thread(() =>
+        {
+            try
+            {
+                CompressColdArchives(directory, name, DateTime.Now);
+            }
+            catch (Exception e)
+            {
+                stopped(e.Message);
+            }
+        })
+        { IsBackground = true, Name = "OVS log retention", Priority = ThreadPriority.BelowNormal }.Start();
     }
 
     // ILogger: the client's own verbs (LogExtensions) and the standard ones (LogInformation, ...) land here.
@@ -507,7 +551,8 @@ public sealed class Log : ILogger, IDisposable
                 return;
             }
 
-            string? first = File.ReadLines(path).FirstOrDefault();
+            // The rollback node's lines start "[yyyy-MM-dd HH:mm:ss.fff zzz]"; this log's start with the stamp itself.
+            string? first = File.ReadLines(path).FirstOrDefault()?.TrimStart('[');
             if (first == null || first.Length < StampFormat.Length
                 || !DateTime.TryParseExact(first[..StampFormat.Length], StampFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime launch))
             {

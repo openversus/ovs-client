@@ -18,6 +18,8 @@ public static class NodeFiles
     public const string WindowsExe = "OVS.Rollback.Node.exe";
     /// <summary>The Linux build's file name, for Proton and Steam Deck players.</summary>
     public const string LinuxExe = "OVS.Rollback.Node";
+    /// <summary>The node's own log in the mod's logs folder, beside OpenVersus.log: "RollbackNode.log", archived like it.</summary>
+    public const string LogName = "RollbackNode";
 
     /// <summary>The Windows node for a mod in <paramref name="modDirectory"/>.</summary>
     public static string WindowsPath(string modDirectory) => Path.Combine(modDirectory, Folder, "win-x64", WindowsExe);
@@ -63,16 +65,22 @@ public static class RendezvousAddress
 /// <param name="ParentTimeoutSeconds">Seconds without a keepalive before the node exits.</param>
 /// <param name="ServerUrl">The OpenVersus server the node fetches match configs from and reports to.</param>
 /// <param name="Rendezvous">The rendezvous as host:port (<see cref="RendezvousAddress.Normalize"/>); "" passes nothing, and the node sends every match to the relay.</param>
-public sealed record NodeOptions(ushort Port, string PortFile, ulong ParentToken, int ParentTimeoutSeconds, string ServerUrl, string Rendezvous = "")
+/// <param name="LogFile">Where the node writes its log, as a Windows path (see <see cref="NodeFiles.LogName"/>); "" passes nothing, and the node logs to its own default place (openversus/rollback-server under %APPDATA% on Windows, under the home directory on Linux).</param>
+public sealed record NodeOptions(ushort Port, string PortFile, ulong ParentToken, int ParentTimeoutSeconds, string ServerUrl, string Rendezvous = "", string LogFile = "")
 {
     /// <summary>
-    /// The arguments, with <paramref name="portFile"/> in place of <see cref="PortFile"/> (the Linux
-    /// path when the Linux node runs). Values are quoted; a value holding a quote cannot be passed and
-    /// is refused by <see cref="NodeLaunch.Plan"/>.
+    /// The arguments, with <paramref name="portFile"/> in place of <see cref="PortFile"/>, and
+    /// <paramref name="logFile"/> in place of <see cref="LogFile"/> when given (the Linux paths when the
+    /// Linux node runs). Values are quoted; a value holding a quote cannot be passed and is refused by
+    /// <see cref="NodeLaunch.Plan"/>.
     /// </summary>
-    public string Arguments(string portFile) =>
-        $"{Port.ToString(CultureInfo.InvariantCulture)} --port-file \"{portFile}\" --parent-token {ParentToken.ToString(CultureInfo.InvariantCulture)} --parent-timeout {ParentTimeoutSeconds.ToString(CultureInfo.InvariantCulture)} --server \"{ServerUrl}\""
-        + (Rendezvous.Length > 0 ? $" --rendezvous \"{Rendezvous}\"" : "");
+    public string Arguments(string portFile, string? logFile = null)
+    {
+        string log = logFile ?? LogFile;
+        return $"{Port.ToString(CultureInfo.InvariantCulture)} --port-file \"{portFile}\" --parent-token {ParentToken.ToString(CultureInfo.InvariantCulture)} --parent-timeout {ParentTimeoutSeconds.ToString(CultureInfo.InvariantCulture)} --server \"{ServerUrl}\""
+            + (Rendezvous.Length > 0 ? $" --rendezvous \"{Rendezvous}\"" : "")
+            + (log.Length > 0 ? $" --log-file \"{log}\"" : "");
+    }
 }
 
 /// <summary>How the node is started: which executable, with which command line, from where.</summary>
@@ -92,8 +100,8 @@ public static class NodeLaunch
 {
     /// <summary>
     /// Under Wine or Proton the Linux build runs natively, started through Wine's <c>start /unix</c>
-    /// (<paramref name="unixPath"/> turns a Windows path into the Linux one, for the node and for its
-    /// port file); without a Linux build the Windows one runs under Wine. On Windows the Windows build
+    /// (<paramref name="unixPath"/> turns a Windows path into the Linux one, for the node, its port
+    /// file and its log file); without a Linux build the Windows one runs under Wine. On Windows the Windows build
     /// runs. The node's settings travel on its command line, since Wine does not pass the Windows
     /// environment to a Linux program. Null, with <paramref name="why"/> set, when there is nothing to
     /// run; a non-empty <paramref name="why"/> with a plan is a note for the log.
@@ -102,9 +110,9 @@ public static class NodeLaunch
     {
         string windows = NodeFiles.WindowsPath(modDirectory);
         string linux = NodeFiles.LinuxPath(modDirectory);
-        if (options.PortFile.Contains('"') || options.ServerUrl.Contains('"') || options.Rendezvous.Contains('"'))
+        if (options.PortFile.Contains('"') || options.ServerUrl.Contains('"') || options.Rendezvous.Contains('"') || options.LogFile.Contains('"'))
         {
-            why = "the port file path, the server URL or the rendezvous contains a quote, which cannot be passed on a command line";
+            why = "the port file path, the server URL, the rendezvous or the log file path contains a quote, which cannot be passed on a command line";
             return null;
         }
 
@@ -124,8 +132,20 @@ public static class NodeLaunch
                 return exists(windows) ? WindowsPlan(windows, options, " under Wine") : null;
             }
 
-            why = "";
-            return new LaunchPlan(Path.Combine(systemDirectory, "start.exe"), $"/unix \"{unix}\" {options.Arguments(unixPortFile)}", Path.GetDirectoryName(linux)!,
+            // The node can do without its log file (it logs to its own default place), so one Wine cannot convert is
+            // dropped with a note rather than costing the Linux node.
+            string? unixLogFile = options.LogFile.Length == 0 ? "" : unixPath(options.LogFile);
+            if (unixLogFile == null || unixLogFile.Contains('"'))
+            {
+                why = $"Wine could not give a usable Linux path for {options.LogFile}; the node logs to its own default place";
+                unixLogFile = "";
+            }
+            else
+            {
+                why = "";
+            }
+
+            return new LaunchPlan(Path.Combine(systemDirectory, "start.exe"), $"/unix \"{unix}\" {options.Arguments(unixPortFile, unixLogFile)}", Path.GetDirectoryName(linux)!,
                 $"the Linux node {unix} through Wine's start.exe", IsNodeItself: false);
         }
 
@@ -231,6 +251,7 @@ public sealed class RollbackNode : IDisposable
     private readonly ILogger _log;
     private readonly Func<string, string?> _unixPath;
     private readonly string _portFile;
+    private string _logFile = "";
     private readonly ulong _token;
     private nint _process;
     private nint _job;
@@ -264,7 +285,9 @@ public sealed class RollbackNode : IDisposable
     /// </summary>
     public unsafe bool Start()
     {
-        var options = new NodeOptions(Port: 0, _portFile, _token, ParentKeepAlive.TimeoutSeconds, _serverUrl, _rendezvous);
+        // Its own log beside the mod's (logs/RollbackNode.log), the last run's archived as OpenVersus.log's is.
+        _logFile = Log.PrepareForeignSession(Path.Combine(_modDirectory, "logs"), NodeFiles.LogName, out string? logNotice) ?? "";
+        var options = new NodeOptions(Port: 0, _portFile, _token, ParentKeepAlive.TimeoutSeconds, _serverUrl, _rendezvous, _logFile);
         if (_rendezvous.Length == 0)
         {
             _log.Warn("[Node] No rendezvous ([Server.Game] P2PRegistry is empty or unusable): every match run between players will go through a relay");
@@ -279,6 +302,11 @@ public sealed class RollbackNode : IDisposable
         if (why.Length > 0)
         {
             _log.Warn($"[Node] {why}");
+        }
+
+        if (logNotice != null)
+        {
+            _log.Warn($"[Node] Log: {logNotice}{(_logFile.Length == 0 ? "; the node logs to its own default place" : "")}");
         }
 
         try
@@ -416,7 +444,7 @@ public sealed class RollbackNode : IDisposable
 
         if (Kernel32.GetExitCodeProcess(_process, out uint code) && code != Kernel32.STILL_ACTIVE)
         {
-            _log.Warn($"[Node] The node exited with code {code} before reporting a port; see its log in {Path.Combine(_modDirectory, NodeFiles.Folder)}");
+            _log.Warn($"[Node] The node exited with code {code} before reporting a port; see its log{(_logFile.Length > 0 ? $", {_logFile}" : "")}");
             return true;
         }
 

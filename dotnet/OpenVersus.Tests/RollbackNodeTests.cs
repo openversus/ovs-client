@@ -53,6 +53,40 @@ public class RollbackNodeTests
     }
 
     [Fact]
+    public void TheLogFileIsPassedOnlyWhenThereIsOne_AndAnOtherPathCanStandInForIt()
+    {
+        var logged = Options with { LogFile = Path.Combine(Mod, "logs", "RollbackNode.log") };
+        Assert.DoesNotContain("--log-file", Options.Arguments("/p"));
+        Assert.EndsWith($" --log-file \"{logged.LogFile}\"", logged.Arguments("/p"));
+        Assert.EndsWith(" --log-file \"/l\"", logged.Arguments("/p", "/l"));
+        Assert.DoesNotContain("--log-file", logged.Arguments("/p", ""));
+        Assert.Null(NodeLaunch.Plan(Mod, underWine: false, Options with { LogFile = "C:\\odd\\\"\\RollbackNode.log" }, Files(WindowsExe), _ => null, System32, out string why));
+        Assert.Contains("quote", why);
+    }
+
+    [Fact]
+    public void TheLogFileReachesEitherNodeAsAPathItsSystemReads()
+    {
+        var logged = Options with { LogFile = Path.Combine(Mod, "logs", "RollbackNode.log") };
+        var windows = NodeLaunch.Plan(Mod, underWine: false, logged, Files(WindowsExe), _ => null, System32, out string why);
+        Assert.NotNull(windows);
+        Assert.Equal("", why);
+        Assert.EndsWith($" --log-file \"{logged.LogFile}\"", windows.Arguments);
+
+        var linux = NodeLaunch.Plan(Mod, underWine: true, logged, Files(WindowsExe, LinuxExe), Unix, System32, out why);
+        Assert.NotNull(linux);
+        Assert.Equal("", why);
+        Assert.EndsWith(" --log-file \"/home/deck/game/plugins/OpenVersus/logs/RollbackNode.log\"", linux.Arguments);
+
+        // Wine converts the node and its port file but not the log file: still the Linux node, without the option.
+        linux = NodeLaunch.Plan(Mod, underWine: true, logged, Files(WindowsExe, LinuxExe), p => p == logged.LogFile ? null : Unix(p), System32, out why);
+        Assert.NotNull(linux);
+        Assert.False(linux.IsNodeItself);
+        Assert.DoesNotContain("--log-file", linux.Arguments);
+        Assert.Contains(logged.LogFile, why);
+    }
+
+    [Fact]
     public void TheOptionsBecomeTheNodesCommandLine()
     {
         // The tests run on Linux too, where Path.Combine joins with '/', so the path is taken from the options.
