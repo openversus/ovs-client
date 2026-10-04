@@ -127,7 +127,7 @@ do_publish() {
         cp -f "$published" "$home/"
         say "installed to $home/$(basename "$published")"
         # The rollback node the mod starts beside the game (see README, "Rollback node"): published by
-        # ovs-rollback-server's OVSRollbackNode/publish.sh, one folder per platform.
+        # ovs-rollback-server's build.sh (node), one folder per platform.
         node_out=${NODE_OUT:-$here/../../ovs-rollback-server/out}
         for rid in win-x64 linux-x64; do
             if [ -d "$node_out/node-$rid" ]; then
@@ -136,7 +136,7 @@ do_publish() {
                 cp -r "$node_out/node-$rid/." "$home/node/$rid/"
                 say "installed the $rid rollback node to $home/node/$rid"
             else
-                echo "no $rid rollback node at $node_out/node-$rid; $home/node/$rid left as it is (publish it with ovs-rollback-server/OVSRollbackNode/publish.sh)"
+                echo "no $rid rollback node at $node_out/node-$rid; $home/node/$rid left as it is (build it with ovs-rollback-server/build.sh node)"
             fi
         done
     fi

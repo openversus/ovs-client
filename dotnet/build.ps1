@@ -85,7 +85,7 @@ function Publish-Plugin {
         Copy-Item $published $modDir -Force
         Say "installed to $(Join-Path $modDir (Split-Path $published -Leaf))"
         # The rollback node the mod starts beside the game (see README, "Rollback node"): published by
-        # ovs-rollback-server's OVSRollbackNode/publish.sh, one folder per platform.
+        # ovs-rollback-server's build.sh (node), one folder per platform.
         $nodeOut = if ($env:NODE_OUT) { $env:NODE_OUT } else { Join-Path $here "..\..\ovs-rollback-server\out" }
         foreach ($rid in @("win-x64", "linux-x64")) {
             $src = Join-Path $nodeOut "node-$rid"
@@ -96,7 +96,7 @@ function Publish-Plugin {
                 Copy-Item (Join-Path $src "*") $dst -Recurse -Force
                 Say "installed the $rid rollback node to $dst"
             } else {
-                Write-Host "no $rid rollback node at $src; $dst left as it is (publish it with ovs-rollback-server/OVSRollbackNode/publish.sh)"
+                Write-Host "no $rid rollback node at $src; $dst left as it is (build it with ovs-rollback-server/build.sh node)"
             }
         }
     }
