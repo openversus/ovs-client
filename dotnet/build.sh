@@ -5,6 +5,12 @@
 #   dotnet/build.sh test            build and run the tests only (no Windows toolchain needed)
 #   dotnet/build.sh publish         publish OpenVersus_<version>.asi only
 #   dotnet/build.sh harness         run the hooking layer end to end under Wine
+#   dotnet/build.sh package         build, test and publish, build the rollback node for both platforms (the server
+#                                   repo's build.sh node), and zip them for players: dotnet/out/OpenVersus_<version>.zip
+#                                   holding plugins/OpenVersus/ with the .asi, OpenVersus.toml (the default file, with
+#                                   both ServerUrl lines switched to the testing server and the prod line commented out
+#                                   above each, and LogLevel trace: tools/package-config.cs) and node/{linux-x64,win-x64}.
+#                                   The testing server is the node's own (NODE_REPO/pki/testing/server-url.txt)
 #   dotnet/build.sh clean           remove every bin/ and obj/
 #
 # Options:
@@ -19,7 +25,7 @@
 #                      node builds into DIR/OpenVersus/node/{win-x64,linux-x64} when the server repo has
 #                      published them (NODE_OUT, default <repo>/../ovs-rollback-server/out), replacing
 #                      what is there; without them the node folder is left alone and a note says so
-#   --skip-tests       do not run the tests in the default command
+#   --skip-tests       do not run the tests in the default command or package
 #
 # Needs the .NET 10 SDK. Publishing a Windows binary from Linux also needs lld-link (package
 # "lld") and xwin on PATH; the tests and the host build need neither. On Windows use build.ps1.
@@ -45,7 +51,7 @@ usage() {
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        build|rebuild|test|publish|harness|clean) command=$1 ;;
+        build|rebuild|test|publish|harness|clean|package) command=$1 ;;
         --accept-license) accept_license=true ;;
         --rwx) rwx=true ;;
         --install) shift; install_dir=${1:-}; [ -n "$install_dir" ] || { echo "--install needs a directory" >&2; exit 2; } ;;
@@ -151,6 +157,45 @@ do_harness() {
     ACCEPT_VS_BUILD_TOOLS_LICENSE=true "$here/wine-host/run.sh"
 }
 
+# The zip for players. The node is built here rather than taken from the server repo's out/, so that the node in the zip
+# is always one that trusts both servers the toml switches between; the published binaries are checked for both URLs.
+do_package() {
+    local node_repo=${NODE_REPO:-$here/../../ovs-rollback-server}
+    local testing_file="$node_repo/pki/testing/server-url.txt"
+    [ -s "$testing_file" ] || fail "$testing_file is missing: the testing server the toml switches to comes from the node's own trust list"
+    local testing prod
+    testing=$(tr -d '[:space:]' < "$testing_file")
+    prod=$(tr -d '[:space:]' < "$node_repo/pki/prod/server-url.txt")
+    say "building the rollback node (the server repo's build.sh node)"
+    NODE_PKI="prod testing" "$node_repo/build.sh" node win-x64 linux-x64
+
+    local stage="$here/out/package"
+    local zip="$here/out/OpenVersus_$version.zip"
+    rm -rf "$stage" "$zip"
+    local home="$stage/plugins/OpenVersus"
+    mkdir -p "$home/node"
+    cp "$published" "$home/"
+    for rid in win-x64 linux-x64; do
+        local exe
+        exe=$(ls "$node_repo/out/node-$rid" | grep -E '^OVS\.Rollback\.Node(\.exe)?$') || fail "$node_repo/out/node-$rid has no node executable"
+        grep -q -a -F "$prod " "$node_repo/out/node-$rid/$exe" && grep -q -a -F "$testing " "$node_repo/out/node-$rid/$exe" \
+            || fail "the $rid node does not trust both $prod and $testing; the toml's switch would not reach it"
+        mkdir -p "$home/node/$rid"
+        # Everything the node runs with (its settings files, the Serilog config, the runtimeconfig), without debug symbols.
+        (cd "$node_repo/out/node-$rid" && find . -type f ! -name '*.pdb' -exec cp --parents {} "$home/node/$rid/" \;)
+    done
+    say "writing OpenVersus.toml (servers: $testing, prod commented out; LogLevel trace)"
+    # --file: from the repo root a bare path would build the C++ project there instead.
+    dotnet run --file "$here/tools/package-config.cs" -- "$home" "$testing"
+
+    (cd "$stage" && zip -q -r -X "$zip" plugins) || fail "zip failed"
+    # zip -X leaves out uid/gid extras, not the Unix mode: the Linux node keeps its executable bit.
+    unzip -Z "$zip" "plugins/OpenVersus/node/linux-x64/OVS.Rollback.Node" | grep -q '^-rwx' \
+        || fail "the Linux node lost its executable bit in $zip"
+    say "packaged $zip ($(du -h "$zip" | cut -f1))"
+    unzip -Z1 "$zip" | sed 's/^/    /'
+}
+
 do_clean() {
     say "removing bin/ and obj/"
     find "$here" -type d \( -name bin -o -name obj \) -prune -exec rm -rf {} +
@@ -173,5 +218,11 @@ case "$command" in
     publish) do_publish ;;
     harness) do_harness ;;
     clean) do_clean ;;
+    package)
+        do_build
+        [ "$skip_tests" = true ] || do_test
+        do_publish
+        do_package
+        ;;
 esac
 
