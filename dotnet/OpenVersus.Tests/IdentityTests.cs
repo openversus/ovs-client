@@ -266,8 +266,12 @@ public class IdentityTests : IDisposable
         using var doc = JsonDocument.Parse(IdentityRegistration.Body(env));
         var root = doc.RootElement;
         Assert.Equal(
-            ["steamId", "epicId", "hardwareId", "hardwareIdVersion", "hardwareIdQuality", "installId", "clientVersion"],
+            ["steamId", "epicId", "hardwareId", "hardwareIdVersion", "hardwareIdQuality", "installId", "clientVersion", "nodePort"],
             root.EnumerateObject().Select(p => p.Name));
+        Assert.Equal(0, root.GetProperty("nodePort").GetInt32());
+        env.NodePort = 51561;
+        using var withPort = JsonDocument.Parse(IdentityRegistration.Body(env));
+        Assert.Equal(51561, withPort.RootElement.GetProperty("nodePort").GetInt32());
         Assert.Equal("7656119\"quoted\\", root.GetProperty("steamId").GetString());
         Assert.Equal(InstallId, root.GetProperty("installId").GetString());
         Assert.Equal("", root.GetProperty("hardwareId").GetString());
@@ -293,6 +297,58 @@ public class IdentityTests : IDisposable
         Assert.Equal("http://ovs.test/api/identify", http.Posts[0].Url);
         Assert.Contains(InstallId, http.Posts[0].Body);
         Assert.Equal(Token, identity.Token);
+    }
+
+    [Fact]
+    public void TheRegistrationWaitsForTheNodesPortAndSendsIt()
+    {
+        var http = new ScriptedPosts(Json($"{{\"ok\":true,\"token\":\"{Token}\"}}"));
+        var env = SteamEnv();
+        var waits = new List<TimeSpan>();
+
+        IdentityRegistration.Run(env, "http://ovs.test", http, new ServerIdentity(), new ListLogger(), _ => Assert.Fail("slept"), waitForNodePort: t => { waits.Add(t); return 41234; });
+
+        Assert.Equal([IdentityRegistration.NodePortWait], waits);
+        Assert.Single(http.Posts);
+        Assert.Contains("\"nodePort\":41234", http.Posts[0].Body);
+    }
+
+    [Fact]
+    public void APortReportedLateIsRegisteredAgain()
+    {
+        var http = new ScriptedPosts(Json($"{{\"ok\":true,\"token\":\"{Token}\"}}"), Json($"{{\"ok\":true,\"token\":\"{Token}\"}}"));
+        var env = SteamEnv();
+        var waits = new List<TimeSpan>();
+        var log = new ListLogger();
+
+        IdentityRegistration.Run(env, "http://ovs.test", http, new ServerIdentity(), log, _ => Assert.Fail("slept"), waitForNodePort: t => { waits.Add(t); return waits.Count == 1 ? 0 : 50000; });
+
+        Assert.Equal([IdentityRegistration.NodePortWait, IdentityRegistration.LateNodePortWait], waits);
+        Assert.Equal(2, http.Posts.Count);
+        Assert.Contains("\"nodePort\":0", http.Posts[0].Body);
+        Assert.Contains("\"nodePort\":50000", http.Posts[1].Body);
+        Assert.Contains(log.Lines, l => l.Contains("registering again"));
+    }
+
+    [Fact]
+    public void ANodeThatNeverReportsAPortLeavesOneRegistrationAndAWarning()
+    {
+        var http = new ScriptedPosts(Json($"{{\"ok\":true,\"token\":\"{Token}\"}}"));
+        var log = new ListLogger();
+
+        IdentityRegistration.Run(SteamEnv(), "http://ovs.test", http, new ServerIdentity(), log, _ => Assert.Fail("slept"), waitForNodePort: _ => 0);
+
+        Assert.Single(http.Posts);
+        Assert.Contains("\"nodePort\":0", http.Posts[0].Body);
+        Assert.Contains(log.Lines, l => l.Contains("never reported a port"));
+    }
+
+    [Fact]
+    public void WithoutANodeNothingWaitsAndThePortIsZero()
+    {
+        var http = new ScriptedPosts(Json($"{{\"ok\":true,\"token\":\"{Token}\"}}"));
+        IdentityRegistration.Run(SteamEnv(), "http://ovs.test", http, new ServerIdentity(), new ListLogger(), _ => Assert.Fail("slept"));
+        Assert.Contains("\"nodePort\":0", http.Posts[0].Body);
     }
 
     [Fact]

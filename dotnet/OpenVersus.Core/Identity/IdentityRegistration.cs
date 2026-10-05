@@ -15,9 +15,14 @@ public static class IdentityRegistration
     /// </summary>
     public static readonly TimeSpan[] RetryDelays = [TimeSpan.FromMilliseconds(250), TimeSpan.FromMilliseconds(500), TimeSpan.FromSeconds(1), TimeSpan.FromMilliseconds(1500), TimeSpan.FromSeconds(2)];
 
-    /// <summary>The JSON body: Steam id, Epic id, hardware id with its version and quality, install id and client version.</summary>
+    /// <summary>How long the first registration waits for the rollback node to report its port before going without it.</summary>
+    public static readonly TimeSpan NodePortWait = TimeSpan.FromSeconds(10);
+    /// <summary>How long after a registration without the port a late one is still waited for and sent.</summary>
+    public static readonly TimeSpan LateNodePortWait = TimeSpan.FromSeconds(60);
+
+    /// <summary>The JSON body: Steam id, Epic id, hardware id with its version and quality, install id, client version and the rollback node's port.</summary>
     public static string Body(EnvInfo env) =>
-        JsonSerializer.Serialize(new IdentityBody(env.SteamId, env.EpicId, env.HardwareId, env.HardwareIdVersion, env.HardwareIdQuality, env.InstallId, OvsVersion.Current), OvsJson.Default.IdentityBody);
+        JsonSerializer.Serialize(new IdentityBody(env.SteamId, env.EpicId, env.HardwareId, env.HardwareIdVersion, env.HardwareIdQuality, env.InstallId, OvsVersion.Current, env.NodePort), OvsJson.Default.IdentityBody);
 
     /// <summary>What /api/identify sent back, or null when it is not that JSON.</summary>
     public static IdentifyResponse? ParseResponse(string json) => OvsJson.TryParse(json, OvsJson.Default.IdentifyResponse, out _);
@@ -31,13 +36,26 @@ public static class IdentityRegistration
     /// (Epic, the Internet Archive build) have no Steam module to wait for, so they register at once
     /// and again if a Steam id turns up. The token each registration returns goes to
     /// <paramref name="identity"/>. Failures are logged. <paramref name="resolveSteamId"/> stands in
-    /// for <see cref="SteamId.Resolve"/> in tests.
+    /// for <see cref="SteamId.Resolve"/> in tests. <paramref name="waitForNodePort"/>, when the mod runs
+    /// a rollback node, waits up to the given time for the node's port and returns it (0 for none yet):
+    /// the registration waits <see cref="NodePortWait"/> for it, and one that went without it is sent
+    /// again if the port turns up within <see cref="LateNodePortWait"/>, since the server sends this
+    /// player's matches to that port.
     /// </summary>
-    public static void Run(EnvInfo env, string serverUrl, IHttpTransport http, ServerIdentity identity, ILogger log, Action<TimeSpan>? sleep = null, Func<string>? resolveSteamId = null)
+    public static void Run(EnvInfo env, string serverUrl, IHttpTransport http, ServerIdentity identity, ILogger log, Action<TimeSpan>? sleep = null, Func<string>? resolveSteamId = null, Func<TimeSpan, int>? waitForNodePort = null)
     {
         if (string.IsNullOrEmpty(serverUrl))
         {
             return;
+        }
+
+        if (waitForNodePort != null)
+        {
+            env.NodePort = waitForNodePort(NodePortWait);
+            if (env.NodePort == 0)
+            {
+                log.Warn($"[OVS] RegisterIdentity: the rollback node has not reported its port after {NodePortWait.TotalSeconds:F0} s; registering without it for now");
+            }
         }
 
         var url = Urls.Join(serverUrl, "/api/identify");
@@ -80,11 +98,26 @@ public static class IdentityRegistration
         {
             if (UseSteamId(env, resolveSteamId()))
             {
-                Send(env, url, http, identity, log);
+                registered = Send(env, url, http, identity, log) == Outcome.Registered || registered;
             }
             else if (!registered)
             {
                 log.Warn("[OVS] RegisterIdentity: no Steam id either");
+            }
+        }
+
+        if (waitForNodePort != null && env.NodePort == 0 && registered)
+        {
+            int late = waitForNodePort(LateNodePortWait);
+            if (late > 0)
+            {
+                env.NodePort = late;
+                log.Info($"[OVS] RegisterIdentity: the rollback node reported UDP {late}; registering again with it");
+                Send(env, url, http, identity, log);
+            }
+            else
+            {
+                log.Warn("[OVS] RegisterIdentity: the rollback node never reported a port; matches between players will not reach this machine");
             }
         }
     }

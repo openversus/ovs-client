@@ -85,6 +85,13 @@ Notifications = true
 # one file per match, named for the match and your opponents.
 NetStats = false
 
+# TL;DR: Needed for matches that run directly between players. Leave it on.
+#
+# Starts the OpenVersus rollback node, a small program that runs beside the game and
+# closes with it. When the server runs a match on the players' own machines instead of
+# on a server, the game connects to this node. Without it, those matches can't be played.
+RollbackNode = true
+
 # ---------------------------------------------------------------------------
 # Byte patterns the mod uses to find things in the game, made for the game's final patch.
 # Don't change these unless you know exactly why; a wrong one can break the feature it belongs to.
@@ -186,6 +193,16 @@ ServerUrl = "https://prod.openversus.org/"
 # Points the game's server connection at ServerUrl above, and checks for announcements.
 # Off means the game tries its original servers, which no longer exist.
 Enabled = true
+
+# TL;DR: Where the rollback node finds the other player for a match run between players. Leave it.
+#
+# A host name (or an IP address). The OpenVersus server points this name wherever the
+# service runs. Empty turns direct matches off: every such match goes through an OpenVersus
+# relay instead.
+P2PRegistry = "p2p.openversus.org"
+
+# The UDP port of that service.
+P2PRegistryPort = 41235
 
 # ---------------------------------------------------------------------------
 # The server the game's WB network connection goes to. Same advice as above.

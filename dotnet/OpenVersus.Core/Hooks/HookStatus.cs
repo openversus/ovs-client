@@ -32,12 +32,20 @@ public sealed class HookStatus
     public bool SunsetCallers { get; set; }
     /// <summary>The game's WB telemetry is stopped: its send function never sends (<see cref="TelemetryPatch"/>).</summary>
     public bool TelemetryOff { get; set; }
+    /// <summary>RecordEventWithAttributes records nothing: it frees what it is given and returns (<see cref="TelemetryPatch.ApplyRecord"/>).</summary>
+    public bool TelemetryRecordOff { get; set; }
+    /// <summary>Every Store analytics function returns at once (<see cref="TelemetryPatch.ApplyShop"/>).</summary>
+    public bool TelemetryShopOff { get; set; }
     /// <summary>The game's requests to the OpenVersus server carry the client's headers (<see cref="RequestHeadersHook"/>).</summary>
     public bool RequestHeaders { get; set; }
+    /// <summary>hiss_amalgamation's zstd sections are decoded (<see cref="HydraZstdHook"/>).</summary>
+    public bool HydraZstd { get; set; }
+    /// <summary>1v1 and 2v2 queues never switch to bots: PFG.PvPBots is found and set to 0 once the game is up (<see cref="PvPBotsPatch"/>).</summary>
+    public bool PvPBotsOff { get; set; }
 
     /// <summary>Every flag as name=value on one line, for the log.</summary>
     public override string ToString() =>
-        $"sigcheck={AntiSigCheck} gameEndpoint={GameEndpointSwap} prodEndpoint={ProdEndpointSwap} sunset={SunsetDate} ue={UeFuncs} dialog={Dialog} notifs={Notifications} stocks={Stocks} friendlyFire={FriendlyFire} postMatchFreeze={PostMatchFreeze} sunsetCallers={SunsetCallers} requestHeaders={RequestHeaders} telemetryOff={TelemetryOff}";
+        $"sigcheck={AntiSigCheck} gameEndpoint={GameEndpointSwap} prodEndpoint={ProdEndpointSwap} sunset={SunsetDate} ue={UeFuncs} dialog={Dialog} notifs={Notifications} stocks={Stocks} friendlyFire={FriendlyFire} postMatchFreeze={PostMatchFreeze} sunsetCallers={SunsetCallers} requestHeaders={RequestHeaders} telemetryOff={TelemetryOff} telemetryRecordOff={TelemetryRecordOff} telemetryShopOff={TelemetryShopOff} pvpBotsOff={PvPBotsOff} hydraZstd={HydraZstd}";
 }
 
 /// <summary>What every hook needs: the image, the pattern resolver, the settings and the log.</summary>

@@ -9,6 +9,7 @@ using OpenVersus.Memory;
 using OpenVersus.Native;
 using OpenVersus.Net;
 using OpenVersus.NetStats;
+using OpenVersus.P2P;
 
 namespace OpenVersus;
 
@@ -52,6 +53,8 @@ public sealed class Client
 
     private readonly nint _module;
     private readonly List<Action> _shutdown = [];
+    /// <summary>The rollback node running beside the game; null when none was started.</summary>
+    private RollbackNode? _node;
     /// <summary>Whether the startup update got the server's answer, which makes the background plugin check redundant.</summary>
     private bool _startupCheckAnswered;
 
@@ -272,7 +275,7 @@ public sealed class Client
 
         ApplyHooks();
         GameThread.Attach(Log);
-        SpawnP2PServer();
+        StartRollbackNode(isGame);
         Objects = new ObjectFinder(Image, ProcessMemory.Instance, EngineNames.Instance, Log, tryObjectArray: Status.UeFuncs);
         StockRulesHooks.Attach(Objects);
         StartBackgroundWork();
@@ -320,12 +323,44 @@ public sealed class Client
         return new StartupUpdate(Settings.ServerUrl, Settings.AutoUpdate, Http, plugins, paks, Log, Log.Close, state.SetUpdateNotice).Run();
     }
 
-    /// <summary>Kept from the C++ client for the planned peer-to-peer rollback experiment.</summary>
-    private void SpawnP2PServer()
+    /// <summary>
+    /// Starts the rollback node beside the game (<see cref="RollbackNode"/>) when the setting is on and
+    /// the game's server connection is pointed at an OpenVersus server; the node is told that server.
+    /// Its port reaches the server with the identity registration, which waits for it.
+    /// </summary>
+    private void StartRollbackNode(bool isGame)
     {
-    }
-    private void DespawnP2PServer()
-    {
+        if (!Settings.RollbackNode)
+        {
+            Log.Info("[Node] Not started: [Features] RollbackNode is off");
+            return;
+        }
+
+        if (!isGame || !Settings.EnableServerProxy || string.IsNullOrEmpty(Settings.ServerUrl))
+        {
+            Log.Info("[Node] Not started: the game's server connection is not pointed at an OpenVersus server");
+            return;
+        }
+
+        ulong port = Settings.P2PRegistryPort;
+        if (RendezvousAddress.PortOrDefault(port) != port)
+        {
+            Log.Warn($"[Node] [Server.Game] P2PRegistryPort = {port} is not a port from 1 to 65535; using {RendezvousAddress.DefaultPort}");
+        }
+
+        string? rendezvous = RendezvousAddress.Normalize(Settings.P2PRegistry, port);
+        if (rendezvous == null)
+        {
+            Log.Warn($"[Node] [Server.Game] P2PRegistry = \"{Settings.P2PRegistry}\" is not a host name (the port goes in P2PRegistryPort); the node runs without a rendezvous");
+            rendezvous = "";
+        }
+
+        var node = new RollbackNode(Directory, Settings.ServerUrl, rendezvous, Wine.IsWine, Log, Wine.IsWine ? Wine.UnixPath : null);
+        if (node.Start())
+        {
+            _node = node;
+            _shutdown.Add(node.Stop);
+        }
     }
 
     private void StartBackgroundWork()
@@ -356,9 +391,16 @@ public sealed class Client
             Start("OVS startup notices", () => StartupNotices.Run(state, problem, Log, updated));
         }
 
+        if (Status.PvPBotsOff)
+        {
+            Start("OVS PvPBots", () => PvPBotsPatch.Run(Log));
+        }
+
         var env = Env!;
         var serverIdentity = ServerIdentity;
-        Start("OVS identity", () => IdentityRegistration.Run(env, Settings.ServerUrl, Http, serverIdentity, Log));
+        var node = _node;
+        Start("OVS identity", () => IdentityRegistration.Run(env, Settings.ServerUrl, Http, serverIdentity, Log,
+            waitForNodePort: node == null ? null : timeout => node.WaitForPort(timeout)));
 
         if (Settings.AutoUpdate && _startupCheckAnswered)
         {
@@ -478,8 +520,16 @@ public sealed class Client
         }
 
         // Not a setting: the game's WB telemetry sends every click, with the player's session token,
-        // IP and Steam id, to a third party. It is stopped for everyone.
+        // IP and Steam id, to a third party. It is stopped for everyone, in layers, so one pattern
+        // going missing does not bring it back: the Store's analytics return at once, the recorder
+        // records nothing, and nothing is sent.
         Status.TelemetryOff = Apply("Telemetry", c, TelemetryPatch.Apply);
+        Status.TelemetryRecordOff = Apply("TelemetryRecord", c, TelemetryPatch.ApplyRecord);
+        Status.TelemetryShopOff = Apply("TelemetryShop", c, TelemetryPatch.ApplyShop);
+
+        // Not a setting: 1v1 and 2v2 queues wait for a real opponent instead of switching to a bot
+        // match after about two minutes. Casual and arena keep their bot fallback.
+        Status.PvPBotsOff = Apply("PvPBots", c, PvPBotsPatch.Apply);
 
         // Not a setting: the identity token on the game's login is what ties a player to their own
         // account rather than to whoever last registered from their IP. The game's /access has no
@@ -490,6 +540,10 @@ public sealed class Client
         headers.Add(new HeaderRule(RequestHeaders.OvsIdentity, () => identity.Token));
         RequestHeaders = headers;
         Status.RequestHeaders = Apply("RequestHeaders", c, ctx => RequestHeadersHook.Apply(ctx, headers));
+
+        // Not a setting: the server sends hiss_amalgamation's sections as zstd only to clients from this version on,
+        // and the game cannot unpack them without this.
+        Status.HydraZstd = Apply("HydraZstd", c, HydraZstdHook.Apply);
 
         Log.Info($"hooks: {Status}");
         foreach (var f in GameFunctions.All)
@@ -575,8 +629,6 @@ public sealed class Client
             }
             catch (Exception e) { Log.Error($"shutdown: {e}"); }
         }
-
-        DespawnP2PServer();
     }
 }
 
@@ -605,6 +657,34 @@ public static class Wine
 
     /// <summary>Whether this process runs under Wine or Proton.</summary>
     public static bool IsWine => s_version.Value != null;
+
+    /// <summary>
+    /// The Linux path for a Windows path, through kernel32's wine_get_unix_file_name (every Wine and
+    /// Proton has it); null outside Wine or when the path has no Linux side. The result is freed from
+    /// the process heap, where Wine allocates it.
+    /// </summary>
+    public static unsafe string? UnixPath(string windowsPath)
+    {
+        nint kernel32 = Kernel32.GetModuleHandle("kernel32.dll");
+        nint fn = kernel32 == 0 ? 0 : Kernel32.GetProcAddress(kernel32, "wine_get_unix_file_name");
+        if (fn == 0)
+        {
+            return null;
+        }
+
+        fixed (char* path = windowsPath)
+        {
+            byte* result = ((delegate* unmanaged<char*, byte*>)fn)(path);
+            if (result == null)
+            {
+                return null;
+            }
+
+            string unix = Marshal.PtrToStringUTF8((nint)result) ?? "";
+            Kernel32.HeapFree(Kernel32.GetProcessHeap(), 0, (nint)result);
+            return unix.Length > 0 ? unix : null;
+        }
+    }
     /// <summary>The Wine version, or null when not under Wine.</summary>
     public static string? Version => s_version.Value;
 }
