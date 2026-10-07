@@ -34,6 +34,7 @@ public static unsafe class StockRulesHooks
     private const uint DoRespawnRva = 0x011E4F70;
     private const uint AttemptEndMatchRva = 0x02967BE0;
     private const uint SetRespawnsRemainingRva = 0x011FC980;
+    private const uint RespawnRva = 0x02966FC0;
 
     // test rdx, rdx; je rel32
     private static readonly byte[] s_playerDiedPrologue = [0x48, 0x85, 0xD2, 0x0F, 0x84, 0x9A, 0x05, 0x00, 0x00];
@@ -45,12 +46,18 @@ public static unsafe class StockRulesHooks
     private static readonly byte[] s_attemptEndMatchPrologue = [0x40, 0x56, 0x48, 0x83, 0xEC, 0x50];
     // mov [rcx+0x380], edx; ret
     private static readonly byte[] s_setRespawnsRemainingCode = [0x89, 0x91, 0x80, 0x03, 0x00, 0x00, 0xC3];
+    // test rdx, rdx; je rel32
+    private static readonly byte[] s_respawnPrologue = [0x48, 0x85, 0xD2, 0x0F, 0x84, 0xE3, 0x02, 0x00, 0x00];
 
     private static delegate* unmanaged<nint, nint, nint, void> s_playerDied;
     private static delegate* unmanaged<nint, nint, void> s_registerCharacter;
     private static delegate* unmanaged<nint, void> s_doRespawn;
     private static delegate* unmanaged<nint, void> s_attemptEndMatch;
     private static delegate* unmanaged<nint, int, void> s_setRespawnsRemaining;
+    private static delegate* unmanaged<nint, nint, void> s_respawn;
+    // Fighters kept dead and taken off the camera's framing; a rematch that reuses one puts it back.
+    private static readonly HashSet<nint> s_offCamera = [];
+    private static CameraTargets? s_camera;
 
     private static ILogger? s_log;
     private static ObjectFinder? s_finder;
@@ -78,7 +85,7 @@ public static unsafe class StockRulesHooks
         var image = c.Image;
         nint setRespawns = image.Address(SetRespawnsRemainingRva);
         CodeWriter.Expect(setRespawns, s_setRespawnsRemainingCode);
-        foreach (var (rva, prologue) in new[] { (PlayerDiedRva, s_playerDiedPrologue), (RegisterCharacterRva, s_registerCharacterPrologue), (DoRespawnRva, s_doRespawnPrologue), (AttemptEndMatchRva, s_attemptEndMatchPrologue) })
+        foreach (var (rva, prologue) in new[] { (PlayerDiedRva, s_playerDiedPrologue), (RegisterCharacterRva, s_registerCharacterPrologue), (DoRespawnRva, s_doRespawnPrologue), (AttemptEndMatchRva, s_attemptEndMatchPrologue), (RespawnRva, s_respawnPrologue) })
         {
             CodeWriter.Expect(image.Address(rva), prologue);
         }
@@ -89,6 +96,7 @@ public static unsafe class StockRulesHooks
         s_playerDied = (delegate* unmanaged<nint, nint, nint, void>)Hook(image, "AMvsGameModeBase::PlayerDied", PlayerDiedRva, s_playerDiedPrologue, (nint)(delegate* unmanaged<nint, nint, nint, void>)&PlayerDied, "void AMvsGameModeBase::PlayerDied(AMvsGameModeBase* this, AMvsFixedCharacter* victim, AMvsFixedCharacter* attacker)", endsInConditionalJump: true);
         s_registerCharacter = (delegate* unmanaged<nint, nint, void>)Hook(image, "AMvsGameModeBase::RegisterCharacter", RegisterCharacterRva, s_registerCharacterPrologue, (nint)(delegate* unmanaged<nint, nint, void>)&RegisterCharacter, "void AMvsGameModeBase::RegisterCharacter(AMvsGameModeBase* this, APfgFixedPawn* character)");
         s_doRespawn = (delegate* unmanaged<nint, void>)Hook(image, "APfgFixedPawn::DoRespawn", DoRespawnRva, s_doRespawnPrologue, (nint)(delegate* unmanaged<nint, void>)&DoRespawn, "void APfgFixedPawn::DoRespawn(APfgFixedPawn* this)");
+        s_respawn = (delegate* unmanaged<nint, nint, void>)Hook(image, "AMvsGameModeBase::Respawn", RespawnRva, s_respawnPrologue, (nint)(delegate* unmanaged<nint, nint, void>)&Respawn, "void AMvsGameModeBase::Respawn(AMvsGameModeBase* this, AMvsFixedCharacter* victim)", endsInConditionalJump: true);
         s_attemptEndMatch = (delegate* unmanaged<nint, void>)Hook(image, "UMvsGameModeDefaultGameEndHandlerComponent::AttemptEndMatch", AttemptEndMatchRva, s_attemptEndMatchPrologue, (nint)(delegate* unmanaged<nint, void>)&AttemptEndMatch, "void UMvsGameModeDefaultGameEndHandlerComponent::AttemptEndMatch(UMvsGameModeDefaultGameEndHandlerComponent* this)");
 
         c.Log.Success("Stock rules hooked");
@@ -131,6 +139,32 @@ public static unsafe class StockRulesHooks
         {
             s_doRespawn(pawn);
         }
+    }
+
+    /// <summary>
+    /// The respawn timer of a fighter with no respawns left: the game would destroy the pawn
+    /// (DestroySpawnedActor, RespawnLimitReached), which takes that player's input source out of the
+    /// netcode session. The local client then becomes a spectator: it stops sending input, stalls on
+    /// server-confirmed frames and runs behind, which is where online stock matches desynced. Skipped
+    /// for a fighter out of lives, so it just stays dead. Decided from the pawn's RespawnsRemaining,
+    /// which is rollback state, so every client decides alike.
+    /// </summary>
+    [UnmanagedCallersOnly]
+    private static void Respawn(nint gameMode, nint victim)
+    {
+        bool keepDead = HookGuard.Run("StocksRespawn", victim, static v => s_match is { } match && match.IsFighter(v) && TryReadInt(v + Mvs.PawnRespawnsRemaining, out int respawns) && respawns == 0, false);
+        if (keepDead)
+        {
+            bool first = HookGuard.Run("StocksRespawnCamera", victim, static v => { lock (s_offCamera) { return s_offCamera.Add(v); } }, false);
+            if (first)
+            {
+                MatchRulesLog.Line("stocks: a fighter out of lives is kept dead (not destroyed) and taken off the camera");
+                SetOnCamera(victim, on: false);
+            }
+            return;
+        }
+
+        s_respawn(gameMode, victim);
     }
 
     [UnmanagedCallersOnly]
@@ -184,7 +218,119 @@ public static unsafe class StockRulesHooks
 
         nint data = character + Mvs.FixedCharacterGameplayPlayerData;
         match.Register(character, ReadInt(data + Mvs.GameplayPlayerDataPlayerIndex), ReadInt(data + Mvs.GameplayPlayerDataTeamIndex));
+        bool wasOffCamera;
+        lock (s_offCamera)
+        {
+            wasOffCamera = s_offCamera.Remove(character);
+        }
+        if (wasOffCamera)
+        {
+            SetOnCamera(character, on: true);
+        }
     }
+
+    /// <summary>
+    /// Takes a fighter kept dead off the camera's framing (or puts it back, for a rematch that reuses
+    /// it), as destroying it did: otherwise the camera keeps zooming out to frame where it died.
+    /// Finding the camera walks the object array, so that runs on a pool thread (cached per match)
+    /// and only the call is posted to the game thread. The camera is each client's own view, not
+    /// gameplay, so this cannot desync.
+    /// </summary>
+    private static void SetOnCamera(nint pawn, bool on)
+    {
+        ThreadPool.QueueUserWorkItem(static s => HookGuard.Run("StocksCamera", s, static s =>
+        {
+            if (FindCamera(s.GameMode) is { } camera)
+            {
+                GameThread.Post("StocksCamera", () => HookGuard.Run("StocksCamera", (camera, s.Pawn, s.On), static t => CallCamera(t.camera, t.Pawn, t.On)));
+            }
+        }), (Pawn: pawn, On: on, GameMode: s_gameMode), preferLocal: false);
+    }
+
+    /// <summary>The match's cameras and their functions: cached while they are alive, otherwise found again. Off the game thread.</summary>
+    private static CameraTargets? FindCamera(nint gameMode)
+    {
+        var finder = s_finder;
+        if (finder == null)
+        {
+            return null;
+        }
+
+        if (s_camera is { } cached && cached.GameMode == gameMode && cached.Cameras.Length > 0 && cached.Cameras.All(finder.IsLive))
+        {
+            return cached;
+        }
+
+        var camera = new CameraTargets(
+            gameMode,
+            finder.FindInstancesOfClass(finder.FindClass("MvsCamera")).ToArray(),
+            Reflection.Find(finder, finder.Image, "MvsCamera", "UnRegisterActorWithCamera"),
+            Reflection.Find(finder, finder.Image, "MvsCamera", "RegisterActorWithCamera"),
+            Reflection.Find(finder, finder.Image, "MvsCamera", "IsActorRegistered"));
+        s_camera = camera;
+        if (camera.Cameras.Length == 0 || !TakesActorFirst(camera.Unregister))
+        {
+            s_log?.Warn($"[Stocks] camera not found ({camera.Cameras.Length} camera(s)); a fighter out of lives stays framed");
+        }
+        return camera;
+    }
+
+    /// <summary>
+    /// UnRegisterActorWithCamera(AActor*) or RegisterActorWithCamera(AActor*, int32 OptionalPlayerIndexCamera)
+    /// on each camera, the actor first in both (checked against the reflected parameters). Registering
+    /// skips a camera that already frames the actor. Game thread.
+    /// </summary>
+    private static void CallCamera(CameraTargets camera, nint pawn, bool on)
+    {
+        var function = on ? camera.Register : camera.Unregister;
+        if (s_finder is not { } finder || !finder.IsLive(pawn) || !TakesActorFirst(function))
+        {
+            return;
+        }
+
+        var sig = function!.Signature.Reflected!;
+        Span<byte> parameters = stackalloc byte[sig.ParmsSize];
+        int calls = 0;
+        foreach (nint cam in camera.Cameras.Where(finder.IsLive))
+        {
+            if (on && IsRegistered(camera, cam, pawn))
+            {
+                continue;
+            }
+
+            parameters.Clear();
+            BitConverter.TryWriteBytes(parameters, (long)pawn);
+            if (on && sig.Parameters.FirstOrDefault(p => !p.IsReturn && p.Type == "IntProperty") is { } index)
+            {
+                BitConverter.TryWriteBytes(parameters[index.Offset..], -1);
+            }
+
+            Reflection.Invoke(function, cam, parameters);
+            calls++;
+        }
+
+        s_log?.Debug($"[Stocks] fighter {(on ? "back on" : "off")} camera ({calls} of {camera.Cameras.Length} cameras)");
+    }
+
+    private static bool IsRegistered(CameraTargets camera, nint cam, nint pawn)
+    {
+        if (!TakesActorFirst(camera.IsRegistered) || camera.IsRegistered!.Signature.Reflected is not { ReturnValueOffset: >= 8 } sig)
+        {
+            return false;
+        }
+
+        Span<byte> parameters = stackalloc byte[sig.ParmsSize];
+        parameters.Clear();
+        BitConverter.TryWriteBytes(parameters, (long)pawn);
+        Reflection.Invoke(camera.IsRegistered, cam, parameters);
+        return parameters[sig.ReturnValueOffset] != 0;
+    }
+
+    private static bool TakesActorFirst(GameFunction? function) =>
+        function?.Signature.Reflected is { ParmsSize: >= 8 and <= 16 } sig
+        && sig.Parameters.FirstOrDefault(p => !p.IsReturn) is { Type: "ObjectProperty", Offset: 0 };
+
+    private sealed record CameraTargets(nint GameMode, nint[] Cameras, GameFunction? Unregister, GameFunction? Register, GameFunction? IsRegistered);
 
     private static nint TryReadPointer(nint address) => address != 0 && CodeWriter.TryRead(address, out nint value) ? value : 0;
 
