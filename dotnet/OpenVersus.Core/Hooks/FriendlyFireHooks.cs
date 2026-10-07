@@ -66,6 +66,8 @@ public static unsafe class FriendlyFireHooks
         "MVS_C036_AgentAssist_Projectile_C", // Agent Smith's clone: touching a teammate makes it their assist
         "Mvs_LeBron_Basketball_C", // LeBron's pass: the same ball as his throw, so it never hurts a teammate
         "Mvs_WonderWoman_LassoProjectile_C", // Wonder Woman's lasso pulls a teammate in
+        "Mvs_Rick_Polymorph_Bomb_C", // Rick's down special: it polymorphs a teammate, without the 1 damage (Lab log 2026-10-06)
+        "Mvs_Finn_HighFiveShockwave_C", // the shockwave Finn's high five sends out after the slap (Lab log 2026-10-07)
     ];
 
     // Actors that, attached to a teammate (their equip component's AttachedComponents), make hits on
@@ -88,6 +90,7 @@ public static unsafe class FriendlyFireHooks
         "Mvs_C027_Ground_Special_Air_AllyDash_Montage", // Nubia's teleport to a teammate
         "Mvs_C027_Air_Special_D_Montage", // Nubia's down special: to the teammate, then the circle
         "Mvs_C027_Ground_Special_D_Montage", // the circle after Nubia's teleport, on the ground
+        "Mvs_Finn_Special_Ground_N", // Finn's neutral special, the high five (Lab log 2026-10-06; it has no air version)
     ];
     private const string JerryCork = "Mvs_JerryCork_Actor_C";
     private const string CarriedJerry = "Mvs_Jerry_Actor_NoHitbox_C";
