@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using OpenVersus.Game;
 using OpenVersus.Hooking;
 using OpenVersus.Memory;
+using OpenVersus.Native;
 using Microsoft.Extensions.Logging;
 
 namespace OpenVersus.Hooks;
@@ -191,7 +192,7 @@ public static unsafe class FriendlyFireHooks
             (nint)(delegate* unmanaged<nint, nint, void>)&ProcessActiveHitInteraction, "void ProcessActiveHitInteraction(UMvsAttackerComponent* attacker, FActiveHitInteraction* hit)");
         s_getHitResponseFlags = (delegate* unmanaged<nint, nint, byte, int*, void>)Hook(image, "UMvsDefenderComponent::GetHitResponseFlags", GetHitResponseFlagsRva, s_getHitResponseFlagsPrologue,
             (nint)(delegate* unmanaged<nint, nint, byte, int*, void>)&GetHitResponseFlags, "void UMvsDefenderComponent::GetHitResponseFlags(UMvsDefenderComponent* this, const FActiveHitInteraction* hit, bool isAlly, int32* flags)");
-        CallSite.Redirect(shieldCall, (nint)(delegate* unmanaged<nint, nint, byte>)&ShieldIsSameTeam);
+        RedirectShieldCheckWithHit(shieldCall);
 
         try
         {
@@ -206,6 +207,34 @@ public static unsafe class FriendlyFireHooks
         s_installed = true;
         c.Log.Success("Friendly fire hooked; it is on only in matches with the Friendly Fire mutator");
         return true;
+    }
+
+    /// <summary>
+    /// Points the shield's IsSameTeam call at <see cref="ShieldIsSameTeam"/> through a stub that also passes the hit
+    /// being checked. The shield code (in the function at 0x02953020, which takes the FActiveHitInteraction as its
+    /// second argument and keeps it in r15: mov r15, rdx; it reads [r15+0x330], the defender, just before) runs before
+    /// ProcessActiveHitInteraction, so the hit is not otherwise known yet. Stub: mov r8, r15; mov rax, target; jmp rax.
+    /// </summary>
+    private static void RedirectShieldCheckWithHit(nint shieldCall)
+    {
+        nint target = (nint)(delegate* unmanaged<nint, nint, nint, byte>)&ShieldIsSameTeam;
+        Span<byte> stub = stackalloc byte[3 + 10 + 2];
+        stub[0] = 0x4D; stub[1] = 0x89; stub[2] = 0xF8;       // mov r8, r15
+        stub[3] = 0x48; stub[4] = 0xB8;                          // mov rax, imm64
+        BitConverter.TryWriteBytes(stub[5..13], (long)target);
+        stub[13] = 0xFF; stub[14] = 0xE0;                        // jmp rax
+        nint placed = Trampoline.Near(shieldCall).Place(stub, 16);
+        Kernel32.FlushInstructionCache(Kernel32.GetCurrentProcess(), placed, (nuint)stub.Length);
+        long displacement = (long)placed - (long)(shieldCall + CallSite.Length);
+        if (displacement < int.MinValue || displacement > int.MaxValue)
+        {
+            throw new PatchException($"shield stub at 0x{placed:X} is out of rel32 range of 0x{shieldCall:X}");
+        }
+
+        Span<byte> call = stackalloc byte[CallSite.Length];
+        call[0] = CallSite.CallOpcode;
+        BitConverter.TryWriteBytes(call[1..], (int)displacement);
+        CodeWriter.Write(shieldCall, call, code: true);
     }
 
     private static nint Hook(GameImage image, string name, uint rva, byte[] prologue, nint hook, string declaration)
@@ -323,11 +352,13 @@ public static unsafe class FriendlyFireHooks
     [UnmanagedCallersOnly]
     private static void ProcessActiveHitInteraction(nint attackerComponent, nint hit)
     {
-        if (s_active)
+        if (!s_active)
         {
-            HookGuard.Run("FriendlyFireHit", hit, static h => OnHit(h));
+            s_processActiveHit(attackerComponent, hit);
+            return;
         }
 
+        HookGuard.Run("FriendlyFireHit", hit, static h => OnHit(h));
         s_processActiveHit(attackerComponent, hit);
     }
 
@@ -348,7 +379,7 @@ public static unsafe class FriendlyFireHooks
     }
 
     [UnmanagedCallersOnly]
-    private static byte ShieldIsSameTeam(nint team, nint other)
+    private static byte ShieldIsSameTeam(nint team, nint other, nint hit)
     {
         byte same = s_isSameTeam(team, other);
         if (same == 0 || !s_active || team == other)
@@ -356,12 +387,18 @@ public static unsafe class FriendlyFireHooks
             return same;
         }
 
+        // A kept ally move (Jake's bite, say) reaching a shielding teammate stays an ally's: the shield would
+        // otherwise take it as an opponent's and the teammate was hurt (Jacob, 2026-10-07). The hit is the shield
+        // code's own (see RedirectShieldCheckWithHit), the same one ProcessActiveHitInteraction classifies next.
+        var keep = hit == 0 ? Keep.No : HookGuard.Run("FriendlyFireShield", hit, static h => Classify(h), Keep.No);
         if (MatchRulesLog.On)
         {
-            LogLine("ff shield check: teammates count as opponents");
+            LogLine(keep != Keep.No
+                ? $"ff shield check: the hit is kept ({keep}), teammates stay teammates"
+                : "ff shield check: teammates count as opponents");
         }
 
-        return 0;
+        return keep != Keep.No ? same : (byte)0;
     }
 
     [UnmanagedCallersOnly]
