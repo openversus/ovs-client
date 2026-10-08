@@ -64,6 +64,28 @@ public class NetTests
     }
 
     [Fact]
+    public void AReidentifyNotificationRunsTheRegistrationOnceAtATime()
+    {
+        int runs = 0;
+        using var started = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        var log = new ListLogger();
+        var poller = new NotificationPoller("http://ovs.test", new NoHttp(), null!, null!, log, reidentify: () => { Interlocked.Increment(ref runs); started.Set(); release.Wait(5000); });
+        var notification = Assert.Single(NotificationPoller.Parse("""[{"type":"reidentify","title":"","message":"","data":{"steamId":"1"},"timestamp":1}]"""));
+
+        poller.Dispatch(notification);
+        Assert.True(started.Wait(5000));
+        poller.Dispatch(notification);
+        release.Set();
+
+        Assert.Equal(1, runs);
+        Assert.Contains(log.Lines, l => l.Contains("in progress"));
+        // Without a registration to run, the notification is logged and dropped.
+        new NotificationPoller("http://ovs.test", new NoHttp(), null!, null!, log).Dispatch(notification);
+        Assert.Contains(log.Lines, l => l.Contains("registers no identity"));
+    }
+
+    [Fact]
     public void NotificationsParseAndUnknownFieldsAreTolerated()
     {
         var list = NotificationPoller.Parse("""[{"type":"admin_banner","title":"Top","message":"Bottom","timeout":10.0,"timestamp":1},{"type":"match_cancel"},{"nope":1},{"type":"toast_received","message":"X toasted you!","extra":[1,2]}]""");
@@ -345,5 +367,13 @@ public class NetTests
         Assert.Null(plugin);
         Assert.Contains(log.Lines, l => l.Contains("SHA-256 matches"));
         Assert.Contains(log.Lines, l => l.Contains("Not installing the download: it is version") && l.Contains("not newer than this client"));
+    }
+
+    // The poller never calls the transport from Dispatch.
+    private sealed class NoHttp : IHttpTransport
+    {
+        public HttpResult Get(Uri url, TimeSpan timeout) => throw new NotSupportedException();
+
+        public HttpResult Post(Uri url, string contentType, ReadOnlySpan<byte> body, TimeSpan timeout) => throw new NotSupportedException();
     }
 }

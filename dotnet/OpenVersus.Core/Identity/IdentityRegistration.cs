@@ -131,6 +131,52 @@ public static class IdentityRegistration
         }
     }
 
+    /// <summary>
+    /// Registers again with a fresh session ticket, when the server asks (a reidentify notification: the Steam identity
+    /// service lost the session it held for this ticket, which Steam allows to be used once). The rest of the identity,
+    /// the node's port included, is sent as it stands. Nothing is sent for a client without Steam, or when no ticket
+    /// could be minted; false then, else whether the server registered it.
+    /// </summary>
+    public static bool Reidentify(EnvInfo env, string serverUrl, IHttpTransport http, ServerIdentity identity, ILogger log, Action<TimeSpan>? sleep = null, Func<string>? resolveSteamTicket = null)
+    {
+        if (string.IsNullOrEmpty(serverUrl) || Urls.Join(serverUrl, "/api/identify") is not { } url)
+        {
+            return false;
+        }
+
+        if (!env.IsSteam)
+        {
+            log.Info("[OVS] Reidentify: the server asked for a new Steam ticket, but this client has no Steam id; nothing to send");
+            return false;
+        }
+
+        sleep ??= Thread.Sleep;
+        resolveSteamTicket ??= () => OperatingSystem.IsWindows() ? SteamId.SessionTicket(log) : "";
+        UseSteamTicket(env, resolveSteamTicket(), log);
+        if (env.SteamTicket.Length == 0)
+        {
+            return false;
+        }
+
+        log.Info("[OVS] Reidentify: registering again with a new Steam session ticket");
+        for (int attempt = 0; ; attempt++)
+        {
+            var outcome = Send(env, url, http, identity, log);
+            if (outcome != Outcome.NoAnswer)
+            {
+                return outcome == Outcome.Registered;
+            }
+
+            if (attempt == RetryDelays.Length)
+            {
+                log.Error("[OVS] Reidentify: no answer after retries");
+                return false;
+            }
+
+            sleep(RetryDelays[attempt]);
+        }
+    }
+
     /// <summary>Takes the session ticket into <paramref name="env"/>; without one the server will not believe the Steam id.</summary>
     private static void UseSteamTicket(EnvInfo env, string ticket, ILogger log)
     {

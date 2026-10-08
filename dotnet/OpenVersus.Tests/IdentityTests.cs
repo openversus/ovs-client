@@ -532,6 +532,38 @@ public class IdentityTests : IDisposable
         Assert.Contains(log.Lines, l => l.Contains("no Steam session ticket"));
     }
 
+    [Fact]
+    public void AReidentifyMintsANewTicketAndRegistersAgain()
+    {
+        var http = new ScriptedPosts(HttpResult.Failed("WinHttpSendRequest failed (12029)"), Json($"{{\"ok\":true,\"token\":\"{Token}\"}}"));
+        var env = SteamEnv();
+        env.SteamTicket = "14000000AABBCCDD";
+        env.NodePort = 7777;
+        var identity = new ServerIdentity();
+
+        bool registered = IdentityRegistration.Reidentify(env, "http://ovs.test", http, identity, new ListLogger(), _ => { }, resolveSteamTicket: () => "14000000FFEEDDCC");
+
+        Assert.True(registered);
+        Assert.Equal(2, http.Posts.Count);
+        Assert.All(http.Posts, p => Assert.Contains("\"steamTicket\":\"14000000FFEEDDCC\"", p.Body));
+        Assert.Contains("\"nodePort\":7777", http.Posts[1].Body);
+        Assert.Equal(Token, identity.Token);
+    }
+
+    [Fact]
+    public void AReidentifySendsNothingWithoutSteamOrWithoutATicket()
+    {
+        var http = new ScriptedPosts();
+        var log = new ListLogger();
+
+        Assert.False(IdentityRegistration.Reidentify(new EnvInfo(RuntimeEnvironment.Wine) { InstallId = InstallId }, "http://ovs.test", http, new ServerIdentity(), log, _ => Assert.Fail("slept")));
+        Assert.False(IdentityRegistration.Reidentify(SteamEnv(), "http://ovs.test", http, new ServerIdentity(), log, _ => Assert.Fail("slept"), resolveSteamTicket: () => ""));
+
+        Assert.Empty(http.Posts);
+        Assert.Contains(log.Lines, l => l.Contains("no Steam id"));
+        Assert.Contains(log.Lines, l => l.Contains("no Steam session ticket"));
+    }
+
     private static EnvInfo SteamEnv() => new(RuntimeEnvironment.Wine) { SteamId = "76561198000000001", IsSteam = true };
 
     private static HttpResult Json(string body) => new(true, 200, System.Text.Encoding.UTF8.GetBytes(body), null);
