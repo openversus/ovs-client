@@ -357,7 +357,9 @@ public sealed class Client
 
         if (Settings.EnableServerProxy && !string.IsNullOrEmpty(Settings.ServerUrl))
         {
-            var poller = new NotificationPoller(Settings.ServerUrl, Http, Objects, Image, Log);
+            // A reidentify from the server: a new Steam ticket, the identity as it stands (IdentityRegistration.Run filled it).
+            var poller = new NotificationPoller(Settings.ServerUrl, Http, Objects, Image, Log,
+                reidentify: () => IdentityRegistration.Reidentify(Env!, Settings.ServerUrl, Http, ServerIdentity, Log));
             poller.Start();
             _shutdown.Add(poller.Stop);
         }
