@@ -20,9 +20,9 @@ public static class IdentityRegistration
     /// <summary>How long after a registration without the port a late one is still waited for and sent.</summary>
     public static readonly TimeSpan LateNodePortWait = TimeSpan.FromSeconds(60);
 
-    /// <summary>The JSON body: Steam id, Epic id, hardware id with its version and quality, install id, client version and the rollback node's port.</summary>
+    /// <summary>The JSON body: Steam id and its session ticket, Epic id, hardware id with its version and quality, install id, client version and the rollback node's port.</summary>
     public static string Body(EnvInfo env) =>
-        JsonSerializer.Serialize(new IdentityBody(env.SteamId, env.EpicId, env.HardwareId, env.HardwareIdVersion, env.HardwareIdQuality, env.InstallId, OvsVersion.Current, env.NodePort), OvsJson.Default.IdentityBody);
+        JsonSerializer.Serialize(new IdentityBody(env.SteamId, env.SteamTicket, env.EpicId, env.HardwareId, env.HardwareIdVersion, env.HardwareIdQuality, env.InstallId, OvsVersion.Current, env.NodePort), OvsJson.Default.IdentityBody);
 
     /// <summary>What /api/identify sent back, or null when it is not that JSON.</summary>
     public static IdentifyResponse? ParseResponse(string json) => OvsJson.TryParse(json, OvsJson.Default.IdentifyResponse, out _);
@@ -40,9 +40,11 @@ public static class IdentityRegistration
     /// a rollback node, waits up to the given time for the node's port and returns it (0 for none yet):
     /// the registration waits <see cref="NodePortWait"/> for it, and one that went without it is sent
     /// again if the port turns up within <see cref="LateNodePortWait"/>, since the server sends this
-    /// player's matches to that port.
+    /// player's matches to that port. With a Steam id, the session ticket that proves it to the server
+    /// is fetched once (<see cref="SteamId.SessionTicket"/>, or <paramref name="resolveSteamTicket"/> in
+    /// tests) and sent with every registration; without one the server takes the id as a claim only.
     /// </summary>
-    public static void Run(EnvInfo env, string serverUrl, IHttpTransport http, ServerIdentity identity, ILogger log, Action<TimeSpan>? sleep = null, Func<string>? resolveSteamId = null, Func<TimeSpan, int>? waitForNodePort = null)
+    public static void Run(EnvInfo env, string serverUrl, IHttpTransport http, ServerIdentity identity, ILogger log, Action<TimeSpan>? sleep = null, Func<string>? resolveSteamId = null, Func<TimeSpan, int>? waitForNodePort = null, Func<string>? resolveSteamTicket = null)
     {
         if (string.IsNullOrEmpty(serverUrl))
         {
@@ -67,6 +69,7 @@ public static class IdentityRegistration
 
         sleep ??= Thread.Sleep;
         resolveSteamId ??= () => SteamId.Resolve(log, allowLoginUsers: env.Runtime == RuntimeEnvironment.NativeWindows);
+        resolveSteamTicket ??= () => OperatingSystem.IsWindows() ? SteamId.SessionTicket(log) : "";
         bool steamIdMissing = env.SteamId is "Unknown" or "";
         if (steamIdMissing && env.IsSteamLaunch)
         {
@@ -74,6 +77,11 @@ public static class IdentityRegistration
         }
 
         log.Debug(env.Print());
+        if (env.IsSteam)
+        {
+            UseSteamTicket(env, resolveSteamTicket(), log);
+        }
+
         bool registered = false;
         for (int attempt = 0; ; attempt++)
         {
@@ -98,6 +106,7 @@ public static class IdentityRegistration
         {
             if (UseSteamId(env, resolveSteamId()))
             {
+                UseSteamTicket(env, resolveSteamTicket(), log);
                 registered = Send(env, url, http, identity, log) == Outcome.Registered || registered;
             }
             else if (!registered)
@@ -119,6 +128,16 @@ public static class IdentityRegistration
             {
                 log.Warn("[OVS] RegisterIdentity: the rollback node never reported a port; matches between players will not reach this machine");
             }
+        }
+    }
+
+    /// <summary>Takes the session ticket into <paramref name="env"/>; without one the server will not believe the Steam id.</summary>
+    private static void UseSteamTicket(EnvInfo env, string ticket, ILogger log)
+    {
+        env.SteamTicket = ticket;
+        if (ticket.Length == 0)
+        {
+            log.Warn("[OVS] RegisterIdentity: no Steam session ticket; the server will not take this Steam id as proven, only the install id and IP identify this client");
         }
     }
 

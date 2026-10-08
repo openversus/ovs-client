@@ -91,6 +91,71 @@ public static unsafe class SteamId
         return FromLoginUsers(log);
     }
 
+    /// <summary>
+    /// A session ticket from the game's Steam API (ISteamUser::GetAuthSessionTicket) as hex, or "" when there is no Steam
+    /// API, no user or no ticket. The server checks Steam's signature on it (the app ownership ticket inside) and only
+    /// then believes the Steam id. Steamworks 1.57+ (SteamUser_v023) takes a fourth argument, the remote identity; the
+    /// game's 1.53 (v021) takes three. The ticket stays valid while the game runs; it is never logged.
+    /// </summary>
+    public static string SessionTicket(ILogger log)
+    {
+        nint module = FindSteamModule();
+        if (module == 0)
+        {
+            log.Warn("[OVS] session ticket: no Steam API module");
+            return "";
+        }
+
+        string? version = null;
+        nint accessor = 0;
+        foreach (string name in UserAccessorNames)
+        {
+            accessor = Kernel32.GetProcAddress(module, name);
+            if (accessor != 0)
+            {
+                version = name;
+                break;
+            }
+        }
+
+        nint function = Kernel32.GetProcAddress(module, "SteamAPI_ISteamUser_GetAuthSessionTicket");
+        if (accessor == 0 || function == 0)
+        {
+            log.Warn("[OVS] session ticket: the Steam API has no user accessor or GetAuthSessionTicket");
+            return "";
+        }
+
+        var steamUser = (delegate* unmanaged[Cdecl]<nint>)accessor;
+        nint user = 0;
+        for (int i = 0; i < 60 && user == 0; i++)
+        {
+            user = steamUser();
+            if (user == 0)
+            {
+                Thread.Sleep(500);
+            }
+        }
+
+        if (user == 0)
+        {
+            log.Warn("[OVS] session ticket: no Steam user");
+            return "";
+        }
+
+        byte[] buffer = new byte[2048];
+        uint length = 0;
+        uint handle;
+        fixed (byte* p = buffer)
+        {
+            handle = version == "SteamAPI_SteamUser_v023"
+                ? ((delegate* unmanaged[Cdecl]<nint, byte*, int, uint*, nint, uint>)function)(user, p, buffer.Length, &length, 0)
+                : ((delegate* unmanaged[Cdecl]<nint, byte*, int, uint*, uint>)function)(user, p, buffer.Length, &length);
+        }
+
+        log.Info($"[OVS] session ticket: handle {handle}, {length} bytes, via {version}");
+        return length == 0 || length > buffer.Length ? "" : Convert.ToHexString(buffer, 0, (int)length);
+    }
+
     private static nint FindSteamModule()
     {
         foreach (string name in s_moduleNames)

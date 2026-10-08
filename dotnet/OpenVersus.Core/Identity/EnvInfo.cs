@@ -45,6 +45,11 @@ public sealed class EnvInfo
     public string HardwareIdQuality { get; } = "";
     /// <summary>Whether a Steam id is known.</summary>
     public bool IsSteam { get; set; }
+    /// <summary>
+    /// The Steam session ticket (ISteamUser::GetAuthSessionTicket) as hex, or "": what proves the Steam id to the server,
+    /// which otherwise takes it as a claim and identifies this client by its install id and IP instead. Never printed.
+    /// </summary>
+    public string SteamTicket { get; set; } = "";
     /// <summary>Whether an Epic id is known.</summary>
     public bool IsEpic { get; }
 

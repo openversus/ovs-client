@@ -262,11 +262,12 @@ public class IdentityTests : IDisposable
     [Fact]
     public void TheBodyCarriesEveryFieldTheServerReads()
     {
-        var env = new EnvInfo(RuntimeEnvironment.CrossOver) { SteamId = "7656119\"quoted\\", InstallId = InstallId };
+        var env = new EnvInfo(RuntimeEnvironment.CrossOver) { SteamId = "7656119\"quoted\\", InstallId = InstallId, SteamTicket = "14000000AABB" };
         using var doc = JsonDocument.Parse(IdentityRegistration.Body(env));
+        Assert.Equal("14000000AABB", doc.RootElement.GetProperty("steamTicket").GetString());
         var root = doc.RootElement;
         Assert.Equal(
-            ["steamId", "epicId", "hardwareId", "hardwareIdVersion", "hardwareIdQuality", "installId", "clientVersion", "nodePort"],
+            ["steamId", "steamTicket", "epicId", "hardwareId", "hardwareIdVersion", "hardwareIdQuality", "installId", "clientVersion", "nodePort"],
             root.EnumerateObject().Select(p => p.Name));
         Assert.Equal(0, root.GetProperty("nodePort").GetInt32());
         env.NodePort = 51561;
@@ -491,6 +492,46 @@ public class IdentityTests : IDisposable
     }
 
     /// <summary>An env with a Steam id, so registration does not wait for the Steam API.</summary>
+    [Fact]
+    public void ASteamClientSendsItsSessionTicketWithEveryRegistration()
+    {
+        var http = new ScriptedPosts(HttpResult.Failed("WinHttpSendRequest failed (12029)"), Json($"{{\"ok\":true,\"token\":\"{Token}\"}}"));
+        int fetched = 0;
+
+        IdentityRegistration.Run(SteamEnv(), "http://ovs.test", http, new ServerIdentity(), new ListLogger(), _ => { }, resolveSteamTicket: () => { fetched++; return "14000000AABBCCDD"; });
+
+        Assert.Equal(1, fetched);
+        Assert.All(http.Posts, p => Assert.Contains("\"steamTicket\":\"14000000AABBCCDD\"", p.Body));
+    }
+
+    [Fact]
+    public void ASteamIdThatTurnsUpLateBringsItsTicket()
+    {
+        var http = new ScriptedPosts(Json($"{{\"ok\":true,\"token\":\"{Token}\"}}"), Json($"{{\"ok\":true,\"token\":\"{Token}\"}}"));
+        var env = new EnvInfo(RuntimeEnvironment.Wine) { InstallId = InstallId };
+        var fetched = new List<string>();
+
+        IdentityRegistration.Run(env, "http://ovs.test", http, new ServerIdentity(), new ListLogger(), resolveSteamId: () => "76561198000000002",
+            resolveSteamTicket: () => { fetched.Add(env.SteamId); return "14000000EEFF"; });
+
+        Assert.Equal(["76561198000000002"], fetched);
+        Assert.Equal(2, http.Posts.Count);
+        Assert.Contains("\"steamTicket\":\"\"", http.Posts[0].Body);
+        Assert.Contains("\"steamTicket\":\"14000000EEFF\"", http.Posts[1].Body);
+    }
+
+    [Fact]
+    public void WithoutATicketTheRegistrationWarnsAndGoesOn()
+    {
+        var http = new ScriptedPosts(Json($"{{\"ok\":true,\"token\":\"{Token}\"}}"));
+        var log = new ListLogger();
+
+        IdentityRegistration.Run(SteamEnv(), "http://ovs.test", http, new ServerIdentity(), log, _ => Assert.Fail("slept"), resolveSteamTicket: () => "");
+
+        Assert.Single(http.Posts);
+        Assert.Contains(log.Lines, l => l.Contains("no Steam session ticket"));
+    }
+
     private static EnvInfo SteamEnv() => new(RuntimeEnvironment.Wine) { SteamId = "76561198000000001", IsSteam = true };
 
     private static HttpResult Json(string body) => new(true, 200, System.Text.Encoding.UTF8.GetBytes(body), null);
