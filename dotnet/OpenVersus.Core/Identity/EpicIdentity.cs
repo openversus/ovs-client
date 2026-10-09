@@ -45,6 +45,8 @@ public static unsafe class EpicIdentity
     private static delegate* unmanaged<IdToken*, void> s_releaseIdToken;
     private static delegate* unmanaged<nint, byte*, int*, int> s_accountIdToString;
     private static delegate* unmanaged<int, byte*> s_resultToString;
+    private static delegate* unmanaged<delegate* unmanaged<LogMessage*, void>, int> s_setLogCallback;
+    private static delegate* unmanaged<int, int, int> s_setLogLevel;
 
     private static nint* s_slot;
     private static nint s_export;
@@ -83,6 +85,19 @@ public static unsafe class EpicIdentity
         public nint AccountId;
         public byte* JsonWebToken;
     }
+
+    /// <summary>EOS_LogMessage: the SDK's own log line (category, text, EOS_ELogLevel).</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    private struct LogMessage
+    {
+        public byte* Category;
+        public byte* Message;
+        public int Level;
+    }
+
+    private const int LogAllCategories = 0x7fffffff;
+    private const int LogLevelWarning = 300;
+    private const int LogLevelInfo = 400;
 
     /// <summary>
     /// Waits for the SDK to be in the process and the game to have called its tick, takes the game's tick slot, then
@@ -129,6 +144,7 @@ public static unsafe class EpicIdentity
         }
 
         var outcome = s_outcome;
+        QuietSdkLog();
         if (outcome == null)
         {
             log.Warn("[Epic] the tick never reported an outcome");
@@ -199,7 +215,45 @@ public static unsafe class EpicIdentity
             return false;
         }
 
+        // The SDK's own log, which the shipped game drops: at Info while the login is awaited (it says why a login
+        // failed), Warning afterwards. One global callback; the game's, if it set one, is replaced.
+        s_setLogCallback = (delegate* unmanaged<delegate* unmanaged<LogMessage*, void>, int>)Kernel32.GetProcAddress(module, "EOS_Logging_SetCallback");
+        s_setLogLevel = (delegate* unmanaged<int, int, int>)Kernel32.GetProcAddress(module, "EOS_Logging_SetLogLevel");
+        if (s_setLogCallback != null && s_setLogLevel != null)
+        {
+            int set = s_setLogCallback(&LogMessageReceived);
+            int level = s_setLogLevel(LogAllCategories, LogLevelInfo);
+            log.Info($"[Epic] SDK log capture: callback {ResultName(set)}, level {ResultName(level)}");
+        }
+
         return true;
+    }
+
+    [UnmanagedCallersOnly]
+    private static void LogMessageReceived(LogMessage* message)
+    {
+        HookGuard.Run("EpicLog", (nint)message, static p =>
+        {
+            var m = (LogMessage*)p;
+            string category = Marshal.PtrToStringUTF8((nint)m->Category) ?? "";
+            string text = Marshal.PtrToStringUTF8((nint)m->Message) ?? "";
+            if (m->Level <= LogLevelWarning)
+            {
+                s_log?.Warn($"[EOS:{category}] {text}");
+            }
+            else
+            {
+                s_log?.Info($"[EOS:{category}] {text}");
+            }
+        });
+    }
+
+    private static void QuietSdkLog()
+    {
+        if (s_setLogLevel != null)
+        {
+            s_setLogLevel(LogAllCategories, LogLevelWarning);
+        }
     }
 
     /// <summary>Points the game's delay-load slot for EOS_Platform_Tick at <see cref="Tick"/> once the loader has resolved it.</summary>
@@ -253,7 +307,10 @@ public static unsafe class EpicIdentity
             Volatile.Write(ref s_platform, platform);
         }
 
-        if (s_state != 0 || ++s_ticks % 30 != 0)
+        // Every tick while waiting: an Epic launch logs into the account, logs the product user in with it and can
+        // log the account out again within seconds (seen 2026-10-08), so the token is copied the moment it exists.
+        ++s_ticks;
+        if (s_state != 0)
         {
             return;
         }
