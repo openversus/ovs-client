@@ -17,7 +17,7 @@ public static unsafe class PvPBotsPatch
 {
     /// <summary>
     /// The 1v1/2v2 gate in the timer setup: <c>test dil, dil; jmp; mov rax, [PFG.PvPBots's int*]; cmp dword [rax], 0; je</c>
-    /// (no timer); the game's only build has it once.
+    /// (no timer); each build (Steam, Epic Games Store) has it once.
     /// </summary>
     internal const string Pattern = "40 84 FF EB 0A 48 8B 05 ? ? ? ? 83 38 00 0F 84";
     /// <summary>Where the <c>mov rax, [rip + disp32]</c> is, from the start of the pattern.</summary>

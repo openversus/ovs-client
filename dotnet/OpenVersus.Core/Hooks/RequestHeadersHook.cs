@@ -24,7 +24,7 @@ public static unsafe class RequestHeadersHook
     public const string SlistAppendName = "CurlSlistAppend";
 
     // The patterns live here, not in OpenVersus.toml: the identity headers are not something a player
-    // can switch off or point elsewhere. Each is unique in the game's only build.
+    // can switch off or point elsewhere. Each is unique in both builds (Steam, Epic Games Store).
     /// <summary>The CURLOPT_URL call in SetupRequest.</summary>
     internal const string UrlPattern = "BA 12 27 00 00 48 8B 4F 60 E8 ? ? ? ?";
     /// <summary>The CURLOPT_HTTPHEADER call in SetupRequest.</summary>
