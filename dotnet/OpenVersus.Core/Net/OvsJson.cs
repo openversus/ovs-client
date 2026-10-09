@@ -148,6 +148,7 @@ public sealed record Notification(string? Type, string Title = "", string Messag
 /// <summary>The body of the identity POST, in the C++ client's field order.</summary>
 /// <param name="SteamId">steamId: the Steam id, or "Unknown".</param>
 /// <param name="EpicId">epicId: the Epic id, or "Unknown".</param>
+/// <param name="EpicToken">epicToken: the Epic account ID token from the game's EOS SDK, or "" (the server believes the Epic id only with it).</param>
 /// <param name="HardwareId">hardwareId: the V2 hardware fingerprint, or "".</param>
 /// <param name="HardwareIdVersion">hardwareIdVersion: "2" with a fingerprint, else "".</param>
 /// <param name="HardwareIdQuality">hardwareIdQuality: "strong" with a fingerprint, else "".</param>
@@ -155,7 +156,7 @@ public sealed record Notification(string? Type, string Title = "", string Messag
 /// <param name="SteamTicket">steamTicket: the Steam session ticket as hex, or "" (the server believes the Steam id only with it).</param>
 /// <param name="ClientVersion">clientVersion: the running client's version.</param>
 /// <param name="NodePort">nodePort: the UDP port of this machine's rollback node, 0 for none.</param>
-public sealed record IdentityBody(string SteamId, string SteamTicket, string EpicId, string HardwareId, string HardwareIdVersion, string HardwareIdQuality, string InstallId, string ClientVersion, int NodePort);
+public sealed record IdentityBody(string SteamId, string SteamTicket, string EpicId, string EpicToken, string HardwareId, string HardwareIdVersion, string HardwareIdQuality, string InstallId, string ClientVersion, int NodePort);
 
 /// <summary>What /api/identify sends back. The server also sends accountId, which the client has no use for.</summary>
 /// <param name="Ok">ok: whether the identity was registered.</param>
@@ -178,6 +179,7 @@ public sealed record IdentifyResponse(
 [JsonSerializable(typeof(IdentifyResponse))]
 [JsonSerializable(typeof(ReleaseFiles))]
 [JsonSerializable(typeof(PakInstallManifest))]
+[JsonSerializable(typeof(JsonElement))]
 internal sealed partial class OvsJson : JsonSerializerContext
 {
     /// <summary><paramref name="json"/> as a <typeparamref name="T"/>, or null, with <paramref name="problem"/> saying why when it is not that JSON.</summary>

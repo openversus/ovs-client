@@ -267,7 +267,7 @@ public class IdentityTests : IDisposable
         Assert.Equal("14000000AABB", doc.RootElement.GetProperty("steamTicket").GetString());
         var root = doc.RootElement;
         Assert.Equal(
-            ["steamId", "steamTicket", "epicId", "hardwareId", "hardwareIdVersion", "hardwareIdQuality", "installId", "clientVersion", "nodePort"],
+            ["steamId", "steamTicket", "epicId", "epicToken", "hardwareId", "hardwareIdVersion", "hardwareIdQuality", "installId", "clientVersion", "nodePort"],
             root.EnumerateObject().Select(p => p.Name));
         Assert.Equal(0, root.GetProperty("nodePort").GetInt32());
         env.NodePort = 51561;
@@ -562,6 +562,31 @@ public class IdentityTests : IDisposable
         Assert.Empty(http.Posts);
         Assert.Contains(log.Lines, l => l.Contains("no Steam id"));
         Assert.Contains(log.Lines, l => l.Contains("no Steam session ticket"));
+    }
+
+    [Fact]
+    public void AnEpicTokenIsRegisteredWithTheIdentityAsItStands()
+    {
+        var http = new ScriptedPosts(HttpResult.Failed("no response"), Json($$"""{"ok":true,"token":"{{Token}}"}"""));
+        var env = new EnvInfo(RuntimeEnvironment.Wine) { InstallId = InstallId, NodePort = 7777 };
+        var identity = new ServerIdentity();
+
+        bool registered = IdentityRegistration.RegisterEpicToken(env, "eyJ.epic.token", "http://ovs.test", http, identity, new ListLogger(), _ => { });
+
+        Assert.True(registered);
+        Assert.Equal(2, http.Posts.Count);
+        Assert.All(http.Posts, p => Assert.Contains("\"epicToken\":\"eyJ.epic.token\"", p.Body));
+        Assert.Contains("\"nodePort\":7777", http.Posts[1].Body);
+        Assert.Equal("eyJ.epic.token", env.EpicToken);
+        Assert.Equal(Token, identity.Token);
+    }
+
+    [Fact]
+    public void WithoutAnEpicTokenNothingIsRegistered()
+    {
+        var http = new ScriptedPosts();
+        Assert.False(IdentityRegistration.RegisterEpicToken(new EnvInfo(RuntimeEnvironment.Wine) { InstallId = InstallId }, "", "http://ovs.test", http, new ServerIdentity(), new ListLogger(), _ => Assert.Fail("slept")));
+        Assert.Empty(http.Posts);
     }
 
     private static EnvInfo SteamEnv() => new(RuntimeEnvironment.Wine) { SteamId = "76561198000000001", IsSteam = true };

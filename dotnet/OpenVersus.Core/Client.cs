@@ -380,6 +380,23 @@ public sealed class Client
             _shutdown.Add(poller.Stop);
         }
 
+        if (Settings.EnableServerProxy && !string.IsNullOrEmpty(Settings.ServerUrl))
+        {
+            // The Epic account ID token from the game's own EOS platform, once the game is logged into an Epic account
+            // (an Epic Games Store launch): registered as the proof of this client's Epic id.
+            var image = Image;
+            var epicEnv = Env!;
+            var epicIdentity = ServerIdentity;
+            _shutdown.Add(EpicIdentity.Restore);
+            Start("OVS epic", () =>
+            {
+                if (EpicIdentity.Probe(image, epicEnv.EpicId, Log)?.Token is { Length: > 0 } token)
+                {
+                    IdentityRegistration.RegisterEpicToken(epicEnv, token, Settings.ServerUrl, Http, epicIdentity, Log);
+                }
+            });
+        }
+
         string? updated = State.TakeUpdateNotice();
         if (updated != null)
         {

@@ -50,6 +50,9 @@ public sealed class EnvInfo
     /// which otherwise takes it as a claim and identifies this client by its install id and IP instead. Never printed.
     /// </summary>
     public string SteamTicket { get; set; } = "";
+
+    /// <summary>The Epic account ID token from the game's own EOS SDK (<see cref="EpicIdentity"/>), or "": the server believes an Epic id only with it.</summary>
+    public string EpicToken { get; set; } = "";
     /// <summary>Whether an Epic id is known.</summary>
     public bool IsEpic { get; }
 
