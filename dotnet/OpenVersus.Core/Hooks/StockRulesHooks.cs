@@ -217,6 +217,7 @@ public static unsafe class StockRulesHooks
             var settings = ReadSettings(finder);
             s_match = settings != null ? StartMatch(finder, settings) : null;
             FriendlyFireHooks.StartMatch(finder, gameMode, settings);
+            GameSpeedHooks.StartMatch(finder, gameMode, settings);
             s_endBlockLogged = false;
             if (s_match is { LastFighterWins: true })
             {

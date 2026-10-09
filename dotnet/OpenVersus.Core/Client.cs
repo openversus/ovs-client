@@ -520,6 +520,7 @@ public sealed class Client
             Status.UeFuncs = Apply("UE Funcs", c, UeFunctionHooks.Apply);
             Status.Stocks = Apply("Stock Rules", c, StockRulesHooks.Apply);
             Status.FriendlyFire = Apply("Friendly Fire", c, FriendlyFireHooks.Apply);
+            GameSpeedHooks.Attach(Log, Settings.LabGameSpeedPercent);
             Status.CreatorCredits = Apply("Creator Credits", c, CreatorCreditHooks.Apply);
         }
 

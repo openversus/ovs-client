@@ -179,6 +179,9 @@ MatchRulesLog = false
 # For testing; leave it off. Friendly fire in offline matches (Local Play, the Lab) without the mutator. Online matches only ever get it from the server.
 FriendlyFireOffline = false
 
+# For testing; leave it at 100. Game speed in percent for offline matches (Local Play, the Lab): 120 runs them 20% faster. Online matches are never changed.
+LabGameSpeedPercent = 100
+
 # ---------------------------------------------------------------------------
 # The OpenVersus server. Leave this section alone unless you run your own server.
 # ---------------------------------------------------------------------------

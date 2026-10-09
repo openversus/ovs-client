@@ -87,6 +87,8 @@ public sealed class Settings
         public static readonly SettingDef MatchRulesLog = SettingDef.Bool("Settings.Debug", "MatchRulesLog", false);
         /// <summary>Turns friendly fire on in offline matches (Local Play, the Lab) without the mutator, for testing (<see cref="Hooks.FriendlyFireHooks"/>). Never online.</summary>
         public static readonly SettingDef FriendlyFireOffline = SettingDef.Bool("Settings.Debug", "FriendlyFireOffline", false);
+        /// <summary>Game speed in percent for offline matches (Local Play, the Lab), for testing (<see cref="Hooks.GameSpeedHooks"/>); 100 is normal. Never online.</summary>
+        public static readonly SettingDef LabGameSpeedPercent = SettingDef.Int("Settings.Debug", "LabGameSpeedPercent", 100);
         // Settings
         /// <summary>
         /// The minimum log level: a name (trace, debug, info, warn, error, critical, none, or an alias such
@@ -208,6 +210,7 @@ public sealed class Settings
         Rows.ReleaseOwner,
         Rows.MatchRulesLog,
         Rows.FriendlyFireOffline,
+        Rows.LabGameSpeedPercent,
         Rows.ServerUrl,
         Rows.ProdServerUrl,
         Rows.EnableServerProxy,
@@ -480,6 +483,8 @@ public sealed class Settings
     public bool MatchRulesLog => GetBool(Rows.MatchRulesLog);
     /// <inheritdoc cref="Rows.FriendlyFireOffline"/>
     public bool FriendlyFireOffline => GetBool(Rows.FriendlyFireOffline);
+    /// <inheritdoc cref="Rows.LabGameSpeedPercent"/>
+    public int LabGameSpeedPercent => (int)Math.Min(GetInt(Rows.LabGameSpeedPercent), int.MaxValue);
     // Settings
     /// <inheritdoc cref="Rows.LogLevel"/>
     public string LogLevel => Get(Rows.LogLevel);
