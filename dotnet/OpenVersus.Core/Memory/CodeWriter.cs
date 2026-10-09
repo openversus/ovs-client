@@ -95,4 +95,17 @@ public static unsafe class CodeWriter
 
     /// <summary>One unmanaged value through <see cref="ProcessMemory"/>, or default and false. Never throws.</summary>
     public static bool TryRead<T>(nint address, out T value) where T : unmanaged => ProcessMemory.Instance.TryRead(address, out value);
+
+    /// <summary>
+    /// A write into the game's heap that cannot take the process down, the counterpart of <see cref="TryRead"/>:
+    /// WriteProcessMemory, which reports an unmapped or unwritable page instead of faulting (NativeAOT turns an
+    /// access violation outside the null page into a fail-fast). For data, such as a field of a game object;
+    /// code goes through <see cref="Write"/>. False when any of the range could not be written. Never throws.
+    /// </summary>
+    public static bool TryWrite(nint address, ReadOnlySpan<byte> bytes) =>
+        Kernel32.WriteProcessMemory(Kernel32.GetCurrentProcess(), address, bytes, (nuint)bytes.Length, out nuint written) && written == (nuint)bytes.Length;
+
+    /// <summary>One unmanaged value through <see cref="TryWrite(nint, ReadOnlySpan{byte})"/>. Never throws.</summary>
+    public static bool TryWrite<T>(nint address, T value) where T : unmanaged =>
+        TryWrite(address, MemoryMarshal.AsBytes(MemoryMarshal.CreateReadOnlySpan(ref value, 1)));
 }

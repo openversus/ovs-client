@@ -26,6 +26,8 @@ public sealed class HookStatus
     public bool Stocks { get; set; }
     /// <summary>Friendly fire is hooked in (<see cref="FriendlyFireHooks"/>); it is on only in matches with its mutator.</summary>
     public bool FriendlyFire { get; set; }
+    /// <summary>OVS emotes and taunts show their creator among their tags (<see cref="CreatorCreditHooks"/>).</summary>
+    public bool CreatorCredits { get; set; }
     /// <summary>The post-match freeze is patched out (<see cref="PostMatchFreezePatch"/>).</summary>
     public bool PostMatchFreeze { get; set; }
     /// <summary>Every call to the sunset check is patched out (<see cref="SunsetCallersPatch"/>); false if any site failed.</summary>
@@ -45,7 +47,7 @@ public sealed class HookStatus
 
     /// <summary>Every flag as name=value on one line, for the log.</summary>
     public override string ToString() =>
-        $"sigcheck={AntiSigCheck} gameEndpoint={GameEndpointSwap} prodEndpoint={ProdEndpointSwap} sunset={SunsetDate} ue={UeFuncs} dialog={Dialog} notifs={Notifications} stocks={Stocks} friendlyFire={FriendlyFire} postMatchFreeze={PostMatchFreeze} sunsetCallers={SunsetCallers} requestHeaders={RequestHeaders} telemetryOff={TelemetryOff} telemetryRecordOff={TelemetryRecordOff} telemetryShopOff={TelemetryShopOff} pvpBotsOff={PvPBotsOff} hydraZstd={HydraZstd}";
+        $"sigcheck={AntiSigCheck} gameEndpoint={GameEndpointSwap} prodEndpoint={ProdEndpointSwap} sunset={SunsetDate} ue={UeFuncs} dialog={Dialog} notifs={Notifications} stocks={Stocks} friendlyFire={FriendlyFire} creatorCredits={CreatorCredits} postMatchFreeze={PostMatchFreeze} sunsetCallers={SunsetCallers} requestHeaders={RequestHeaders} telemetryOff={TelemetryOff} telemetryRecordOff={TelemetryRecordOff} telemetryShopOff={TelemetryShopOff} pvpBotsOff={PvPBotsOff} hydraZstd={HydraZstd}";
 }
 
 /// <summary>What every hook needs: the image, the pattern resolver, the settings and the log.</summary>

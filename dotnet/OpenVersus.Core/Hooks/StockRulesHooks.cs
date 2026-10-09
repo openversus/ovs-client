@@ -27,27 +27,35 @@ namespace OpenVersus.Hooks;
 /// </summary>
 public static unsafe class StockRulesHooks
 {
-    // RVAs and prologues from a disassembly of the final build (MultiVersus-Win64-Shipping.exe,
-    // 2026-09-27); the RVAs are the C++ client's (StockDiagnostics.cpp).
-    private const uint PlayerDiedRva = 0x02966870;
-    private const uint RegisterCharacterRva = 0x02966E20;
-    private const uint DoRespawnRva = 0x011E4F70;
-    private const uint AttemptEndMatchRva = 0x02967BE0;
-    private const uint SetRespawnsRemainingRva = 0x011FC980;
-    private const uint RespawnRva = 0x02966FC0;
+    // The patterns live here, not in OpenVersus.toml: the stock rules are the server's to turn on, not a player's.
+    // Each is the start of the function, whole instructions from the game's only build with rel32 targets and
+    // RIP-relative displacements as wildcards, and matches once there (StockRulesHooksTests has the bytes). The
+    // functions are the C++ client's (StockDiagnostics.cpp): RVAs 0x02966870, 0x02966E20, 0x011E4F70, 0x02967BE0,
+    // 0x011FC980 and 0x02966FC0.
+    /// <summary>AMvsGameModeBase::PlayerDied.</summary>
+    internal const string PlayerDiedPattern = "48 85 D2 0F 84 ? ? ? ? 48 8B C4 48 89 48 08 55 41 54 41 56";
+    /// <summary>AMvsGameModeBase::RegisterCharacter.</summary>
+    internal const string RegisterCharacterPattern = "40 53 56 57 48 81 EC C0 00 00 00 48 8B 05 ? ? ? ? 48 33 C4 48 89 84 24 B0 00 00 00 48 8B FA";
+    /// <summary>APfgFixedPawn::DoRespawn.</summary>
+    internal const string DoRespawnPattern = "8B 81 80 03 00 00 85 C0 7E 08 FF C8 89 81 80 03 00 00";
+    /// <summary>UMvsGameModeDefaultGameEndHandlerComponent::AttemptEndMatch.</summary>
+    internal const string AttemptEndMatchPattern = "40 56 48 83 EC 50 80 B9 E0 00 00 00 00 48 8B F1";
+    /// <summary>APfgFixedPawn::SetRespawnsRemaining: mov [rcx+0x380], edx; ret, and the padding after it.</summary>
+    internal const string SetRespawnsRemainingPattern = "89 91 80 03 00 00 C3 CC CC CC CC CC CC CC CC CC";
+    /// <summary>AMvsGameModeBase::Respawn.</summary>
+    internal const string RespawnPattern = "48 85 D2 0F 84 ? ? ? ? 55 41 56 41 57 48 8D 6C 24 B9 48 81 EC 00 01 00 00";
 
+    // The instructions the entry hooks move, at least five bytes each.
     // test rdx, rdx; je rel32
-    private static readonly byte[] s_playerDiedPrologue = [0x48, 0x85, 0xD2, 0x0F, 0x84, 0x9A, 0x05, 0x00, 0x00];
+    internal static readonly byte[] s_playerDiedPrologue = [0x48, 0x85, 0xD2, 0x0F, 0x84, 0x9A, 0x05, 0x00, 0x00];
     // push rbx; push rsi; push rdi; sub rsp, 0xC0
-    private static readonly byte[] s_registerCharacterPrologue = [0x40, 0x53, 0x56, 0x57, 0x48, 0x81, 0xEC, 0xC0, 0x00, 0x00, 0x00];
+    internal static readonly byte[] s_registerCharacterPrologue = [0x40, 0x53, 0x56, 0x57, 0x48, 0x81, 0xEC, 0xC0, 0x00, 0x00, 0x00];
     // mov eax, [rcx+0x380]
-    private static readonly byte[] s_doRespawnPrologue = [0x8B, 0x81, 0x80, 0x03, 0x00, 0x00];
+    internal static readonly byte[] s_doRespawnPrologue = [0x8B, 0x81, 0x80, 0x03, 0x00, 0x00];
     // push rsi; sub rsp, 0x50
-    private static readonly byte[] s_attemptEndMatchPrologue = [0x40, 0x56, 0x48, 0x83, 0xEC, 0x50];
-    // mov [rcx+0x380], edx; ret
-    private static readonly byte[] s_setRespawnsRemainingCode = [0x89, 0x91, 0x80, 0x03, 0x00, 0x00, 0xC3];
+    internal static readonly byte[] s_attemptEndMatchPrologue = [0x40, 0x56, 0x48, 0x83, 0xEC, 0x50];
     // test rdx, rdx; je rel32
-    private static readonly byte[] s_respawnPrologue = [0x48, 0x85, 0xD2, 0x0F, 0x84, 0xE3, 0x02, 0x00, 0x00];
+    internal static readonly byte[] s_respawnPrologue = [0x48, 0x85, 0xD2, 0x0F, 0x84, 0xE3, 0x02, 0x00, 0x00];
 
     private static delegate* unmanaged<nint, nint, nint, void> s_playerDied;
     private static delegate* unmanaged<nint, nint, void> s_registerCharacter;
@@ -75,29 +83,34 @@ public static unsafe class StockRulesHooks
     private static long s_hudApplied;
 
     /// <summary>
-    /// Hooks the four functions. False, or a <see cref="PatchException"/>, when this build's code
-    /// is not what the disassembly found; nothing is hooked unless every prologue matches.
+    /// Hooks the five functions. False, with nothing hooked, when a pattern is missing; a
+    /// <see cref="PatchException"/> when this build's code is not what the disassembly found.
     /// </summary>
     public static bool Apply(HookContext c)
     {
         s_log = c.Log;
         c.Log.Info("==Stock Rules==");
         var image = c.Image;
-        nint setRespawns = image.Address(SetRespawnsRemainingRva);
-        CodeWriter.Expect(setRespawns, s_setRespawnsRemainingCode);
-        foreach (var (rva, prologue) in new[] { (PlayerDiedRva, s_playerDiedPrologue), (RegisterCharacterRva, s_registerCharacterPrologue), (DoRespawnRva, s_doRespawnPrologue), (AttemptEndMatchRva, s_attemptEndMatchPrologue), (RespawnRva, s_respawnPrologue) })
+        var playerDied = c.Patterns.Find("StocksPlayerDied", PlayerDiedPattern);
+        var registerCharacter = c.Patterns.Find("StocksRegisterCharacter", RegisterCharacterPattern);
+        var doRespawn = c.Patterns.Find("StocksDoRespawn", DoRespawnPattern);
+        var attemptEndMatch = c.Patterns.Find("StocksAttemptEndMatch", AttemptEndMatchPattern);
+        var setRespawns = c.Patterns.Find("StocksSetRespawnsRemaining", SetRespawnsRemainingPattern);
+        var respawn = c.Patterns.Find("StocksRespawn", RespawnPattern);
+        if (!playerDied.Found || !registerCharacter.Found || !doRespawn.Found || !attemptEndMatch.Found || !setRespawns.Found || !respawn.Found)
         {
-            CodeWriter.Expect(image.Address(rva), prologue);
+            c.Log.Error("Stock rules: a function they need was not found; nothing is hooked and FFA and 2v2 Individual Stocks will not work");
+            return false;
         }
 
-        s_setRespawnsRemaining = (delegate* unmanaged<nint, int, void>)setRespawns;
-        GameFunctions.FromRva("APfgFixedPawn::SetRespawnsRemaining", SetRespawnsRemainingRva, "void APfgFixedPawn::SetRespawnsRemaining(APfgFixedPawn* this, int32 limit)", image);
+        s_setRespawnsRemaining = (delegate* unmanaged<nint, int, void>)setRespawns.Address;
+        GameFunctions.Register("APfgFixedPawn::SetRespawnsRemaining", setRespawns, FunctionSource.Pattern, "StocksSetRespawnsRemaining", "void APfgFixedPawn::SetRespawnsRemaining(APfgFixedPawn* this, int32 limit)", image);
 
-        s_playerDied = (delegate* unmanaged<nint, nint, nint, void>)Hook(image, "AMvsGameModeBase::PlayerDied", PlayerDiedRva, s_playerDiedPrologue, (nint)(delegate* unmanaged<nint, nint, nint, void>)&PlayerDied, "void AMvsGameModeBase::PlayerDied(AMvsGameModeBase* this, AMvsFixedCharacter* victim, AMvsFixedCharacter* attacker)", endsInConditionalJump: true);
-        s_registerCharacter = (delegate* unmanaged<nint, nint, void>)Hook(image, "AMvsGameModeBase::RegisterCharacter", RegisterCharacterRva, s_registerCharacterPrologue, (nint)(delegate* unmanaged<nint, nint, void>)&RegisterCharacter, "void AMvsGameModeBase::RegisterCharacter(AMvsGameModeBase* this, APfgFixedPawn* character)");
-        s_doRespawn = (delegate* unmanaged<nint, void>)Hook(image, "APfgFixedPawn::DoRespawn", DoRespawnRva, s_doRespawnPrologue, (nint)(delegate* unmanaged<nint, void>)&DoRespawn, "void APfgFixedPawn::DoRespawn(APfgFixedPawn* this)");
-        s_respawn = (delegate* unmanaged<nint, nint, void>)Hook(image, "AMvsGameModeBase::Respawn", RespawnRva, s_respawnPrologue, (nint)(delegate* unmanaged<nint, nint, void>)&Respawn, "void AMvsGameModeBase::Respawn(AMvsGameModeBase* this, AMvsFixedCharacter* victim)", endsInConditionalJump: true);
-        s_attemptEndMatch = (delegate* unmanaged<nint, void>)Hook(image, "UMvsGameModeDefaultGameEndHandlerComponent::AttemptEndMatch", AttemptEndMatchRva, s_attemptEndMatchPrologue, (nint)(delegate* unmanaged<nint, void>)&AttemptEndMatch, "void UMvsGameModeDefaultGameEndHandlerComponent::AttemptEndMatch(UMvsGameModeDefaultGameEndHandlerComponent* this)");
+        s_playerDied = (delegate* unmanaged<nint, nint, nint, void>)Hook(image, "AMvsGameModeBase::PlayerDied", playerDied, s_playerDiedPrologue, (nint)(delegate* unmanaged<nint, nint, nint, void>)&PlayerDied, "void AMvsGameModeBase::PlayerDied(AMvsGameModeBase* this, AMvsFixedCharacter* victim, AMvsFixedCharacter* attacker)", endsInConditionalJump: true);
+        s_registerCharacter = (delegate* unmanaged<nint, nint, void>)Hook(image, "AMvsGameModeBase::RegisterCharacter", registerCharacter, s_registerCharacterPrologue, (nint)(delegate* unmanaged<nint, nint, void>)&RegisterCharacter, "void AMvsGameModeBase::RegisterCharacter(AMvsGameModeBase* this, APfgFixedPawn* character)");
+        s_doRespawn = (delegate* unmanaged<nint, void>)Hook(image, "APfgFixedPawn::DoRespawn", doRespawn, s_doRespawnPrologue, (nint)(delegate* unmanaged<nint, void>)&DoRespawn, "void APfgFixedPawn::DoRespawn(APfgFixedPawn* this)");
+        s_respawn = (delegate* unmanaged<nint, nint, void>)Hook(image, "AMvsGameModeBase::Respawn", respawn, s_respawnPrologue, (nint)(delegate* unmanaged<nint, nint, void>)&Respawn, "void AMvsGameModeBase::Respawn(AMvsGameModeBase* this, AMvsFixedCharacter* victim)", endsInConditionalJump: true);
+        s_attemptEndMatch = (delegate* unmanaged<nint, void>)Hook(image, "UMvsGameModeDefaultGameEndHandlerComponent::AttemptEndMatch", attemptEndMatch, s_attemptEndMatchPrologue, (nint)(delegate* unmanaged<nint, void>)&AttemptEndMatch, "void UMvsGameModeDefaultGameEndHandlerComponent::AttemptEndMatch(UMvsGameModeDefaultGameEndHandlerComponent* this)");
 
         c.Log.Success("Stock rules hooked");
         return true;
@@ -106,10 +119,10 @@ public static unsafe class StockRulesHooks
     /// <summary>The object finder the rules read the gameplay config and HUD through; until it is attached they stay off.</summary>
     public static void Attach(ObjectFinder finder) => s_finder = finder;
 
-    private static nint Hook(GameImage image, string name, uint rva, byte[] prologue, nint hook, string declaration, bool endsInConditionalJump = false)
+    private static nint Hook(GameImage image, string name, PatternHit hit, byte[] prologue, nint hook, string declaration, bool endsInConditionalJump = false)
     {
-        nint gateway = EntryHook.Install(image.Address(rva), prologue, hook, endsInConditionalJump);
-        GameFunctions.Register(name, gateway, FunctionSource.Rva, $"rva 0x{rva:X}, entry hooked; this is the gateway to the original", declaration, image);
+        nint gateway = EntryHook.Install(hit.Address, prologue, hook, endsInConditionalJump);
+        GameFunctions.Register(name, gateway, FunctionSource.Pattern, $"{hit.Name} at 0x{hit.Address:X}, entry hooked; this is the gateway to the original", declaration, image);
         return gateway;
     }
 

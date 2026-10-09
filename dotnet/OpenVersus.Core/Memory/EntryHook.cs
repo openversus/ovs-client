@@ -139,7 +139,7 @@ public static unsafe class EntryHook
         return gateway.ToArray();
     }
 
-    private static void AddAbsoluteJump(List<byte> code, nint target)
+    internal static void AddAbsoluteJump(List<byte> code, nint target)
     {
         code.AddRange(s_absoluteJump);
         code.AddRange(BitConverter.GetBytes((long)target));

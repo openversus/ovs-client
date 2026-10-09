@@ -32,25 +32,28 @@ public static unsafe class FriendlyFireHooks
     /// <summary>The mutator's slug.</summary>
     public const string Slug = "ovs_friendly_fire";
 
-    // RVAs are the C++ client's; the bytes are from a disassembly of the final build
-    // (MultiVersus-Win64-Shipping.exe, 2026-09-28).
-    private const uint ProcessActiveHitInteractionRva = 0x02951B00;
-    private const uint GetHitResponseFlagsRva = 0x02957C10;
-    private const uint IsSameTeamRva = 0x0121BFB0;
-    private const uint GetTopLevelAttackerRva = 0x02951A00;
-    /// <summary>The call to IsSameTeam in the shield code, whose return address the C++ matched (0x0295388C).</summary>
-    private const uint ShieldTeamCheckCallRva = 0x02953887;
+    // The patterns live here, not in OpenVersus.toml: the mutator is the server's to turn on, not a player's.
+    // Whole instructions from the game's only build, with rel32 targets and RIP-relative displacements as
+    // wildcards; each matches once there (FriendlyFireHooksTests has the bytes). The functions are the C++
+    // client's (StockDiagnostics.cpp, at RVAs 0x02951B00, 0x02957C10, 0x0121BFB0 and 0x02951A00).
+    /// <summary>ProcessActiveHitInteraction's start.</summary>
+    internal const string ProcessActiveHitInteractionPattern = "40 55 56 41 56 48 8D AC 24 30 F5 FF FF 48 81 EC D0 0B 00 00";
+    /// <summary>UMvsDefenderComponent::GetHitResponseFlags's start.</summary>
+    internal const string GetHitResponseFlagsPattern = "48 89 5C 24 10 48 89 6C 24 18 57 41 54 41 55 41 56 41 57 48 81 EC E0 0A 00 00";
+    /// <summary>UMvsTeamComponent::IsSameTeam's start.</summary>
+    internal const string IsSameTeamPattern = "48 85 D2 74 1F 80 7A 30 00 75 19 F7 42 08 00 00 00 60 75 10 8B 89 D0 00 00 00";
+    /// <summary>UMvsAttackerComponent::GetTopLevelAttacker's start.</summary>
+    internal const string GetTopLevelAttackerPattern = "48 89 5C 24 10 56 48 83 EC 20 48 8B F1 48 8B 89 A0 00 00 00";
+    /// <summary>The shield code's team check (0x02953875), ending in its call to IsSameTeam, whose return address the C++ matched (0x0295388C).</summary>
+    internal const string ShieldTeamCheckPattern = "80 79 30 00 75 19 F7 41 08 00 00 00 60 75 10 49 8B D6 E8 ? ? ? ?";
+    /// <summary>Where the call to IsSameTeam is, from the start of <see cref="ShieldTeamCheckPattern"/>.</summary>
+    internal const int ShieldTeamCheckCall = 18;
 
+    // The instructions the entry hooks move, at least five bytes each.
     // push rbp; push rsi; push r14
-    private static readonly byte[] s_processActiveHitPrologue = [0x40, 0x55, 0x56, 0x41, 0x56];
+    internal static readonly byte[] s_processActiveHitPrologue = [0x40, 0x55, 0x56, 0x41, 0x56];
     // mov [rsp+0x10], rbx
-    private static readonly byte[] s_getHitResponseFlagsPrologue = [0x48, 0x89, 0x5C, 0x24, 0x10];
-    // test rdx, rdx; je; cmp byte [rdx+0x30], 0
-    private static readonly byte[] s_isSameTeamCode = [0x48, 0x85, 0xD2, 0x74, 0x1F, 0x80, 0x7A, 0x30, 0x00];
-    // mov [rsp+0x10], rbx; push rsi; sub rsp, 0x20; mov rsi, rcx; mov rcx, [rcx+0xA0]
-    private static readonly byte[] s_getTopLevelAttackerCode = [0x48, 0x89, 0x5C, 0x24, 0x10, 0x56, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x8B, 0xF1, 0x48, 0x8B, 0x89, 0xA0, 0x00, 0x00, 0x00];
-    // mov rdx, r14; call IsSameTeam
-    private static readonly byte[] s_shieldCall = [0x49, 0x8B, 0xD6, 0xE8];
+    internal static readonly byte[] s_getHitResponseFlagsPrologue = [0x48, 0x89, 0x5C, 0x24, 0x10];
     // push rbp; push rsi; push rdi; push r12
     private static readonly byte[] s_processEventPrologue = [0x40, 0x55, 0x56, 0x57, 0x41, 0x54];
 
@@ -159,9 +162,9 @@ public static unsafe class FriendlyFireHooks
     /// <summary>
     /// Hooks the two hit functions and the shield's team check, and ProcessEvent through a filter
     /// for the match-start event. Nothing changes until <see cref="StartMatch"/> sees the mutator.
-    /// Throws a <see cref="PatchException"/> when this build's code is not what the disassembly
-    /// found; the ProcessEvent hook alone may fail (another mod on it), which only loses the
-    /// match-start parameter.
+    /// False, with nothing hooked, when a pattern is missing; throws a <see cref="PatchException"/>
+    /// when this build's code is not what the disassembly found. The ProcessEvent hook alone may
+    /// fail (another mod on it), which only loses the match-start parameter.
     /// </summary>
     public static bool Apply(HookContext c)
     {
@@ -169,28 +172,31 @@ public static unsafe class FriendlyFireHooks
         s_offlineTesting = c.Settings.FriendlyFireOffline;
         c.Log.Info("==Friendly Fire==");
         var image = c.Image;
-        nint isSameTeam = image.Address(IsSameTeamRva);
-        nint topLevel = image.Address(GetTopLevelAttackerRva);
-        nint shieldCall = image.Address(ShieldTeamCheckCallRva);
-        CodeWriter.Expect(isSameTeam, s_isSameTeamCode);
-        CodeWriter.Expect(topLevel, s_getTopLevelAttackerCode);
-        CodeWriter.Expect(shieldCall - 3, s_shieldCall);
-        if (CallSite.Destination(shieldCall) != isSameTeam)
+        var processActiveHit = c.Patterns.Find("FriendlyFireHit", ProcessActiveHitInteractionPattern);
+        var hitResponse = c.Patterns.Find("FriendlyFireResponse", GetHitResponseFlagsPattern);
+        var isSameTeam = c.Patterns.Find("FriendlyFireIsSameTeam", IsSameTeamPattern);
+        var topLevel = c.Patterns.Find("FriendlyFireTopLevelAttacker", GetTopLevelAttackerPattern);
+        var shield = c.Patterns.Find("FriendlyFireShield", ShieldTeamCheckPattern);
+        if (!processActiveHit.Found || !hitResponse.Found || !isSameTeam.Found || !topLevel.Found || !shield.Found)
         {
-            throw new PatchException($"the shield's team check at 0x{shieldCall:X} does not call IsSameTeam at 0x{isSameTeam:X}");
+            c.Log.Error("Friendly fire: a function it needs was not found; nothing is hooked and the Friendly Fire mutator will not work");
+            return false;
         }
 
-        CodeWriter.Expect(image.Address(ProcessActiveHitInteractionRva), s_processActiveHitPrologue);
-        CodeWriter.Expect(image.Address(GetHitResponseFlagsRva), s_getHitResponseFlagsPrologue);
+        nint shieldCall = shield.Address + ShieldTeamCheckCall;
+        if (CallSite.Destination(shieldCall) != isSameTeam.Address)
+        {
+            throw new PatchException($"the shield's team check at 0x{shieldCall:X} does not call IsSameTeam at 0x{isSameTeam.Address:X}");
+        }
 
-        s_isSameTeam = (delegate* unmanaged<nint, nint, byte>)isSameTeam;
-        s_getTopLevelAttacker = (delegate* unmanaged<nint, nint>)topLevel;
-        GameFunctions.FromRva("UMvsTeamComponent::IsSameTeam", IsSameTeamRva, "bool UMvsTeamComponent::IsSameTeam(UMvsTeamComponent* this, UMvsTeamComponent* other)", image);
-        GameFunctions.FromRva("UMvsAttackerComponent::GetTopLevelAttacker", GetTopLevelAttackerRva, "UMvsAttackerComponent* GetTopLevelAttacker(UMvsAttackerComponent* this)", image);
+        s_isSameTeam = (delegate* unmanaged<nint, nint, byte>)isSameTeam.Address;
+        s_getTopLevelAttacker = (delegate* unmanaged<nint, nint>)topLevel.Address;
+        GameFunctions.Register("UMvsTeamComponent::IsSameTeam", isSameTeam, FunctionSource.Pattern, "FriendlyFireIsSameTeam", "bool UMvsTeamComponent::IsSameTeam(UMvsTeamComponent* this, UMvsTeamComponent* other)", image);
+        GameFunctions.Register("UMvsAttackerComponent::GetTopLevelAttacker", topLevel, FunctionSource.Pattern, "FriendlyFireTopLevelAttacker", "UMvsAttackerComponent* GetTopLevelAttacker(UMvsAttackerComponent* this)", image);
 
-        s_processActiveHit = (delegate* unmanaged<nint, nint, void>)Hook(image, "ProcessActiveHitInteraction", ProcessActiveHitInteractionRva, s_processActiveHitPrologue,
+        s_processActiveHit = (delegate* unmanaged<nint, nint, void>)Hook(image, "ProcessActiveHitInteraction", processActiveHit, s_processActiveHitPrologue,
             (nint)(delegate* unmanaged<nint, nint, void>)&ProcessActiveHitInteraction, "void ProcessActiveHitInteraction(UMvsAttackerComponent* attacker, FActiveHitInteraction* hit)");
-        s_getHitResponseFlags = (delegate* unmanaged<nint, nint, byte, int*, void>)Hook(image, "UMvsDefenderComponent::GetHitResponseFlags", GetHitResponseFlagsRva, s_getHitResponseFlagsPrologue,
+        s_getHitResponseFlags = (delegate* unmanaged<nint, nint, byte, int*, void>)Hook(image, "UMvsDefenderComponent::GetHitResponseFlags", hitResponse, s_getHitResponseFlagsPrologue,
             (nint)(delegate* unmanaged<nint, nint, byte, int*, void>)&GetHitResponseFlags, "void UMvsDefenderComponent::GetHitResponseFlags(UMvsDefenderComponent* this, const FActiveHitInteraction* hit, bool isAlly, int32* flags)");
         RedirectShieldCheckWithHit(shieldCall);
 
@@ -205,7 +211,7 @@ public static unsafe class FriendlyFireHooks
         }
 
         s_installed = true;
-        c.Log.Success("Friendly fire hooked; it is on only in matches with the Friendly Fire mutator");
+        c.Log.Success($"Friendly fire hooked (shield check at 0x{shieldCall:X}); it is on only in matches with the Friendly Fire mutator");
         return true;
     }
 
@@ -213,34 +219,18 @@ public static unsafe class FriendlyFireHooks
     /// Points the shield's IsSameTeam call at <see cref="ShieldIsSameTeam"/> through a stub that also passes the hit
     /// being checked. The shield code (in the function at 0x02953020, which takes the FActiveHitInteraction as its
     /// second argument and keeps it in r15: mov r15, rdx; it reads [r15+0x330], the defender, just before) runs before
-    /// ProcessActiveHitInteraction, so the hit is not otherwise known yet. Stub: mov r8, r15; mov rax, target; jmp rax.
+    /// ProcessActiveHitInteraction, so the hit is not otherwise known yet. The stub's prelude is mov r8, r15.
     /// </summary>
-    private static void RedirectShieldCheckWithHit(nint shieldCall)
-    {
-        nint target = (nint)(delegate* unmanaged<nint, nint, nint, byte>)&ShieldIsSameTeam;
-        Span<byte> stub = stackalloc byte[3 + 10 + 2];
-        stub[0] = 0x4D; stub[1] = 0x89; stub[2] = 0xF8;       // mov r8, r15
-        stub[3] = 0x48; stub[4] = 0xB8;                          // mov rax, imm64
-        BitConverter.TryWriteBytes(stub[5..13], (long)target);
-        stub[13] = 0xFF; stub[14] = 0xE0;                        // jmp rax
-        nint placed = Trampoline.Near(shieldCall).Place(stub, 16);
-        Kernel32.FlushInstructionCache(Kernel32.GetCurrentProcess(), placed, (nuint)stub.Length);
-        long displacement = (long)placed - (long)(shieldCall + CallSite.Length);
-        if (displacement < int.MinValue || displacement > int.MaxValue)
-        {
-            throw new PatchException($"shield stub at 0x{placed:X} is out of rel32 range of 0x{shieldCall:X}");
-        }
+    private static void RedirectShieldCheckWithHit(nint shieldCall) =>
+        CallSite.InjectWithPrelude(shieldCall, s_passHitInR8, (nint)(delegate* unmanaged<nint, nint, nint, byte>)&ShieldIsSameTeam, jump: false);
 
-        Span<byte> call = stackalloc byte[CallSite.Length];
-        call[0] = CallSite.CallOpcode;
-        BitConverter.TryWriteBytes(call[1..], (int)displacement);
-        CodeWriter.Write(shieldCall, call, code: true);
-    }
+    // mov r8, r15
+    private static readonly byte[] s_passHitInR8 = [0x4D, 0x89, 0xF8];
 
-    private static nint Hook(GameImage image, string name, uint rva, byte[] prologue, nint hook, string declaration)
+    private static nint Hook(GameImage image, string name, PatternHit hit, byte[] prologue, nint hook, string declaration)
     {
-        nint gateway = EntryHook.Install(image.Address(rva), prologue, hook);
-        GameFunctions.Register(name, gateway, FunctionSource.Rva, $"rva 0x{rva:X}, entry hooked; this is the gateway to the original", declaration, image);
+        nint gateway = EntryHook.Install(hit.Address, prologue, hook);
+        GameFunctions.Register(name, gateway, FunctionSource.Pattern, $"{hit.Name} at 0x{hit.Address:X}, entry hooked; this is the gateway to the original", declaration, image);
         return gateway;
     }
 
@@ -374,7 +364,8 @@ public static unsafe class FriendlyFireHooks
         s_getHitResponseFlags(defender, hit, asked, flags);
         if (s_active && isAlly != 0 && MatchRulesLog.On)
         {
-            HookGuard.Run("FriendlyFireResponse", (hit, asked, flags: flags != null ? *flags : 0), static s => LogHit("response", s.hit, s.asked == 0 ? Keep.No : Classify(s.hit), $" flags=0x{s.flags:X}"));
+            int after = flags != null && CodeWriter.TryRead((nint)flags, out int read) ? read : 0;
+            HookGuard.Run("FriendlyFireResponse", (hit, asked, flags: after), static s => LogHit("response", s.hit, s.asked == 0 ? Keep.No : Classify(s.hit), $" flags=0x{s.flags:X}"));
         }
     }
 
@@ -423,9 +414,13 @@ public static unsafe class FriendlyFireHooks
             return;
         }
 
-        byte* friendlyFire = (byte*)(parameters + Mvs.MatchStartedFriendlyFireParam);
-        byte was = *friendlyFire;
-        *friendlyFire = 1;
+        nint friendlyFire = parameters + Mvs.MatchStartedFriendlyFireParam;
+        if (!CodeWriter.TryRead(friendlyFire, out byte was) || !CodeWriter.TryWrite(friendlyFire, (byte)1))
+        {
+            s_log?.Warn($"[FF] match start: the friendly fire parameter at 0x{friendlyFire:X} could not be set");
+            return;
+        }
+
         s_log?.Info($"[FF] match start: friendly fire parameter {was} -> 1");
         MatchRulesLog.Line($"friendly fire: PandaGameStateMatchStarted parameter {was} -> 1");
     }
@@ -438,10 +433,9 @@ public static unsafe class FriendlyFireHooks
             return;
         }
 
-        byte* flag = (byte*)(s_gameState + Mvs.PandaGameStateFriendlyFire);
-        if (CodeWriter.TryRead(s_gameState + Mvs.PandaGameStateFriendlyFire, out byte was) && was != 1)
+        nint flag = s_gameState + Mvs.PandaGameStateFriendlyFire;
+        if (CodeWriter.TryRead(flag, out byte was) && was != 1 && CodeWriter.TryWrite(flag, (byte)1))
         {
-            *flag = 1;
             MatchRulesLog.Line($"friendly fire: game state flag {was} -> 1");
         }
     }
@@ -456,9 +450,9 @@ public static unsafe class FriendlyFireHooks
         }
 
         var keep = Classify(hit);
-        if (keep == Keep.No)
+        if (keep == Keep.No && !CodeWriter.TryWrite(hit + Mvs.HitInteractionIsAlly, (byte)0))
         {
-            *(byte*)(hit + Mvs.HitInteractionIsAlly) = 0;
+            LogLine($"ff hit 0x{hit:X}: IsAllyInteraction could not be cleared");
         }
 
         if (MatchRulesLog.On)

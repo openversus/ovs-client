@@ -65,4 +65,26 @@ public static unsafe class CallSite
         CodeWriter.Write(instruction, bytes, code: true);
         return overwritten;
     }
+
+    /// <summary>
+    /// <see cref="Inject"/> through a stub that runs <paramref name="prelude"/> before jumping to
+    /// <paramref name="target"/>, for a hook that needs a value the game keeps in a register at
+    /// that call (the prelude copies it into a free argument register, e.g. mov r8, r15). The
+    /// prelude is copied as it is, so it must not address anything relative to where it sits.
+    /// Returns the bytes that were overwritten. Throws a <see cref="PatchException"/> on failure.
+    /// </summary>
+    public static byte[] InjectWithPrelude(nint instruction, ReadOnlySpan<byte> prelude, nint target, bool jump)
+    {
+        nint stub = Trampoline.Near(instruction).Place(BuildPrelude(prelude, target), align: 16);
+        return Inject(instruction, stub, jump);
+    }
+
+    /// <summary>The <see cref="InjectWithPrelude"/> stub: the prelude, then an absolute jump to <paramref name="target"/>.</summary>
+    public static byte[] BuildPrelude(ReadOnlySpan<byte> prelude, nint target)
+    {
+        var code = new List<byte>(prelude.Length + 14);
+        code.AddRange(prelude);
+        EntryHook.AddAbsoluteJump(code, target);
+        return code.ToArray();
+    }
 }
