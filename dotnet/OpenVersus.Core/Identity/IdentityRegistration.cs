@@ -20,9 +20,9 @@ public static class IdentityRegistration
     /// <summary>How long after a registration without the port a late one is still waited for and sent.</summary>
     public static readonly TimeSpan LateNodePortWait = TimeSpan.FromSeconds(60);
 
-    /// <summary>The JSON body: Steam id and its session ticket, Epic id, hardware id with its version and quality, install id, client version and the rollback node's port.</summary>
+    /// <summary>The JSON body: Steam id and its session ticket, Epic id and its ID token, hardware id with its version and quality, install id, client version and the rollback node's port.</summary>
     public static string Body(EnvInfo env) =>
-        JsonSerializer.Serialize(new IdentityBody(env.SteamId, env.SteamTicket, env.EpicId, env.HardwareId, env.HardwareIdVersion, env.HardwareIdQuality, env.InstallId, OvsVersion.Current, env.NodePort), OvsJson.Default.IdentityBody);
+        JsonSerializer.Serialize(new IdentityBody(env.SteamId, env.SteamTicket, env.EpicId, env.EpicToken, env.HardwareId, env.HardwareIdVersion, env.HardwareIdQuality, env.InstallId, OvsVersion.Current, env.NodePort), OvsJson.Default.IdentityBody);
 
     /// <summary>What /api/identify sent back, or null when it is not that JSON.</summary>
     public static IdentifyResponse? ParseResponse(string json) => OvsJson.TryParse(json, OvsJson.Default.IdentifyResponse, out _);
@@ -170,6 +170,40 @@ public static class IdentityRegistration
             if (attempt == RetryDelays.Length)
             {
                 log.Error("[OVS] Reidentify: no answer after retries");
+                return false;
+            }
+
+            sleep(RetryDelays[attempt]);
+        }
+    }
+
+    /// <summary>
+    /// Registers again with the Epic account ID token the game's EOS SDK handed out once the game was logged into an
+    /// Epic account (an Epic Games Store launch; a Steam launch never has one). The rest of the identity is sent as it
+    /// stands: the server adds the proof to what the first registration stored for this install. False when nothing
+    /// was sent (no token, no server), else whether the server registered it.
+    /// </summary>
+    public static bool RegisterEpicToken(EnvInfo env, string token, string serverUrl, IHttpTransport http, ServerIdentity identity, ILogger log, Action<TimeSpan>? sleep = null)
+    {
+        if (token.Length == 0 || string.IsNullOrEmpty(serverUrl) || Urls.Join(serverUrl, "/api/identify") is not { } url)
+        {
+            return false;
+        }
+
+        env.EpicToken = token;
+        sleep ??= Thread.Sleep;
+        log.Info("[OVS] RegisterIdentity: registering again with the game's Epic account ID token");
+        for (int attempt = 0; ; attempt++)
+        {
+            var outcome = Send(env, url, http, identity, log);
+            if (outcome != Outcome.NoAnswer)
+            {
+                return outcome == Outcome.Registered;
+            }
+
+            if (attempt == RetryDelays.Length)
+            {
+                log.Error("[OVS] RegisterIdentity: no answer to the Epic registration after retries");
                 return false;
             }
 
