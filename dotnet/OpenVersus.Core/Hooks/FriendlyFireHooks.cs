@@ -84,7 +84,7 @@ public static unsafe class FriendlyFireHooks
 
     // Moves a fighter makes with their own body, which do something to a teammate instead of hurting
     // them, by the animation montage their hitbox comes from (the hitbox's creating anim notify
-    // state's outer). Jacob's list, each checked in the Lab log (2026-09-29).
+    // state's outer). Tuggernuts's list, each checked in the Lab log (2026-09-29).
     private static readonly string[] s_supportMontageNames =
     [
         "Mvs_Jake_Special_N_Montage", // bite
@@ -379,7 +379,7 @@ public static unsafe class FriendlyFireHooks
         }
 
         // A kept ally move (Jake's bite, say) reaching a shielding teammate stays an ally's: the shield would
-        // otherwise take it as an opponent's and the teammate was hurt (Jacob, 2026-10-07). The hit is the shield
+        // otherwise take it as an opponent's and the teammate was hurt (Tuggernuts, 2026-10-07). The hit is the shield
         // code's own (see RedirectShieldCheckWithHit), the same one ProcessActiveHitInteraction classifies next.
         var keep = hit == 0 ? Keep.No : HookGuard.Run("FriendlyFireShield", hit, static h => Classify(h), Keep.No);
         if (MatchRulesLog.On)
