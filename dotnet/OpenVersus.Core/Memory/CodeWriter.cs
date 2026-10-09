@@ -84,6 +84,27 @@ public static unsafe class CodeWriter
         }
     }
 
+    /// <summary>Writes only if the bytes there match <paramref name="expected"/> through its wildcards; throws a <see cref="PatchException"/> otherwise.</summary>
+    public static void WriteIf(nint target, BytePattern expected, ReadOnlySpan<byte> bytes, bool code)
+    {
+        Expect(target, expected);
+        Write(target, bytes, code);
+    }
+
+    /// <summary>
+    /// Throws a <see cref="PatchException"/> unless the bytes at <paramref name="target"/> match
+    /// <paramref name="expected"/>, a wildcard standing for any byte: for code whose displacements
+    /// differ between the game's builds.
+    /// </summary>
+    public static void Expect(nint target, BytePattern expected)
+    {
+        var current = new ReadOnlySpan<byte>((void*)target, expected.Length);
+        if (!expected.MatchesAt(current, 0))
+        {
+            throw new PatchException($"expected {expected} at 0x{target:X}, found {Convert.ToHexString(current)}; not patching");
+        }
+    }
+
     /// <summary>An unguarded copy of <paramref name="length"/> bytes at <paramref name="address"/>, for memory known to be mapped, such as the image.</summary>
     public static byte[] Read(nint address, int length) => new ReadOnlySpan<byte>((void*)address, length).ToArray();
 

@@ -9,15 +9,19 @@ namespace OpenVersus.Hooks;
 
 /// <summary>
 /// Lets the server send hiss_amalgamation's compressed sections as zstd, which is much smaller than zlib. The game
-/// unpacks them in one place: a method of the Hydra SDK's zlib stream class (0x145005170 in the game's only build)
-/// that inflates a section chunk by chunk into a sink. Every section of a login goes through it, and nothing else
+/// unpacks them in one place: a method of the Hydra SDK's zlib stream class (0x145005170 in the Steam build; the
+/// Epic Games Store build has its own, with the same shape) that inflates a section chunk by chunk into a sink. Every section of a login goes through it, and nothing else
 /// does (checked in the game with a logging probe). Its one call to zlib's inflate is redirected to
 /// <see cref="ZstdInflate"/>, which decodes a zstd stream and leaves every other stream to zlib unchanged.
 /// </summary>
 public static unsafe class HydraZstdHook
 {
-    /// <summary>The inflate call in the stream method: strm = the object + 0x20, flush 0 (Z_NO_FLUSH).</summary>
-    internal const string Pattern = "48 8D 4E 20 89 46 28 33 D2 89 5E 38 48 89 6E 30 E8 ? ? ? ?";
+    /// <summary>
+    /// The inflate call in the stream method: strm = the object + 0x20, flush 0 (Z_NO_FLUSH). The object sits in
+    /// rsi in the Steam build and rdi in the Epic Games Store build, and the saved pointer comes from rbp or rsi,
+    /// so the four ModRM bytes are left open; once in each build.
+    /// </summary>
+    internal const string Pattern = "48 8D ? 20 89 ? 28 33 D2 89 ? 38 48 89 ? 30 E8 ? ? ? ?";
     private const int Call = 16;
 
     private static delegate* unmanaged<nint, int, int> s_inflate;

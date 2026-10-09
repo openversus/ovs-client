@@ -4,10 +4,11 @@ using OpenVersus.Memory;
 namespace OpenVersus.Tests;
 
 /// <summary>
-/// <see cref="TelemetryPatch"/> against the real bytes of WBA's send function, copied from the game's
-/// only build (0x140bea5a7 to 0x140bea89e): the pattern finds it, both byte runs the patch checks are
-/// where it expects, the jump it writes goes where the je went, and the HTTP request is created only
-/// on the path the jump skips. Writing the bytes needs VirtualProtect, so that part is proven in the game.
+/// <see cref="TelemetryPatch"/> against the real bytes of WBA's send function, copied from both builds
+/// (Steam 0x140bea5a7 to 0x140bea89e; Epic Games Store 0x140c3d737 to 0x140c3d91b, a smaller frame and
+/// 0x113 fewer bytes): the pattern finds it, the plan read off the je lands on the return with the build's
+/// own offsets, the jump it writes goes where the je went, and the HTTP request is created only on the
+/// path the jump skips. Writing the bytes needs VirtualProtect, so that part is proven in the game.
 /// </summary>
 public class TelemetryPatchTests
 {
@@ -45,44 +46,113 @@ public class TelemetryPatchTests
         "C0 00 00 00 48 8B BC 24 F0 00 00 00 48 8B B4 24 E8 00 00 00 48 85 C9 74 " +
         "05 E8 7B 15 EE 01 48 81 C4 D0 00 00 00 5D C3").Replace(" ", ""));
 
-    private static int Match() => PatternScanner.FindFirst(s_function, BytePattern.Parse(TelemetryPatch.Pattern));
 
-    [Fact]
-    public void ThePatternFindsTheNoSendBranch()
+    private static readonly byte[] s_epicFunction = Convert.FromHexString((
+        "45 33 FF 48 8B F1 48 8B 09 4C 89 7D 17 4C 89 7D 1F E8 F3 15 00 00 84 C0 " +
+        "0F 84 98 01 00 00 65 48 8B 04 25 58 00 00 00 8B 0D CC 1B 75 07 48 89 9C " +
+        "24 A0 00 00 00 BA 1C 08 00 00 4C 89 B4 24 88 00 00 00 48 8B 1C C8 48 03 " +
+        "DA 8B 03 39 05 78 DD 3C 07 0F 8F D7 01 00 00 8B 03 39 05 82 DD 3C 07 0F " +
+        "8F 12 02 00 00 8B 03 39 05 8C DD 3C 07 0F 8F 72 01 00 00 E8 D1 8B 01 03 " +
+        "48 8D 55 F7 48 8B C8 4C 8B 08 41 FF 51 40 48 8B 4D F7 48 8D 15 58 DD 3C " +
+        "07 48 8B 01 FF 50 48 48 8B 4D F7 4C 8D 05 2F DD 3C 07 48 8D 15 10 DD 3C " +
+        "07 48 8B 01 FF 90 80 00 00 00 48 8B 4D F7 48 8B 16 48 8B 01 48 8B 52 18 " +
+        "FF 50 50 48 8B 4D F7 48 8D 55 17 48 8B 01 FF 50 60 48 8B 4D F7 48 8B 01 " +
+        "FF 90 B0 00 00 00 8B 5E 10 4C 8B F0 48 8B 7E 08 4C 89 7D 07 89 5D 0F 85 " +
+        "DB 75 06 44 89 7D 13 EB 42 45 33 C0 48 8D 4D 07 8B D3 E8 B2 05 F3 FF 48 " +
+        "8B 4D 07 48 2B F9 66 66 66 0F 1F 84 00 00 00 00 00 48 8B 04 0F 48 89 01 " +
+        "48 8B 44 0F 08 48 89 41 08 48 85 C0 74 04 F0 FF 40 08 48 83 C1 10 83 EB " +
+        "01 75 DE 48 8B 16 48 8D 45 07 4C 8D 4D 27 48 89 44 24 20 4C 8D 05 D7 66 " +
+        "00 00 4C 89 7D 27 49 8B CE 4C 89 7D 2F E8 67 CA FF FF 48 8B 4D F7 48 8B " +
+        "01 FF 90 A8 00 00 00 48 8B 5D FF 4C 8B B4 24 88 00 00 00 48 85 DB 74 2E " +
+        "BF FF FF FF FF 8B C7 F0 0F C1 43 08 83 F8 01 75 1D 48 8B 03 48 8B CB FF " +
+        "10 F0 0F C1 7B 0C 83 FF 01 75 0B 48 8B 03 8B D7 48 8B CB FF 50 08 48 8B " +
+        "9C 24 A0 00 00 00 48 8B 4D 17 4C 8B BC 24 80 00 00 00 48 8B BC 24 B0 00 " +
+        "00 00 48 8B B4 24 A8 00 00 00 48 85 C9 74 05 E8 6D 63 E8 01 48 81 C4 90 " +
+        "00 00 00 5D C3").Replace(" ", ""));
+
+    /// <summary>Both builds' send functions, with where the plan must land and the jump it must write.</summary>
+    public static TheoryData<string, int, string> Builds => new()
     {
-        Assert.Equal(0, Match());
+        { "steam", 0x2C8, "E9AB02000090" },
+        { "epic", 0x1B6, "E99901000090" },
+    };
+
+    private static byte[] Function(string build) => build == "steam" ? s_function : s_epicFunction;
+
+    private static int Match(byte[] function) => PatternScanner.FindFirst(function, BytePattern.Parse(TelemetryPatch.Pattern));
+
+    [Theory]
+    [MemberData(nameof(Builds))]
+    public void ThePatternFindsTheNoSendBranchOnce(string build, int exitOffset, string jump)
+    {
+        _ = (exitOffset, jump);
+        Assert.Equal(0, Match(Function(build)));
+        Assert.Single(PatternScanner.FindAll(Function(build), BytePattern.Parse(TelemetryPatch.Pattern)));
     }
 
-    [Fact]
-    public void TheJeAndTheNoSendReturnAreWhereThePatchExpects()
+    [Theory]
+    [MemberData(nameof(Builds))]
+    public void ThePlanLandsOnTheBuildsOwnReturn(string build, int exitOffset, string jump)
     {
-        int m = Match();
-        Assert.Equal(TelemetryPatch.Expected, s_function[(m + TelemetryPatch.BranchOffset)..(m + TelemetryPatch.BranchOffset + TelemetryPatch.Expected.Length)]);
-        Assert.Equal(TelemetryPatch.Exit, s_function[(m + TelemetryPatch.ExitOffset)..(m + TelemetryPatch.ExitOffset + TelemetryPatch.Exit.Length)]);
+        _ = jump;
+        byte[] function = Function(build);
+        var plan = TelemetryPatch.PlanFor(function.AsSpan(Match(function)));
+        Assert.Equal(exitOffset, plan.ExitOffset);
+        Assert.True(TelemetryPatch.ExitShape.MatchesAt(function, plan.ExitOffset));
+        // The return frees the slot the function zeroed first: mov rcx, [rbp + X] against mov [rbp + X], r15.
+        Assert.Equal(function[TelemetryPatch.PayloadSlotOffset], function[plan.ExitOffset + 3]);
         // The return ends in pop rbp; ret.
-        Assert.Equal([0x5D, 0xC3], s_function[^2..]);
+        Assert.Equal([0x5D, 0xC3], function[^2..]);
     }
 
-    [Fact]
-    public void TheJumpGoesWhereTheJeWentAlways()
+    [Theory]
+    [MemberData(nameof(Builds))]
+    public void TheJumpGoesWhereTheJeWentAlways(string build, int exitOffset, string jump)
     {
-        int branch = Match() + TelemetryPatch.BranchOffset;
-        int jeTarget = branch + 6 + BitConverter.ToInt32(s_function, branch + 2);
-        Assert.Equal(Match() + TelemetryPatch.ExitOffset, jeTarget);
+        byte[] function = Function(build);
+        var plan = TelemetryPatch.PlanFor(function.AsSpan(Match(function)));
+        int branch = Match(function) + TelemetryPatch.BranchOffset;
+        Assert.Equal(function[branch..(branch + 6)], plan.Je);
+        int jeTarget = branch + 6 + BitConverter.ToInt32(function, branch + 2);
+        Assert.Equal(exitOffset, jeTarget);
 
-        Assert.Equal(TelemetryPatch.Expected.Length, TelemetryPatch.Jump.Length);
-        Assert.Equal(0xE9, TelemetryPatch.Jump[0]);
-        Assert.Equal(jeTarget, branch + 5 + BitConverter.ToInt32(TelemetryPatch.Jump, 1));
-        Assert.Equal(0x90, TelemetryPatch.Jump[5]);
+        Assert.Equal(jump, Convert.ToHexString(plan.Jump));
+        Assert.Equal(plan.Je.Length, plan.Jump.Length);
+        Assert.Equal(jeTarget, branch + 5 + BitConverter.ToInt32(plan.Jump, 1));
     }
 
-    [Fact]
-    public void TheRequestIsOnlyCreatedOnThePathTheJumpSkips()
+    [Theory]
+    [MemberData(nameof(Builds))]
+    public void TheRequestIsOnlyCreatedOnThePathTheJumpSkips(string build, int exitOffset, string jump)
     {
+        _ = jump;
         // call qword [r9 + 0x40]: IHttpModule-style CreateRequest through the HTTP module's vtable.
-        int m = Match();
-        int create = s_function.AsSpan().IndexOf([(byte)0x41, (byte)0xFF, (byte)0x51, (byte)0x40]);
-        Assert.InRange(create, m + TelemetryPatch.BranchOffset + 6, m + TelemetryPatch.ExitOffset - 1);
+        byte[] function = Function(build);
+        int m = Match(function);
+        int create = function.AsSpan().IndexOf([(byte)0x41, (byte)0xFF, (byte)0x51, (byte)0x40]);
+        Assert.InRange(create, m + TelemetryPatch.BranchOffset + 6, m + exitOffset - 1);
+    }
+
+    [Fact]
+    public void AJeThatIsNotAJeIsRefused()
+    {
+        byte[] function = (byte[])s_function.Clone();
+        function[TelemetryPatch.BranchOffset + 1] = 0x85;
+        Assert.Throws<PatchException>(() => TelemetryPatch.PlanFor(function));
+    }
+
+    [Fact]
+    public void AReturnThatFreesAnotherSlotIsRefused()
+    {
+        byte[] function = (byte[])s_function.Clone();
+        function[0x2C8 + 3] = 0xDF;
+        Assert.Throws<PatchException>(() => TelemetryPatch.PlanFor(function));
+    }
+
+    [Fact]
+    public void AJeReachingPastWhatWasReadIsRefused()
+    {
+        Assert.Throws<PatchException>(() => TelemetryPatch.PlanFor(s_function.AsSpan(0, 0x2C8)));
     }
 
     // UFighterGameInstance::RecordEventWithAttributes, 0x142729010 to 0x142729137 in the game's only build.
@@ -151,12 +221,26 @@ public class TelemetryPatchTests
     // The Store's patterns are each function's first 32 bytes, read from the game's only build, where
     // each is unique; that the functions return void and own nothing is from the reflected headers.
     [Fact]
-    public void EveryStorePatternIsAnExact32ByteFunctionStartAndTheyAreAllDifferent()
+    public void EveryStorePatternIsAFunctionStartOfAtLeast32BytesAndTheyAreAllDifferent()
     {
         var patterns = TelemetryPatch.ShopFunctions.Select(f => BytePattern.Parse(f.Pattern)).ToList();
-        Assert.All(patterns, p => Assert.Equal(32, p.Length));
-        Assert.All(patterns, p => Assert.All(p.Mask, m => Assert.Equal(0xFF, m)));
-        Assert.Equal(patterns.Count, patterns.Select(p => Convert.ToHexString(p.Bytes)).Distinct().Count());
+        Assert.All(patterns, p => Assert.InRange(p.Length, 32, 36));
+        // Every open byte is a displacement: the three or four after a call (E8), or the four of a lea rdx, [rip + disp32].
+        Assert.All(patterns, p =>
+        {
+            for (int i = 0; i < p.Length; i++)
+            {
+                if (p.Mask[i] == 0)
+                {
+                    bool afterCall = i >= 1 && p.Bytes[i - 1] == 0xE8 && p.Mask[i - 1] != 0;
+                    bool afterLea = i >= 3 && p.Bytes[i - 3] == 0x48 && p.Bytes[i - 2] == 0x8D && p.Bytes[i - 1] == 0x15 && p.Mask[i - 1] != 0;
+                    bool inRun = i >= 1 && p.Mask[i - 1] == 0;
+                    Assert.True(afterCall || afterLea || inRun, $"byte {i} of {p} is open for no displacement");
+                }
+            }
+        });
+        // The two recorders share their pattern and are told apart by name; every other function has its own.
+        Assert.Equal(patterns.Count, TelemetryPatch.ShopFunctions.Select(f => f.Pattern + "|" + f.EventName).Distinct().Count());
         Assert.Equal(TelemetryPatch.ShopFunctions.Length, TelemetryPatch.ShopFunctions.Select(f => f.Name).Distinct().Count());
         Assert.Equal(0xC3, TelemetryPatch.Ret);
     }
@@ -169,5 +253,46 @@ public class TelemetryPatchTests
             Assert.NotEqual(TelemetryPatch.RecordPattern, f.Pattern);
             Assert.DoesNotContain(TelemetryPatch.Pattern, f.Pattern);
         }
+    }
+
+    // The five static recorders of UMvsShopAnalytics start with the same 36 bytes in both builds; only the event
+    // name each one's lea rdx points at differs. These are the Steam build's heads (0x1424d0e90 to 0x1424d1150,
+    // 0xB0 apart), laid out in a small image with their names, the lea displacements re-pointed into it.
+    private static readonly string[] s_recorderNames = ["durable_unlock", "game_store_ui_interact", "game_store_ui_open", "another_event", "wb_iap_event"];
+    private const string RecorderHead =
+        "48 89 5C 24 08 57 48 83 EC 40 48 8B FA 48 8B D1 48 8D 4C 24 20 E8 A6 65 FF FF 48 8D 15 37 C5 7F 03 48 8B D8 48 8D 4C 24 30 E8 32 52 5C 00 4C 8B C7 48 8D 4C 24 30 48 8B D3 E8 12 17 00 00";
+
+    private static byte[] RecorderImage()
+    {
+        byte[] head = Convert.FromHexString(RecorderHead.Replace(" ", ""));
+        const int stride = 0xB0;
+        var image = new byte[stride * s_recorderNames.Length + 0x400];
+        int strings = stride * s_recorderNames.Length;
+        for (int i = 0; i < s_recorderNames.Length; i++)
+        {
+            int at = stride * i;
+            head.CopyTo(image, at);
+            byte[] name = System.Text.Encoding.Unicode.GetBytes(s_recorderNames[i] + "\0");
+            name.CopyTo(image, strings);
+            int lea = at + TelemetryPatch.EventNameOffset;
+            BitConverter.TryWriteBytes(image.AsSpan(lea + 3), strings - (lea + 7));
+            strings += name.Length + 2;
+        }
+        return image;
+    }
+
+    [Fact]
+    public void TheRecorderPatternMatchesEverySiblingAndTheEventNamePicksOne()
+    {
+        byte[] image = RecorderImage();
+        var pattern = BytePattern.Parse(TelemetryPatch.RecorderPattern);
+        Assert.Equal(s_recorderNames.Length, PatternScanner.FindAll(image, pattern).Count);
+        Assert.Equal([0x48, 0x8D, 0x15], image[TelemetryPatch.EventNameOffset..(TelemetryPatch.EventNameOffset + 3)]);
+        foreach (var f in TelemetryPatch.ShopFunctions.Where(f => f.EventName != null))
+        {
+            int expected = 0xB0 * Array.IndexOf(s_recorderNames, f.EventName);
+            Assert.Equal(expected, OpenVersus.Game.PatternResolver.FindNaming(image, BytePattern.Parse(f.Pattern), TelemetryPatch.EventNameOffset, f.EventName!));
+        }
+        Assert.Equal(-1, OpenVersus.Game.PatternResolver.FindNaming(image, pattern, TelemetryPatch.EventNameOffset, "game_store_ui"));
     }
 }

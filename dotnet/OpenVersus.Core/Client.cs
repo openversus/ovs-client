@@ -563,6 +563,11 @@ public sealed class Client
         // Not a setting: the server sends hiss_amalgamation's sections as zstd only to clients from this version on,
         // and the game cannot unpack them without this.
         Status.HydraZstd = Apply("HydraZstd", c, HydraZstdHook.Apply);
+        if (Status.HydraZstd)
+        {
+            // Only now is it known: the server reads this header, not the version, to decide between zstd and zlib.
+            headers.Add(new HeaderRule(RequestHeaders.OvsZstd, static () => "1"));
+        }
 
         Log.Info($"hooks: {Status}");
         foreach (var f in GameFunctions.All)

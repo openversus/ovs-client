@@ -31,6 +31,13 @@ public sealed unsafe class RequestHeaders
     /// <summary>This install's identify token, on every request to the OpenVersus server.</summary>
     public const string OvsIdentity = "X-OVS-Identity";
 
+    /// <summary>
+    /// "1" on every request when the HydraZstd hook took on this build, so the server sends zstd sections only to a game
+    /// that can read them: a build the hook's pattern misses (the Epic Games Store one, 2026-10-08) would inflate zstd as
+    /// zlib and crash on the first big answer. Sent only when the hook took; never "0".
+    /// </summary>
+    public const string OvsZstd = "X-OVS-Zstd";
+
     private const int LoggedSendsPerRule = 3;
     private const int MaxRules = 64;
 
