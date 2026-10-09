@@ -1,4 +1,5 @@
 using OpenVersus.Game;
+using OpenVersus.Memory;
 using Microsoft.Extensions.Logging;
 
 namespace OpenVersus.Hooks;
@@ -52,6 +53,7 @@ public static class GameSpeedHooks
 
         bool betaSpeed = settings.HasWorldBuff(BetaSpeedSlug);
         int percent = PercentFor(settings, s_percent);
+        Countdown.SetSpeed(finder, percent / 100f, s_log);
         if (percent == 100)
         {
             return;
@@ -109,4 +111,48 @@ public static class GameSpeedHooks
     }
 
     private static void ClearMatch() => s_gameMode = 0;
+
+    /// <summary>
+    /// The intro countdown (UI_Countdown_C, its "3", "2", "1", GO) is a widget animation, which plays in real time, while
+    /// the fighters are let go by a fixed timer in game time (6 s: the intro handler's EndIntro). At 1.2x they could move
+    /// while "1" still showed. Its PlayAnimation call's PlaybackSpeed literal (1.0, in the class's loaded ubergraph
+    /// bytecode) becomes the match's speed, so the numbers keep pace; 1.0 again for a match at normal speed. UI only:
+    /// nothing in the simulation changes. Every byte around the literal is checked first (docs: BETA_SPEED_COUNTDOWN).
+    /// </summary>
+    private static class Countdown
+    {
+        private const int ScriptLength = 7644;
+        private const int CallAt = 4716;           // EX_LetObj (0x5F), the return value, then EX_FinalFunction (0x1C) PlayAnimation
+        private const int SpeedAt = 4756;          // EX_FloatConst (0x1E) PlaybackSpeed
+        private const int UStructScript = 0x70;   // UStruct::Script (TArray<uint8>): data, then Num at +8
+        private static float s_written = 1f;
+
+        public static void SetSpeed(ObjectFinder finder, float speed, ILogger? log)
+        {
+            if (speed == s_written)
+            {
+                return;
+            }
+
+            nint ubergraph = finder.FindFunction("UI_Countdown_C", "ExecuteUbergraph_UI_Countdown", out _);
+            nint playAnimation = finder.FindFunction("UserWidget", "PlayAnimation", out _);
+            byte[] code = new byte[ScriptLength];
+            if (ubergraph == 0 || playAnimation == 0
+                || !finder.Memory.TryRead(ubergraph + UStructScript, out nint script) || script == 0
+                || !finder.Memory.TryRead(ubergraph + UStructScript + 8, out int length) || length != ScriptLength
+                || !finder.Memory.TryRead(script, code)
+                || code[CallAt] != 0x5F || code[CallAt + 10] != 0x1C || BitConverter.ToInt64(code, CallAt + 11) != playAnimation
+                || code[SpeedAt] != 0x1E)
+            {
+                log?.Warn($"[GameSpeed] the intro countdown's speed is not changed: its script is not as expected (ubergraph 0x{ubergraph:X}, PlayAnimation 0x{playAnimation:X})");
+                return;
+            }
+
+            if (CodeWriter.TryWrite(script + SpeedAt + 1, speed))
+            {
+                s_written = speed;
+                log?.Info($"[GameSpeed] the intro countdown plays at {speed:0.00}x");
+            }
+        }
+    }
 }
