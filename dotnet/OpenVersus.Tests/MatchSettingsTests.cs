@@ -79,6 +79,20 @@ public class MatchSettingsTests
         Assert.False(FriendlyFireHooks.IsOn(localPlay with { Online = true }, offlineTesting: true));
     }
 
+    [Fact]
+    public void BetaSpeedRunsEveryMatchWithTheMutatorAt120()
+    {
+        var betaSpeed = new MatchSettings("2v2", 4, ["ovs_friendly_fire", "ovs_beta_speed"], 5, true);
+        var online = new MatchSettings("2v2", 4, [], 5, true);
+        var lab = new MatchSettings("1v1", 4, [], MatchSettings.LabMatchType, false);
+
+        Assert.Equal(120, GameSpeedHooks.PercentFor(betaSpeed, offlinePercent: 50));
+        Assert.Equal(120, GameSpeedHooks.PercentFor(lab with { WorldBuffs = ["OVS_BETA_SPEED"] }, offlinePercent: 100));
+        Assert.Equal(100, GameSpeedHooks.PercentFor(online, offlinePercent: 50));
+        Assert.Equal(50, GameSpeedHooks.PercentFor(lab, offlinePercent: 50));
+        Assert.Equal(100, GameSpeedHooks.PercentFor(lab with { Online = true }, offlinePercent: 50));
+    }
+
     /// <summary>An FString at <paramref name="at"/>: data, count with the terminator, capacity.</summary>
     private static void WriteFString(FakeMemory memory, nint at, long data, string text)
     {
