@@ -52,8 +52,9 @@ public static unsafe class EpicIdentity
     private static nint s_export;
     private static nint s_platform;
     private static long s_ticks;
-    private static int s_lastAuth = -2;
-    private static int s_lastConnect = -2;
+    // The last counts logged, per platform handle: the game can tick more than one platform (seen on Windows, 2026-10-10:
+    // one with a product user, one without), and shared counts flipped on every tick and logged each time.
+    private static readonly Dictionary<nint, (int Auth, int Connect)> s_lastCounts = [];
     private static long s_startedAt;
     private static volatile int s_state;
     private static Outcome? s_outcome;
@@ -319,11 +320,10 @@ public static unsafe class EpicIdentity
         nint connect = s_getConnect(platform);
         int accounts = auth == 0 ? -1 : s_authCount(auth);
         int users = connect == 0 ? -1 : s_connectCount(connect);
-        if (accounts != s_lastAuth || users != s_lastConnect)
+        if (!s_lastCounts.TryGetValue(platform, out var last) || last != (accounts, users))
         {
-            s_lastAuth = accounts;
-            s_lastConnect = users;
-            s_log?.Info($"[Epic] logged in: {accounts} Epic account(s), {users} product user(s) (tick {s_ticks}, {Stopwatch.GetElapsedTime(s_startedAt).TotalSeconds:F1} s)");
+            s_lastCounts[platform] = (accounts, users);
+            s_log?.Info($"[Epic] logged in: {accounts} Epic account(s), {users} product user(s) on platform 0x{platform:X} (tick {s_ticks}, {Stopwatch.GetElapsedTime(s_startedAt).TotalSeconds:F1} s)");
         }
 
         if (accounts > 0)
