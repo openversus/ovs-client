@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging;
 using OpenVersus.Config;
@@ -396,6 +397,9 @@ public sealed class Client
                 reidentify: () => IdentityRegistration.Reidentify(Env!, Settings.ServerUrl, Http, ServerIdentity, Log));
             poller.Start();
             _shutdown.Add(poller.Stop);
+
+            // The Beta Speed a match with the mutator runs at is the server's: every player and the rollback server must agree.
+            Start("OVS client settings", () => new ClientSettingsFetch(Settings.ServerUrl, Http, Log, GameSpeedHooks.SetBetaSpeed).Run());
         }
 
         if (Settings.EnableServerProxy && !string.IsNullOrEmpty(Settings.ServerUrl))
@@ -580,6 +584,8 @@ public sealed class Client
         // request to the server, after the startup update has installed what it installs.
         var experimentalPaks = new Lazy<string>(ExperimentalPaksReport);
         headers.Add(new HeaderRule(RequestHeaders.OvsPaks, () => experimentalPaks.Value));
+        // Not a setting: the Beta Speed this game runs (the server's, once ClientSettingsFetch has it), for the queues that run it.
+        headers.Add(new HeaderRule(RequestHeaders.OvsBetaSpeed, static () => GameSpeedHooks.BetaSpeedPercent.ToString(CultureInfo.InvariantCulture)));
         RequestHeaders = headers;
         Status.RequestHeaders = Apply("RequestHeaders", c, ctx => RequestHeadersHook.Apply(ctx, headers));
 

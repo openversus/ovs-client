@@ -93,6 +93,30 @@ public class MatchSettingsTests
         Assert.Equal(100, GameSpeedHooks.PercentFor(lab with { Online = true }, offlinePercent: 50));
     }
 
+    [Fact]
+    public void BetaSpeedRunsAtTheServersSpeedOnceItHasIt()
+    {
+        var betaSpeed = new MatchSettings("1v1", 4, ["ovs_beta_speed", "ovs_shield_hp"], 5, true);
+        var lab = new MatchSettings("1v1", 4, [], MatchSettings.LabMatchType, false);
+        try
+        {
+            Assert.True(GameSpeedHooks.SetBetaSpeed(120));
+            Assert.Equal(120, GameSpeedHooks.BetaSpeedPercent);
+            Assert.Equal(120, GameSpeedHooks.PercentFor(betaSpeed, offlinePercent: 50));
+            // The offline setting is its own.
+            Assert.Equal(50, GameSpeedHooks.PercentFor(lab, offlinePercent: 50));
+
+            // Outside the server's own range (50 to 200): kept as it was.
+            Assert.False(GameSpeedHooks.SetBetaSpeed(201));
+            Assert.False(GameSpeedHooks.SetBetaSpeed(49));
+            Assert.Equal(120, GameSpeedHooks.PercentFor(betaSpeed, offlinePercent: 50));
+        }
+        finally
+        {
+            GameSpeedHooks.SetBetaSpeed(GameSpeedHooks.DefaultBetaSpeedPercent);
+        }
+    }
+
     /// <summary>An FString at <paramref name="at"/>: data, count with the terminator, capacity.</summary>
     private static void WriteFString(FakeMemory memory, nint at, long data, string text)
     {

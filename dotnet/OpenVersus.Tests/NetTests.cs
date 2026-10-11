@@ -242,6 +242,71 @@ public class NetTests
         Assert.StartsWith("a damaged zip", broken);
     }
 
+    [Theory]
+    [InlineData("""{"betaSpeedPercent":120}""", 120)]
+    [InlineData("""{"betaSpeedPercent":110,"later":"more"}""", 110)]
+    [InlineData("""{"betaSpeedPercent":1.1}""", null)]
+    [InlineData("""{"betaSpeedPercent":"120"}""", null)]
+    [InlineData("""{"betaSpeed":120}""", null)]
+    [InlineData("""[120]""", null)]
+    [InlineData("<html>not found</html>", null)]
+    [InlineData("", null)]
+    public void ClientSettingsGiveTheServersBetaSpeed(string body, int? percent) => Assert.Equal(percent, ClientSettingsFetch.ParseBetaSpeed(body));
+
+    /// <summary>Serves its results in order, the last one again after that.</summary>
+    private sealed class SequenceHttp(params HttpResult[] results) : IHttpTransport
+    {
+        public List<string> Requested { get; } = [];
+
+        public HttpResult Get(Uri url, TimeSpan timeout)
+        {
+            Requested.Add(url.ToString());
+            return results[Math.Min(Requested.Count, results.Length) - 1];
+        }
+
+        public HttpResult Post(Uri url, string contentType, ReadOnlySpan<byte> body, TimeSpan timeout) => throw new NotSupportedException();
+    }
+
+    [Fact]
+    public void ClientSettingsAreAskedForAgainUntilTheServerAnswers()
+    {
+        var http = new SequenceHttp(HttpResult.Failed("timed out"), new HttpResult(false, 502, [], null), Served("""{"betaSpeedPercent":120}"""u8.ToArray()));
+        var taken = new List<int>();
+        var waits = new List<TimeSpan>();
+
+        bool ok = new ClientSettingsFetch("http://testing.openversus.org:8000/", http, new ListLogger(), p => { taken.Add(p); return true; }, waits.Add).Run();
+
+        Assert.True(ok);
+        Assert.Equal([120], taken);
+        Assert.Equal(3, http.Requested.Count);
+        Assert.All(http.Requested, u => Assert.Equal("http://testing.openversus.org:8000/ovs/client-settings", u));
+        Assert.Equal([TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(20)], waits);
+    }
+
+    [Fact]
+    public void WithoutAnAnswerTheClientKeepsItsBetaSpeedAndSaysSo()
+    {
+        var http = new SequenceHttp(new HttpResult(false, 404, [], null));
+        var log = new ListLogger();
+        var taken = new List<int>();
+
+        bool ok = new ClientSettingsFetch("http://host/", http, log, p => { taken.Add(p); return true; }, _ => { }).Run();
+
+        // Three tries, then it stops.
+        Assert.False(ok);
+        Assert.Equal(3, http.Requested.Count);
+        Assert.Empty(taken);
+        Assert.Contains(log.Lines, l => l.Contains("Gave up") && l.Contains("110%"));
+
+        // A speed the client refuses (outside 50 to 200) is a failed try too.
+        http = new SequenceHttp(Served("""{"betaSpeedPercent":500}"""u8.ToArray()));
+        Assert.False(new ClientSettingsFetch("http://host/", http, new ListLogger(), InTheServersRange, _ => { }).Run());
+        Assert.Equal(3, http.Requested.Count);
+    }
+
+    // GameSpeedHooks.SetBetaSpeed's range, without its process-wide value.
+    private static bool InTheServersRange(int percent) => percent is >= 50 and <= 200;
+
     /// <summary>Serves a fixed result per URL, 404 for anything else, and records what was asked for.</summary>
     private sealed class FakeHttp(Dictionary<string, HttpResult> results) : IHttpTransport
     {

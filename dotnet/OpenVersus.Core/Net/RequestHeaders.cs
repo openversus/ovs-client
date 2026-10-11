@@ -45,6 +45,13 @@ public sealed unsafe class RequestHeaders
     /// </summary>
     public const string OvsPaks = "X-OVS-Paks";
 
+    /// <summary>
+    /// The Beta Speed this game runs, in percent (<see cref="Hooks.GameSpeedHooks.BetaSpeedPercent"/>: the server's, read
+    /// at startup): a queue that runs Beta Speed (1v1 Testing Grounds) lets in only games at the server's speed, or the
+    /// match would desync.
+    /// </summary>
+    public const string OvsBetaSpeed = "X-OVS-BetaSpeed";
+
     private const int LoggedSendsPerRule = 3;
     private const int MaxRules = 64;
 
