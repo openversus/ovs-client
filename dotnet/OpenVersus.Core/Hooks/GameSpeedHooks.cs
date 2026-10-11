@@ -6,10 +6,10 @@ namespace OpenVersus.Hooks;
 
 /// <summary>
 /// Game speed. A match with the Beta Speed mutator (<see cref="BetaSpeedSlug"/>, custom games, online too) runs at
-/// 120%: every player's client does the same, and the rollback server paces the match at 72 frames a second (the HTTP
-/// server's registry gives it tick_rate 72). For offline testing ([Settings.Debug] LabGameSpeedPercent) a Lab or Local
+/// 110%: every player's client does the same, and the rollback server paces the match at 66 frames a second (the HTTP
+/// server's registry gives it tick_rate 66). For offline testing ([Settings.Debug] LabGameSpeedPercent) a Lab or Local
 /// Play match without it runs at that percentage of normal speed. The fixed simulation still steps 1/60 of sim time each frame; the game state's step
-/// accumulator is fed the world's time-dilated delta, so at 120 the match takes 72 steps a real second instead of 60
+/// accumulator is fed the world's time-dilated delta, so at 110 the match takes 66 steps a real second instead of 60
 /// (docs: GAME_SPEED_MUTATOR). It is the engine's own UGameplayStatics::SetGlobalTimeDilation on the match world, what
 /// WB's debug menu (Comp_GameState_Debug.ApplyGameSpeed) called on non-live builds, through reflection: no code bytes
 /// change. The speed never enters the simulation: every step is still 1/60 s of game time, so it cannot desync. Tested
@@ -19,7 +19,7 @@ public static class GameSpeedHooks
 {
     /// <summary>The Beta Speed mutator's slug (the HTTP server's GameplayConfigs.BetaSpeedMutator).</summary>
     public const string BetaSpeedSlug = "ovs_beta_speed";
-    private const int BetaSpeedPercent = 120;
+    private const int BetaSpeedPercent = 110;
 
     private static ILogger? s_log;
     private static int s_percent = 100;
@@ -40,7 +40,7 @@ public static class GameSpeedHooks
     }
 
     /// <summary>
-    /// A new match (<see cref="StockRulesHooks"/>, on the game thread): a Beta Speed match runs at 120%, an offline Lab
+    /// A new match (<see cref="StockRulesHooks"/>, on the game thread): a Beta Speed match runs at 110%, an offline Lab
     /// or Local Play match at the configured speed; any other match is left at the world's own (1.0).
     /// </summary>
     public static void StartMatch(ObjectFinder finder, nint gameMode, MatchSettings? settings)
@@ -86,7 +86,7 @@ public static class GameSpeedHooks
     }
 
     /// <summary>
-    /// The speed a match runs at, in percent: 120 with the Beta Speed mutator (any match, online too), else
+    /// The speed a match runs at, in percent: 110 with the Beta Speed mutator (any match, online too), else
     /// <paramref name="offlinePercent"/> for an offline Lab or Local Play match, else 100.
     /// </summary>
     public static int PercentFor(MatchSettings settings, int offlinePercent) =>

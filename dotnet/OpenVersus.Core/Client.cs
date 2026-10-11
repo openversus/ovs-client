@@ -283,6 +283,24 @@ public sealed class Client
     }
 
     /// <summary>
+    /// <see cref="PakUpdate.ExperimentalReport"/> for this install (the pak updater's folders), or "" without a local
+    /// AppData folder.
+    /// </summary>
+    private string ExperimentalPaksReport()
+    {
+        string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        if (string.IsNullOrEmpty(localAppData))
+        {
+            return "";
+        }
+
+        string saved = Path.Combine(localAppData, "MultiVersus", "Saved");
+        string report = PakUpdate.ExperimentalReport(Path.Combine(saved, "Paks"), Path.Combine(saved, Layout.FolderName, "PakHashes.txt"), Log);
+        Log.Info($"[Paks] Experimental paks reported to the server: {(report.Length == 0 ? "none" : report.Split(';').Length.ToString())}");
+        return report;
+    }
+
+    /// <summary>
     /// <see cref="StartupUpdate"/> for this install: paks in %LOCALAPPDATA%\MultiVersus\Saved\Paks
     /// (skipped when there is no local AppData folder), staging, backup and the hash cache beside it
     /// in Saved\OpenVersus, hand-installed paks moved out of the game's Content\Paks, and the plugin
@@ -558,6 +576,10 @@ public sealed class Client
         var headers = new RequestHeaders([Settings.ServerUrl, Settings.ProdServerUrl], Log);
         headers.Add(new HeaderRule(RequestHeaders.HydraAccessToken, () => identity.Token, Path: "/access", OnlyIfMissing: true));
         headers.Add(new HeaderRule(RequestHeaders.OvsIdentity, () => identity.Token));
+        // Not a setting: the experimental paks this game mounted, for the queues that need them. Taken once, at the first
+        // request to the server, after the startup update has installed what it installs.
+        var experimentalPaks = new Lazy<string>(ExperimentalPaksReport);
+        headers.Add(new HeaderRule(RequestHeaders.OvsPaks, () => experimentalPaks.Value));
         RequestHeaders = headers;
         Status.RequestHeaders = Apply("RequestHeaders", c, ctx => RequestHeadersHook.Apply(ctx, headers));
 

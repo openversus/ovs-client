@@ -80,14 +80,14 @@ public class MatchSettingsTests
     }
 
     [Fact]
-    public void BetaSpeedRunsEveryMatchWithTheMutatorAt120()
+    public void BetaSpeedRunsEveryMatchWithTheMutatorAt110()
     {
         var betaSpeed = new MatchSettings("2v2", 4, ["ovs_friendly_fire", "ovs_beta_speed"], 5, true);
         var online = new MatchSettings("2v2", 4, [], 5, true);
         var lab = new MatchSettings("1v1", 4, [], MatchSettings.LabMatchType, false);
 
-        Assert.Equal(120, GameSpeedHooks.PercentFor(betaSpeed, offlinePercent: 50));
-        Assert.Equal(120, GameSpeedHooks.PercentFor(lab with { WorldBuffs = ["OVS_BETA_SPEED"] }, offlinePercent: 100));
+        Assert.Equal(110, GameSpeedHooks.PercentFor(betaSpeed, offlinePercent: 50));
+        Assert.Equal(110, GameSpeedHooks.PercentFor(lab with { WorldBuffs = ["OVS_BETA_SPEED"] }, offlinePercent: 100));
         Assert.Equal(100, GameSpeedHooks.PercentFor(online, offlinePercent: 50));
         Assert.Equal(50, GameSpeedHooks.PercentFor(lab, offlinePercent: 50));
         Assert.Equal(100, GameSpeedHooks.PercentFor(lab with { Online = true }, offlinePercent: 50));

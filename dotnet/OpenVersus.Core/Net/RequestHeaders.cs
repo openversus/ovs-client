@@ -38,6 +38,13 @@ public sealed unsafe class RequestHeaders
     /// </summary>
     public const string OvsZstd = "X-OVS-Zstd";
 
+    /// <summary>
+    /// The installed OVS_Experimental paks, "name=sha256" of each .utoc separated by semicolons (<see cref="PakUpdate.ExperimentalReport"/>):
+    /// a queue whose mutators live in one (1v1 Testing Grounds) lets in only players with the exact pak, or the match
+    /// would desync. Not sent when there is none.
+    /// </summary>
+    public const string OvsPaks = "X-OVS-Paks";
+
     private const int LoggedSendsPerRule = 3;
     private const int MaxRules = 64;
 

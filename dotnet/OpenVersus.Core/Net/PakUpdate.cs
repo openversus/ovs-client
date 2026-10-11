@@ -577,6 +577,52 @@ public sealed class PakUpdate(string paksDirectory, string stagingDirectory, str
         }
     }
 
+    /// <summary>
+    /// The installed OVS_Experimental paks for the X-OVS-Paks header: "name=sha256" per .utoc (name without the
+    /// extension), in name order, separated by semicolons; "" when there is none. The .utoc holds every chunk's hash, so it
+    /// changes with any of the pak's content, and it is small. Hashes come from the hash cache while a file's size and
+    /// modified time are unchanged.
+    /// </summary>
+    public static string ExperimentalReport(string paksDirectory, string hashCachePath, ILogger log)
+    {
+        string[] files;
+        try
+        {
+            files = Directory.GetFiles(paksDirectory, "OVS_Experimental*_P.utoc");
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return "";
+        }
+
+        var cache = HashCache.Load(hashCachePath);
+        bool changed = false;
+        var report = new List<string>();
+        foreach (string path in files.Order(StringComparer.OrdinalIgnoreCase))
+        {
+            string name = Path.GetFileName(path);
+            var info = new FileInfo(path);
+            string? hash = cache.Find(name, info.Length, info.LastWriteTimeUtc.Ticks);
+            if (hash == null && (hash = HashFile(path)) != null)
+            {
+                cache.Set(name, info.Length, info.LastWriteTimeUtc.Ticks, hash);
+                changed = true;
+            }
+
+            if (hash != null)
+            {
+                report.Add($"{Path.GetFileNameWithoutExtension(name)}={hash}");
+            }
+        }
+
+        if (changed)
+        {
+            cache.Save(hashCachePath, log);
+        }
+
+        return string.Join(';', report);
+    }
+
     /// <summary>The SHA-256 of a file as lowercase hex, or null when it cannot be read.</summary>
     public static string? HashFile(string path)
     {

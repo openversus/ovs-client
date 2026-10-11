@@ -157,6 +157,28 @@ public class PakUpdateTests : IDisposable
         Assert.Single(updater.Needed([Entry("OVS_P.pak", body)]));
     }
 
+    [Fact]
+    public void ExperimentalPaksAreReportedByTheirUtocHash()
+    {
+        string hashes = Path.Combine(_plugin, "PakHashes.txt");
+        Assert.Equal("", PakUpdate.ExperimentalReport(_paks, hashes, _log));
+
+        byte[] b = Bytes("toc b"), a = Bytes("toc a");
+        File.WriteAllBytes(Path.Combine(_paks, "OVS_Experimental_60_P.utoc"), b);
+        File.WriteAllBytes(Path.Combine(_paks, "OVS_Experimental_50_P.utoc"), a);
+        File.WriteAllBytes(Path.Combine(_paks, "OVS_Experimental_50_P.ucas"), Bytes("chunks"));
+        File.WriteAllBytes(Path.Combine(_paks, "OVS_P.utoc"), Bytes("not experimental"));
+        Assert.Equal($"OVS_Experimental_50_P={Sha(a)};OVS_Experimental_60_P={Sha(b)}", PakUpdate.ExperimentalReport(_paks, hashes, _log));
+
+        // The hash cache learned them: an unchanged size and modified time is not hashed again.
+        string path = Path.Combine(_paks, "OVS_Experimental_50_P.utoc");
+        var stamp = File.GetLastWriteTimeUtc(path);
+        File.WriteAllBytes(path, Bytes("toc A"));
+        File.SetLastWriteTimeUtc(path, stamp);
+        Assert.StartsWith($"OVS_Experimental_50_P={Sha(a)};", PakUpdate.ExperimentalReport(_paks, hashes, _log));
+        Assert.Equal("", PakUpdate.ExperimentalReport(Path.Combine(_root, "missing"), hashes, _log));
+    }
+
     // Download and install
 
     [Fact]
