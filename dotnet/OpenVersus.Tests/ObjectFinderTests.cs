@@ -171,6 +171,22 @@ public class ObjectFinderTests
     }
 
     [Fact]
+    public void FindDefaultObjectTakesOnlyTheExactClassesDefaultObject()
+    {
+        var game = new FakeGame();
+        nint statics = game.AddClass("GameplayStatics");
+        nint derived = game.AddClass("GameplayStaticsDerived", super: statics);
+        game.AddInstance(statics, "Live");
+        game.AddInstance(derived, "Default__GameplayStaticsDerived", defaultObject: true);
+        nint cdo = game.AddInstance(statics, "Default__GameplayStatics", defaultObject: true);
+        var finder = game.Finder();
+
+        Assert.Equal(cdo, finder.FindDefaultObject(statics));
+        Assert.Equal(0, finder.FindDefaultObject(game.AddClass("NoDefault")));
+        Assert.Equal(0, finder.FindDefaultObject(0));
+    }
+
+    [Fact]
     public void FindFunctionRequiresAUFunctionVTableAndTheDeclaringClass()
     {
         var game = new FakeGame();
