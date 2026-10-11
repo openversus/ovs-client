@@ -94,6 +94,21 @@ internal static class DefaultConfig
             Once a second during a match, writes the rollback session's statistics to a log in logs/,
             one file per match, named for the match and your opponents.
             """,
+        [Settings.Rows.RollbackNode] = """
+            TL;DR: Needed for matches that run directly between players. Leave it on.
+
+            Starts the OpenVersus rollback node, a small program that runs beside the game and
+            closes with it. When the server runs a match on the players' own machines instead of
+            on a server, the game connects to this node. Without it, those matches can't be played.
+            """,
+        [Settings.Rows.P2PRegistry] = """
+            TL;DR: Where the rollback node finds the other player for a match run between players. Leave it.
+
+            A host name (or an IP address). The OpenVersus server points this name wherever the
+            service runs. Empty turns direct matches off: every such match goes through an OpenVersus
+            relay instead.
+            """,
+        [Settings.Rows.P2PRegistryPort] = "The UDP port of that service.",
         [Settings.Rows.SigCheckPattern] = "The pak signature check (PakLoader).",
         [Settings.Rows.EndpointLoaderPattern] = "Where the game stores its game-server address ([Server.Game]).",
         [Settings.Rows.ProdEndpointLoaderPattern] = "Where the game stores its WB network address ([Server.Prod]).",
@@ -113,6 +128,10 @@ internal static class DefaultConfig
         [Settings.Rows.DebugLogging] = "With LogLevel = 0, logs at debug level. Otherwise it does nothing.",
         [Settings.Rows.NonMvsPatching] = "Silences the warning shown when the mod is loaded by something that isn't MultiVersus.",
         [Settings.Rows.CountSunsetCalls] = "For profiling; leave it off. Counts calls to the end-of-service check and logs them once a minute.",
+        [Settings.Rows.ReleaseOwner] = "For testing updates from a fork; leave it. Game content only downloads from this GitHub account's releases.",
+        [Settings.Rows.MatchRulesLog] = "For testing match rules; leave it off. Writes logs/MatchRules.log: each match's settings, stock-rule deaths and every friendly-fire hit.",
+        [Settings.Rows.FriendlyFireOffline] = "For testing; leave it off. Friendly fire in offline matches (Local Play, the Lab) without the mutator. Online matches only ever get it from the server.",
+        [Settings.Rows.LabGameSpeedPercent] = "For testing; leave it at 100. Game speed in percent for offline matches (Local Play, the Lab): 120 runs them 20% faster. Online matches are never changed.",
         [Settings.Rows.ServerUrl] = """
             TL;DR: The OpenVersus server.
 
@@ -158,7 +177,8 @@ internal static class DefaultConfig
             {
                 Line("");
                 CommentLines(Comments[def]);
-                string value = def.Kind == SettingKind.Bool ? def.Default : SettingsMigration.Quote(def.Default);
+                // Booleans and integers are bare TOML values; everything else is a string.
+                string value = def.Kind is SettingKind.Bool or SettingKind.Int ? def.Default : SettingsMigration.Quote(def.Default);
                 Line($"{def.Key} = {value}");
             }
         }

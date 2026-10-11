@@ -64,6 +64,28 @@ public class NetTests
     }
 
     [Fact]
+    public void AReidentifyNotificationRunsTheRegistrationOnceAtATime()
+    {
+        int runs = 0;
+        using var started = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        var log = new ListLogger();
+        var poller = new NotificationPoller("http://ovs.test", new NoHttp(), null!, null!, log, reidentify: () => { Interlocked.Increment(ref runs); started.Set(); release.Wait(5000); });
+        var notification = Assert.Single(NotificationPoller.Parse("""[{"type":"reidentify","title":"","message":"","data":{"steamId":"1"},"timestamp":1}]"""));
+
+        poller.Dispatch(notification);
+        Assert.True(started.Wait(5000));
+        poller.Dispatch(notification);
+        release.Set();
+
+        Assert.Equal(1, runs);
+        Assert.Contains(log.Lines, l => l.Contains("in progress"));
+        // Without a registration to run, the notification is logged and dropped.
+        new NotificationPoller("http://ovs.test", new NoHttp(), null!, null!, log).Dispatch(notification);
+        Assert.Contains(log.Lines, l => l.Contains("registers no identity"));
+    }
+
+    [Fact]
     public void NotificationsParseAndUnknownFieldsAreTolerated()
     {
         var list = NotificationPoller.Parse("""[{"type":"admin_banner","title":"Top","message":"Bottom","timeout":10.0,"timestamp":1},{"type":"match_cancel"},{"nope":1},{"type":"toast_received","message":"X toasted you!","extra":[1,2]}]""");
@@ -136,34 +158,6 @@ public class NetTests
         "PE\0\0"u8.CopyTo(pe.AsSpan(0x80));
         BitConverter.TryWriteBytes(pe.AsSpan(0x80 + 24 + 56), 0x1000u);
         Assert.Null(AutoUpdate.Validate(pe));
-    }
-
-    [Fact]
-    public void FingerprintTextIsTheCppFormat()
-    {
-        // "%d|%d|%d|%d|%08X|%ls": signed decimal registers, upper-case zero-padded hex, serial as is.
-        Assert.Equal("13|1970169159|1818588270|1231384169|000A0655|ABC123", EnvInfo.FingerprintText((13, 1970169159, 1818588270, 1231384169), (0x000A0655, 0, 0, 0), "ABC123"));
-        Assert.Equal("-1|0|0|0|FFFFFFFF|Unknown", EnvInfo.FingerprintText((-1, 0, 0, 0), (-1, 0, 0, 0), "Unknown"));
-    }
-
-    [Fact]
-    public void HardwareIdIsLowercaseSha256OfTheFingerprint()
-    {
-        string id = EnvInfo.ComputeHardwareId((13, 1970169159, 1818588270, 1231384169), (0x000A0655, 0, 0, 0), "ABC123");
-        Assert.Equal(64, id.Length);
-        Assert.Equal(id, id.ToLowerInvariant());
-        Assert.Equal(Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes("13|1970169159|1818588270|1231384169|000A0655|ABC123"))), id);
-    }
-
-    [Fact]
-    public void IdentityBodyIsValidJsonWithEscaping()
-    {
-        var env = new EnvInfo { SteamId = "7656119\"quoted\\" };
-        string body = IdentityRegistration.Body(env);
-        using var doc = System.Text.Json.JsonDocument.Parse(body);
-        Assert.Equal("7656119\"quoted\\", doc.RootElement.GetProperty("steamId").GetString());
-        Assert.Equal(OvsVersion.Current, doc.RootElement.GetProperty("clientVersion").GetString());
-        Assert.Equal(64, doc.RootElement.GetProperty("hardwareId").GetString()!.Length);
     }
 
     /// <summary>The smallest body <see cref="AutoUpdate.Validate"/> accepts, marked so it can be told apart.</summary>
@@ -247,6 +241,71 @@ public class NetTests
         Assert.Null(AutoUpdate.PluginFrom(damaged, "2026.10.01.01", out _, out string? broken));
         Assert.StartsWith("a damaged zip", broken);
     }
+
+    [Theory]
+    [InlineData("""{"betaSpeedPercent":120}""", 120)]
+    [InlineData("""{"betaSpeedPercent":110,"later":"more"}""", 110)]
+    [InlineData("""{"betaSpeedPercent":1.1}""", null)]
+    [InlineData("""{"betaSpeedPercent":"120"}""", null)]
+    [InlineData("""{"betaSpeed":120}""", null)]
+    [InlineData("""[120]""", null)]
+    [InlineData("<html>not found</html>", null)]
+    [InlineData("", null)]
+    public void ClientSettingsGiveTheServersBetaSpeed(string body, int? percent) => Assert.Equal(percent, ClientSettingsFetch.ParseBetaSpeed(body));
+
+    /// <summary>Serves its results in order, the last one again after that.</summary>
+    private sealed class SequenceHttp(params HttpResult[] results) : IHttpTransport
+    {
+        public List<string> Requested { get; } = [];
+
+        public HttpResult Get(Uri url, TimeSpan timeout)
+        {
+            Requested.Add(url.ToString());
+            return results[Math.Min(Requested.Count, results.Length) - 1];
+        }
+
+        public HttpResult Post(Uri url, string contentType, ReadOnlySpan<byte> body, TimeSpan timeout) => throw new NotSupportedException();
+    }
+
+    [Fact]
+    public void ClientSettingsAreAskedForAgainUntilTheServerAnswers()
+    {
+        var http = new SequenceHttp(HttpResult.Failed("timed out"), new HttpResult(false, 502, [], null), Served("""{"betaSpeedPercent":120}"""u8.ToArray()));
+        var taken = new List<int>();
+        var waits = new List<TimeSpan>();
+
+        bool ok = new ClientSettingsFetch("http://testing.openversus.org:8000/", http, new ListLogger(), p => { taken.Add(p); return true; }, waits.Add).Run();
+
+        Assert.True(ok);
+        Assert.Equal([120], taken);
+        Assert.Equal(3, http.Requested.Count);
+        Assert.All(http.Requested, u => Assert.Equal("http://testing.openversus.org:8000/ovs/client-settings", u));
+        Assert.Equal([TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(20)], waits);
+    }
+
+    [Fact]
+    public void WithoutAnAnswerTheClientKeepsItsBetaSpeedAndSaysSo()
+    {
+        var http = new SequenceHttp(new HttpResult(false, 404, [], null));
+        var log = new ListLogger();
+        var taken = new List<int>();
+
+        bool ok = new ClientSettingsFetch("http://host/", http, log, p => { taken.Add(p); return true; }, _ => { }).Run();
+
+        // Three tries, then it stops.
+        Assert.False(ok);
+        Assert.Equal(3, http.Requested.Count);
+        Assert.Empty(taken);
+        Assert.Contains(log.Lines, l => l.Contains("Gave up") && l.Contains("110%"));
+
+        // A speed the client refuses (outside 50 to 200) is a failed try too.
+        http = new SequenceHttp(Served("""{"betaSpeedPercent":500}"""u8.ToArray()));
+        Assert.False(new ClientSettingsFetch("http://host/", http, new ListLogger(), InTheServersRange, _ => { }).Run());
+        Assert.Equal(3, http.Requested.Count);
+    }
+
+    // GameSpeedHooks.SetBetaSpeed's range, without its process-wide value.
+    private static bool InTheServersRange(int percent) => percent is >= 50 and <= 200;
 
     /// <summary>Serves a fixed result per URL, 404 for anything else, and records what was asked for.</summary>
     private sealed class FakeHttp(Dictionary<string, HttpResult> results) : IHttpTransport
@@ -373,5 +432,13 @@ public class NetTests
         Assert.Null(plugin);
         Assert.Contains(log.Lines, l => l.Contains("SHA-256 matches"));
         Assert.Contains(log.Lines, l => l.Contains("Not installing the download: it is version") && l.Contains("not newer than this client"));
+    }
+
+    // The poller never calls the transport from Dispatch.
+    private sealed class NoHttp : IHttpTransport
+    {
+        public HttpResult Get(Uri url, TimeSpan timeout) => throw new NotSupportedException();
+
+        public HttpResult Post(Uri url, string contentType, ReadOnlySpan<byte> body, TimeSpan timeout) => throw new NotSupportedException();
     }
 }

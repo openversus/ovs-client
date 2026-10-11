@@ -427,10 +427,11 @@ FodyWeavers.xsd
 *.vsix
 
 # Local-only stuff
-/.codegraph/
+.codegraph/
 codegraph.json
 graphify-out/
 .graphifyignore
+.memorymesh/
 /local/
 .idea/
 

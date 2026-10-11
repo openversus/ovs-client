@@ -23,6 +23,25 @@ public interface IHttpTransport
     HttpResult Get(Uri url, TimeSpan timeout);
     /// <summary>Sends a POST of <paramref name="body"/> as <paramref name="contentType"/>. A request that gets no response comes back as a result with <see cref="HttpResult.Ok"/> false, not as an exception.</summary>
     HttpResult Post(Uri url, string contentType, ReadOnlySpan<byte> body, TimeSpan timeout);
+
+    /// <summary>
+    /// Sends a GET and writes a 2xx body to <paramref name="destination"/> as it arrives, calling
+    /// <paramref name="progress"/> with each chunk's size, for downloads too big to hold in memory.
+    /// The result's <see cref="HttpResult.Body"/> is empty for a 2xx and holds an error page otherwise.
+    /// <paramref name="timeout"/> bounds each step (connect, each read), not the whole download.
+    /// </summary>
+    HttpResult Download(Uri url, Stream destination, TimeSpan timeout, Action<int>? progress = null)
+    {
+        var result = Get(url, timeout);
+        if (!result.Ok)
+        {
+            return result;
+        }
+
+        destination.Write(result.Body);
+        progress?.Invoke(result.Body.Length);
+        return result with { Body = [] };
+    }
 }
 
 /// <summary>The server URL as the ini gives it, turned into request URLs.</summary>

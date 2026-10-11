@@ -1,3 +1,5 @@
+using System.Buffers.Binary;
+using System.Text;
 using OpenVersus.Config;
 using OpenVersus.Memory;
 using Microsoft.Extensions.Logging;
@@ -39,19 +41,8 @@ public sealed class PatternResolver(GameImage image, PatternCache cache, Setting
     /// </summary>
     public PatternHit Find(string name, string text)
     {
-        if (string.IsNullOrWhiteSpace(text))
+        if (!TryParse(name, text, out var pattern))
         {
-            log.Error($"{name}: no pattern in the ini");
-            return PatternHit.Missing(name, text);
-        }
-        BytePattern pattern;
-        try
-        {
-            pattern = BytePattern.Parse(text);
-        }
-        catch (FormatException e)
-        {
-            log.Error($"{name}: bad pattern ({e.Message})");
             return PatternHit.Missing(name, text);
         }
 
@@ -78,5 +69,101 @@ public sealed class PatternResolver(GameImage image, PatternCache cache, Setting
         cache.Save(text, (uint)offset);
         log.Debug($"{name} pattern found at 0x{found:X} (rva 0x{offset:X})");
         return new PatternHit(name, text, found, false);
+    }
+
+    /// <summary>
+    /// Finds, among every match of <paramref name="text"/>, the one whose RIP-relative instruction at
+    /// <paramref name="operandOffset"/> (seven bytes, the disp32 last: <c>lea r64, [rip + disp32]</c>)
+    /// points at <paramref name="utf16"/> as a NUL-terminated UTF-16 string. For a function that differs
+    /// from its siblings only in the string it names, such as the Store's two event recorders. Cached
+    /// under the pattern and the string together, and the cached address is checked the same way.
+    /// </summary>
+    public PatternHit FindNaming(string name, string text, int operandOffset, string utf16)
+    {
+        if (!TryParse(name, text, out var pattern))
+        {
+            return PatternHit.Missing(name, text);
+        }
+
+        string key = $"{text} -> {utf16}";
+        uint cached = cache.Load(key);
+        if (cached != 0 && cached < (uint)Image.Size && Names(Image.Bytes, pattern, (int)cached, operandOffset, utf16))
+        {
+            nint at = Image.Address(cached);
+            log.Debug($"{name} pattern naming {utf16} cached at 0x{at:X} (rva 0x{cached:X})");
+            return new PatternHit(name, text, at, true);
+        }
+        if (cached != 0)
+        {
+            log.Warn($"{name}: cached rva 0x{cached:X} no longer matches or names {utf16}; rescanning");
+        }
+
+        int offset = FindNaming(Image.Bytes, pattern, operandOffset, utf16);
+        if (offset < 0)
+        {
+            log.Error($"{name}: no match of the pattern names {utf16}");
+            cache.Save(key, 0);
+            return PatternHit.Missing(name, text);
+        }
+        nint found = Image.Address((uint)offset);
+        cache.Save(key, (uint)offset);
+        log.Debug($"{name} pattern naming {utf16} found at 0x{found:X} (rva 0x{offset:X})");
+        return new PatternHit(name, text, found, false);
+    }
+
+    /// <summary>The first match of <paramref name="pattern"/> in <paramref name="image"/> that <see cref="Names"/> <paramref name="utf16"/>, or -1.</summary>
+    internal static int FindNaming(ReadOnlySpan<byte> image, BytePattern pattern, int operandOffset, string utf16)
+    {
+        foreach (int at in PatternScanner.FindAll(image, pattern))
+        {
+            if (Names(image, pattern, at, operandOffset, utf16))
+            {
+                return at;
+            }
+        }
+        return -1;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="pattern"/> matches <paramref name="image"/> at <paramref name="at"/> and the
+    /// RIP-relative operand <paramref name="operandOffset"/> bytes in points at <paramref name="utf16"/>,
+    /// NUL-terminated, inside the image.
+    /// </summary>
+    internal static bool Names(ReadOnlySpan<byte> image, BytePattern pattern, int at, int operandOffset, string utf16)
+    {
+        if (!pattern.MatchesAt(image, at))
+        {
+            return false;
+        }
+
+        int next = at + operandOffset + 7;
+        if (next > image.Length)
+        {
+            return false;
+        }
+
+        long target = next + BinaryPrimitives.ReadInt32LittleEndian(image[(next - 4)..]);
+        byte[] expected = Encoding.Unicode.GetBytes(utf16 + "\0");
+        return target >= 0 && target + expected.Length <= image.Length && image.Slice((int)target, expected.Length).SequenceEqual(expected);
+    }
+
+    private bool TryParse(string name, string text, out BytePattern pattern)
+    {
+        pattern = null!;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            log.Error($"{name}: no pattern in the ini");
+            return false;
+        }
+        try
+        {
+            pattern = BytePattern.Parse(text);
+            return true;
+        }
+        catch (FormatException e)
+        {
+            log.Error($"{name}: bad pattern ({e.Message})");
+            return false;
+        }
     }
 }

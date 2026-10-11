@@ -377,6 +377,28 @@ public sealed class ObjectFinder(GameImage image, IMemory memory, IGameNames nam
     /// <summary>Any live instance of <paramref name="uclass"/> or a subclass, skipping class default objects.</summary>
     public nint FindInstanceOfClass(nint uclass) => FindInstancesOfClass(uclass).FirstOrDefault();
 
+    /// <summary>
+    /// The class default object of exactly <paramref name="uclass"/> (Default__&lt;Class&gt;), or 0. A static
+    /// UFunction, such as a Kismet library's, is called through ProcessEvent on its class's default object.
+    /// </summary>
+    public nint FindDefaultObject(nint uclass)
+    {
+        if (uclass == 0)
+        {
+            return 0;
+        }
+
+        foreach (var h in AllObjects())
+        {
+            if (h.IsDefaultObject && h.ClassPrivate == uclass)
+            {
+                return h.Address;
+            }
+        }
+
+        return 0;
+    }
+
     /// <summary>Every live instance of <paramref name="uclass"/> or a subclass, skipping class default objects.</summary>
     public IEnumerable<nint> FindInstancesOfClass(nint uclass)
     {

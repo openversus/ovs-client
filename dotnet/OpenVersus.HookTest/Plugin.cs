@@ -3,6 +3,7 @@ using OpenVersus;
 using OpenVersus.Hooking;
 using OpenVersus.Memory;
 using OpenVersus.Native;
+using OpenVersus.P2P;
 using Microsoft.Extensions.Logging;
 
 namespace OpenVersus.HookTest;
@@ -17,6 +18,7 @@ public static unsafe class Plugin
     private static delegate* unmanaged<long, long> s_originalCall;
     private static delegate* unmanaged<long, long> s_originalJump;
     private static delegate* unmanaged<long, long> s_originalGuard;
+    private static delegate* unmanaged<long, long> s_originalTable;
 
     [UnmanagedCallersOnly(EntryPoint = "InitializeASI")]
     public static void InitializeASI()
@@ -33,7 +35,7 @@ public static unsafe class Plugin
                 captured.Info("process-exit hook fired");
                 captured.Close();
             };
-            Run(log);
+            Run(log, Path.GetDirectoryName(pluginPath)!);
             log.Flush();
         }
         catch (Exception e)
@@ -54,9 +56,12 @@ public static unsafe class Plugin
     private static long JumpHook(long x) => HookGuard.Run("jmp", x, static x => s_originalJump(x) + 1000, -1L);
 
     [UnmanagedCallersOnly]
+    private static long TableHook(long x) => HookGuard.Run("table", x, static x => s_originalTable(x) + 100, -1L);
+
+    [UnmanagedCallersOnly]
     private static long GuardHook(long x) => HookGuard.Run("guard", x, static x => throw new InvalidOperationException($"deliberate failure for {x}"), 77L);
 
-    private static void Run(ILogger log)
+    private static void Run(ILogger log, string pluginDirectory)
     {
         byte* image = (byte*)Kernel32.GetModuleHandle(null);
         ReadOnlySpan<byte> bytes = PeImage.ImageInMemory(image);
@@ -90,6 +95,9 @@ public static unsafe class Plugin
             }
         }
 
+        SwapTableSlot(log, image, bytes);
+        RunNode(log, pluginDirectory);
+
         // The guarded read must refuse an unmapped address instead of taking the process down.
         bool unmapped = CodeWriter.TryRead(0x10, out long _);
         bool mapped = CodeWriter.TryRead((nint)image, out ushort mz);
@@ -103,6 +111,98 @@ public static unsafe class Plugin
         log.Info($"trampoline page 0x{page:X} protect 0x{mbi.Protect:X} ({(mbi.Protect == Trampoline.RestingProtection ? "as expected" : "WRONG")})");
 
         log.Info("done");
+    }
+
+    /// <summary>
+    /// When node binaries sit beside the plugin (run.sh copies the Linux build in when it has been
+    /// published), starts the rollback node the way the mod does (under Wine: the Linux build through
+    /// start.exe), waits for its port, keeps it alive for a few seconds and stops it. run.sh then checks
+    /// that the node process ends once the keepalives stop.
+    /// </summary>
+    private static void RunNode(ILogger log, string pluginDirectory)
+    {
+        if (!File.Exists(NodeFiles.LinuxPath(pluginDirectory)) && !File.Exists(NodeFiles.WindowsPath(pluginDirectory)))
+        {
+            log.Info("node: no binaries beside the plugin; skipped");
+            return;
+        }
+
+        using var node = new RollbackNode(pluginDirectory, "http://127.0.0.1:1", "127.0.0.1:41235", Wine.IsWine, log, Wine.IsWine ? Wine.UnixPath : null);
+        if (!node.Start())
+        {
+            log.Error("node: WRONG (did not start)");
+            return;
+        }
+
+        ushort port = node.WaitForPort(TimeSpan.FromSeconds(30));
+        log.Info(port == 0 ? "node: WRONG (no port reported in 30 s)" : $"node: port {port} reported");
+        // Longer than the node's keepalive timeout (10 s): a node still running at the end of this wait was kept
+        // alive by the keepalives, and the exit delay run.sh measures after Stop is the timeout alone.
+        Thread.Sleep(TimeSpan.FromSeconds(ParentKeepAlive.TimeoutSeconds + 5));
+        node.Stop();
+        log.Info("node: stopped");
+    }
+
+    /// <summary>
+    /// Finds the host's function table in read-only data by the address of thrice() it holds, swaps
+    /// that slot for <see cref="TableHook"/>, then tries a second swap that still expects thrice(),
+    /// which must be refused and leave the slot as it is.
+    /// </summary>
+    private static void SwapTableSlot(ILogger log, byte* image, ReadOnlySpan<byte> bytes)
+    {
+        int at = PatternScanner.FindFirst(bytes, BytePattern.Parse("49 BB 08 07 06 05 04 03 02 01 48 8D 04 49 C3"));
+        if (at < 0)
+        {
+            log.Error("thrice() not found");
+            return;
+        }
+
+        nint thrice = (nint)image + at;
+        nint slot = 0;
+        foreach (var s in PeImage.Sections(PeImage.HeadersInMemory(image)))
+        {
+            if (!s.IsReadOnlyData())
+            {
+                continue;
+            }
+
+            var words = new ReadOnlySpan<nint>(image + s.Rva, (int)(s.VirtualSize / (uint)sizeof(nint)));
+            int i = words.IndexOf(thrice);
+            if (i >= 0)
+            {
+                slot = (nint)(image + s.Rva) + i * sizeof(nint);
+                break;
+            }
+        }
+
+        if (slot == 0)
+        {
+            log.Error($"no read-only slot holds thrice() at 0x{thrice:X}");
+            return;
+        }
+
+        nint hook = (nint)(delegate* unmanaged<long, long>)&TableHook;
+        try
+        {
+            CodeWriter.SwapPointer(slot, thrice, hook);
+            s_originalTable = (delegate* unmanaged<long, long>)thrice;
+            log.Info($"table slot 0x{slot:X} swapped from 0x{thrice:X} to 0x{hook:X}");
+        }
+        catch (PatchException e)
+        {
+            log.Error($"table slot swap failed: {e.Message}");
+            return;
+        }
+
+        try
+        {
+            CodeWriter.SwapPointer(slot, thrice, thrice);
+            log.Error("a stale swap was accepted");
+        }
+        catch (PatchException)
+        {
+            log.Info(*(nint*)slot == hook ? "stale swap refused, slot unchanged" : "stale swap refused, but the slot CHANGED");
+        }
     }
 
     private static void Redirect(ILogger log, byte* image, ReadOnlySpan<byte> bytes, string pattern, nint hook, out delegate* unmanaged<long, long> original)

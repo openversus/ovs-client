@@ -37,6 +37,36 @@ public static unsafe class CodeWriter
         }
     }
 
+    /// <summary>
+    /// Replaces the pointer at <paramref name="slot"/> (a vtable entry, say) with <paramref name="replacement"/>
+    /// if it still holds <paramref name="expected"/>, in one atomic exchange, or throws a
+    /// <see cref="PatchException"/>. Another thread may be reading the slot to make a call, and
+    /// a byte-by-byte copy could hand it half of each pointer.
+    /// </summary>
+    public static void SwapPointer(nint slot, nint expected, nint replacement)
+    {
+        if (slot % sizeof(nint) != 0)
+        {
+            throw new PatchException($"pointer slot 0x{slot:X} is not aligned; not patching");
+        }
+
+        if (!Kernel32.VirtualProtect(slot, (nuint)sizeof(nint), Kernel32.PAGE_READWRITE, out uint oldProtect))
+        {
+            throw new PatchException($"VirtualProtect error {Marshal.GetLastPInvokeError()} at 0x{slot:X}");
+        }
+
+        nint found = Interlocked.CompareExchange(ref *(nint*)slot, replacement, expected);
+        if (!Kernel32.VirtualProtect(slot, (nuint)sizeof(nint), oldProtect, out _))
+        {
+            throw new PatchException($"swapped, but protection not restored (VirtualProtect error {Marshal.GetLastPInvokeError()}) at 0x{slot:X}");
+        }
+
+        if (found != expected)
+        {
+            throw new PatchException($"expected 0x{expected:X} at 0x{slot:X}, found 0x{found:X}; not patching");
+        }
+    }
+
     /// <summary>Writes only if the bytes there are <paramref name="expected"/>; throws a <see cref="PatchException"/> otherwise.</summary>
     public static void WriteIf(nint target, ReadOnlySpan<byte> expected, ReadOnlySpan<byte> bytes, bool code)
     {
@@ -54,6 +84,27 @@ public static unsafe class CodeWriter
         }
     }
 
+    /// <summary>Writes only if the bytes there match <paramref name="expected"/> through its wildcards; throws a <see cref="PatchException"/> otherwise.</summary>
+    public static void WriteIf(nint target, BytePattern expected, ReadOnlySpan<byte> bytes, bool code)
+    {
+        Expect(target, expected);
+        Write(target, bytes, code);
+    }
+
+    /// <summary>
+    /// Throws a <see cref="PatchException"/> unless the bytes at <paramref name="target"/> match
+    /// <paramref name="expected"/>, a wildcard standing for any byte: for code whose displacements
+    /// differ between the game's builds.
+    /// </summary>
+    public static void Expect(nint target, BytePattern expected)
+    {
+        var current = new ReadOnlySpan<byte>((void*)target, expected.Length);
+        if (!expected.MatchesAt(current, 0))
+        {
+            throw new PatchException($"expected {expected} at 0x{target:X}, found {Convert.ToHexString(current)}; not patching");
+        }
+    }
+
     /// <summary>An unguarded copy of <paramref name="length"/> bytes at <paramref name="address"/>, for memory known to be mapped, such as the image.</summary>
     public static byte[] Read(nint address, int length) => new ReadOnlySpan<byte>((void*)address, length).ToArray();
 
@@ -65,4 +116,17 @@ public static unsafe class CodeWriter
 
     /// <summary>One unmanaged value through <see cref="ProcessMemory"/>, or default and false. Never throws.</summary>
     public static bool TryRead<T>(nint address, out T value) where T : unmanaged => ProcessMemory.Instance.TryRead(address, out value);
+
+    /// <summary>
+    /// A write into the game's heap that cannot take the process down, the counterpart of <see cref="TryRead"/>:
+    /// WriteProcessMemory, which reports an unmapped or unwritable page instead of faulting (NativeAOT turns an
+    /// access violation outside the null page into a fail-fast). For data, such as a field of a game object;
+    /// code goes through <see cref="Write"/>. False when any of the range could not be written. Never throws.
+    /// </summary>
+    public static bool TryWrite(nint address, ReadOnlySpan<byte> bytes) =>
+        Kernel32.WriteProcessMemory(Kernel32.GetCurrentProcess(), address, bytes, (nuint)bytes.Length, out nuint written) && written == (nuint)bytes.Length;
+
+    /// <summary>One unmanaged value through <see cref="TryWrite(nint, ReadOnlySpan{byte})"/>. Never throws.</summary>
+    public static bool TryWrite<T>(nint address, T value) where T : unmanaged =>
+        TryWrite(address, MemoryMarshal.AsBytes(MemoryMarshal.CreateReadOnlySpan(ref value, 1)));
 }

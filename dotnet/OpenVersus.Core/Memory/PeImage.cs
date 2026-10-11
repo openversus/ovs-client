@@ -72,6 +72,80 @@ public static unsafe class PeImage
         return (BitConverter.ToUInt32(headers[entry..]), BitConverter.ToUInt32(headers[(entry + 4)..]));
     }
 
+    /// <summary>
+    /// The RVA of the delay-load import address table slot through which the image calls <paramref name="function"/>
+    /// of <paramref name="dll"/>, or 0 when it has no such delay-load import. <paramref name="image"/> is the mapped
+    /// image (<see cref="ImageInMemory"/> or <see cref="MapFile"/>), addressed by RVA. The loader writes the export's
+    /// address into the slot the first time the image calls through it; until then the slot holds the delay-load
+    /// helper's thunk. PE32+ only (8-byte entries), and only RVA-based descriptors (every linker since VS 2005).
+    /// </summary>
+    public static uint DelayImportSlot(ReadOnlySpan<byte> image, string dll, string function)
+    {
+        var (directory, _) = DataDirectory(image, 13);
+        if (directory == 0)
+        {
+            return 0;
+        }
+
+        for (int d = (int)directory; d + 32 <= image.Length; d += 32)
+        {
+            uint attributes = BitConverter.ToUInt32(image[d..]);
+            uint nameRva = BitConverter.ToUInt32(image[(d + 4)..]);
+            uint addressTable = BitConverter.ToUInt32(image[(d + 12)..]);
+            uint nameTable = BitConverter.ToUInt32(image[(d + 16)..]);
+            if (nameRva == 0)
+            {
+                break;
+            }
+
+            if ((attributes & 1) == 0 || !CString(image, nameRva).Equals(dll, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            for (int i = 0; ; i++)
+            {
+                int entry = (int)nameTable + (i * 8);
+                if (entry < 0 || entry + 8 > image.Length)
+                {
+                    break;
+                }
+
+                ulong name = BitConverter.ToUInt64(image[entry..]);
+                if (name == 0)
+                {
+                    break;
+                }
+
+                // The high bit marks an import by ordinal; a name entry points at a hint (2 bytes) and the name.
+                if ((name >> 63) == 0 && name + 2 < (ulong)image.Length && CString(image, (uint)name + 2) == function)
+                {
+                    return addressTable + (uint)(i * 8);
+                }
+            }
+        }
+
+        return 0;
+    }
+
+    /// <summary>The ASCII string at <paramref name="rva"/>, up to its terminator or the image's end (at most 512 bytes).</summary>
+    private static string CString(ReadOnlySpan<byte> image, uint rva)
+    {
+        if (rva >= image.Length)
+        {
+            return "";
+        }
+
+        var span = image[(int)rva..];
+        int end = span.IndexOf((byte)0);
+        if (end < 0 || end > 512)
+        {
+            end = Math.Min(span.Length, 512);
+        }
+
+        return System.Text.Encoding.ASCII.GetString(span[..end]);
+    }
+
     /// <summary>Where <paramref name="rva"/> lies in the file, or -1 when no section holds it.</summary>
     public static long FileOffset(IReadOnlyList<PeSection> sections, uint rva)
     {

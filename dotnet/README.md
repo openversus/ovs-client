@@ -11,6 +11,7 @@
 - Supports using custom in-game notification dialogs
 - Restores the original post-match behavior: after the final stock, everyone still in the match sees what the winners do again, instead of them standing frozen until the lobby
 - Auto-update: at launch, checks for a newer version and installs it, then closes the game so the next launch runs the update (`AutoUpdate`, on by default)
+- Rollback node: runs the OpenVersus rollback node beside the game and closes it with the game, for matches the server runs directly between the players' machines instead of on a server (`RollbackNode`, on by default; see [Rollback node](#rollback-node))
 
 ### How to use:
 Comprehensive install instructions are available in the `readme.txt` file included in the release zip file. An installer will be provided with a later build, but for right now, it's just a simple drag & drop.
@@ -36,6 +37,38 @@ client updating itself to this one (from a legacy plain-http `ServerUrl`), which
 `plugins/OpenVersus/` and converted the ini; and the updater refusing an offer whose built-in
 version was not newer. Never tested on macOS.
 
+## Rollback node
+
+For a match the server runs between the players' own machines (P2P rollback), the game is told to
+connect to `127.0.0.1` and a port, where the OpenVersus rollback node (`OVS.Rollback.Node`, from the
+ovs-rollback-server repository) must be listening. The mod runs that node:
+
+- At startup, when `RollbackNode` is on and the game's server connection points at an OpenVersus
+  server, it starts `node/win-x64/OVS.Rollback.Node.exe` from the mod's folder (`plugins/OpenVersus/`).
+  Under Proton or Wine it starts `node/linux-x64/OVS.Rollback.Node` instead, through Wine's
+  `start /unix`, so the node runs natively on Linux and the Steam Deck; the Windows build runs under
+  Wine only when the Linux one is missing.
+- The node is told to take any free UDP port and writes it to `node/port-<game pid>.txt`; the mod
+  reports that port to the server with the player's identity (`nodePort` in `/api/identify`), and the
+  server names it in the match-found notification. A node that cannot be started leaves the port at
+  0 and the server uses its default.
+- Everything the node needs travels on its command line (`--port-file`, `--parent-token`,
+  `--parent-timeout`, `--server`, `--rendezvous`), because Wine does not pass the Windows environment
+  to a Linux program.
+- `[Server.Game] P2PRegistry` and `P2PRegistryPort` name the rendezvous service the nodes find each
+  other through (defaults `p2p.openversus.org` and 41235). The host is a DNS name the server side
+  points wherever the service runs, so moving it needs no client release; the port has its own row
+  for the same reason, and a value that is not a port falls back to 41235 with a warning. An empty
+  host sends every P2P match through a relay. The node resolves the name once at startup, so a change
+  takes effect at the next launch of the game.
+- The mod sends the node a keepalive every second (its P2P protocol's Parent message, with a token
+  only this launch knows). On Windows the node is also in a kill-on-close job, so a game crash ends it
+  at once; through `start /unix` it is not the mod's child, and the keepalive stopping is what ends
+  it, within ten seconds. A normal exit stops it directly.
+
+The node binaries are not yet part of the release or the updater (`AutoUpdate` installs the `.asi`
+only); that is an open item before P2P matches are switched on for players.
+
 ## Layout
 
 - `OpenVersus/`: the `.asi` itself: the `InitializeASI` export the loader calls, and
@@ -55,6 +88,9 @@ version was not newer. Never tested on macOS.
   - `Hooks/`: one class per patch or hook; `Hooking/HookGuard` keeps exceptions out of the game.
   - `Memory/`: byte patterns, call-site redirects, trampolines, code writes, guarded reads.
   - `Net/`: HTTP, the notification poller, auto-update, JSON.
+  - `P2P/`: the rollback node the mod runs beside the game (`RollbackNode`): how it is started on
+    Windows and under Proton, the file it reports its port in, and the keepalive that lets it
+    outlive a crashed game by seconds rather than forever.
   - `Identity/`: the Steam/Epic identity and hardware fingerprint sent to the server.
   - `NetStats/`: the per-match rollback statistics log.
   - `Native/`: P/Invoke declarations, with Windows SDK names.
@@ -232,8 +268,13 @@ What each key does is documented on its row in `Config/Settings.cs` (`Settings.R
 with the C++ client:
 
 - Added: `[Patches] PostMatchFreeze`, on by default, with its pattern under `[Patterns.MVS]`; and,
-  off by default, `[Patches] SunsetCallers`, `[Settings.Debug] CountSunsetCalls` and
-  `[Features] NetStats`.
+  off by default, `[Patches] SunsetCallers`, `[Settings.Debug] CountSunsetCalls`,
+  `[Settings.Debug] MatchRulesLog` (writes `logs/MatchRules.log` for testing the FFA, Individual
+  Stocks and Friendly Fire rules) and `[Features] NetStats`. Two changes have no setting and no
+  pattern in the file, so a player cannot switch them off: requests to the OpenVersus server carry
+  this install's identity (`Hooks/RequestHeadersHook.cs`), which ties a player to their own
+  account; and the game's WB Analytics telemetry to event.wbinsights.com is stopped at its send
+  function (`Hooks/TelemetryPatch.cs`).
 - `[Settings] LogLevel` takes a level name as well as a number (see [Logs](#logs)).
 - No longer read: `LogSize`, `ModLoader`, `AntiCheatEngine`, `CurlSetOpt` and `CurlPerform` under
   `[Settings]` (`Settings.RetiredKeys`). They stay in files that have them, each logged at startup
@@ -396,9 +437,10 @@ refused.
 
 The Wine harness (`build.sh harness` or `wine-host/run.sh`) checks the hooking layer without the
 game: the host calls three assembly sites before and after loading the test plugin, which
-redirects a call and a jmp into managed code, patches a byte, and makes one hook throw to prove the
-guard returns the fallback. It needs wine and mingw-w64 besides the publish toolchain, and uses its
-own prefix under `local/wine-host`.
+redirects a call and a jmp into managed code, patches a byte, makes one hook throw to prove the
+guard returns the fallback, and swaps a function pointer in read-only data, as in a vtable (and
+refuses a second swap whose expected value is stale). It needs wine and mingw-w64 besides the
+publish toolchain, and uses its own prefix under `local/wine-host`.
 
 ---
 

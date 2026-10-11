@@ -1,3 +1,4 @@
+using OpenVersus.Native;
 using OpenVersus.Memory;
 
 namespace OpenVersus.Tests;
@@ -32,6 +33,40 @@ public unsafe class CallSiteTests
         {
             nint at = (nint)p;
             Assert.Equal(at + 7 + 0x1234, CallSite.Destination(at, displacementOffset: 3, instructionLength: 7));
+        }
+    }
+
+    [Fact]
+    public void APreludeStubIsThePreludeThenAnAbsoluteJump()
+    {
+        const long target = 0x1122334455667788;
+        byte[] stub = CallSite.BuildPrelude([0x4D, 0x89, 0xF8], unchecked((nint)target));
+
+        Assert.Equal(new byte[] { 0x4D, 0x89, 0xF8, 0xFF, 0x25, 0, 0, 0, 0 }, stub[..9]);
+        Assert.Equal(target, BitConverter.ToInt64(stub, 9));
+        Assert.Equal(3 + 14, stub.Length);
+    }
+
+    [SkippableFact]
+    public void ThePreludeRunsBeforeTheTarget()
+    {
+        Skip.IfNot(OperatingSystem.IsWindows(), "runs generated x64 code");
+        nint memory = Kernel32.VirtualAlloc(0, 4096, Kernel32.MEM_COMMIT | Kernel32.MEM_RESERVE, Kernel32.PAGE_EXECUTE_READWRITE);
+        Assert.NotEqual(0, memory);
+        try
+        {
+            // The target returns its third argument (mov rax, r8; ret); the prelude copies the first into it (mov r8, rcx).
+            byte[] returnsR8 = [0x4C, 0x89, 0xC0, 0xC3];
+            returnsR8.CopyTo(new Span<byte>((void*)memory, returnsR8.Length));
+            byte[] stub = CallSite.BuildPrelude([0x49, 0x89, 0xC8], memory);
+            stub.CopyTo(new Span<byte>((void*)(memory + 64), stub.Length));
+            var call = (delegate* unmanaged<nint, nint, nint, nint>)(memory + 64);
+
+            Assert.Equal(0x1234, call(0x1234, 0, 0x999));
+        }
+        finally
+        {
+            Kernel32.VirtualFree(memory, 0, Kernel32.MEM_RELEASE);
         }
     }
 }

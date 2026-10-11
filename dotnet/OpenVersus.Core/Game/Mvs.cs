@@ -85,6 +85,65 @@ public static class Mvs
     public const int GameplayConfigCluster = 0x60;
     /// <summary>TArray&lt;FGameplayPlayerData&gt;: the same players the pawns carry.</summary>
     public const int GameplayConfigPlayers = 0x70;
+    /// <summary>FString: the mode, such as "1v1", "2v2" or "FFA" (CXXHeaderDump).</summary>
+    public const int GameplayConfigModeString = 0xA8;
+    /// <summary>
+    /// int32: FCustomGameSettings.NumRingouts, the first field of CustomGameSettings at 0xBC
+    /// (CXXHeaderDump). The server sends the ringouts to win, or a custom lobby's own count.
+    /// </summary>
+    public const int GameplayConfigNumRingouts = 0xBC;
+    /// <summary>
+    /// TArray&lt;UMvsMetaWorldBuffHsda*&gt;: the mutators selected for the match (CXXHeaderDump; the C++
+    /// client's StockDiagnostics read the slugs here).
+    /// </summary>
+    public const int GameplayConfigWorldBuffs = 0x98;
+    /// <summary>EMvsMatchType, one byte (CXXHeaderDump).</summary>
+    public const int GameplayConfigMatchType = 0xD8;
+    /// <summary>bool bIsOnlineMatch (CXXHeaderDump).</summary>
+    public const int GameplayConfigIsOnlineMatch = 0xD9;
+    /// <summary>UMvsHydraSyncDataAsset, FString: the asset's slug, such as "ovs_friendly_fire" (CXXHeaderDump).</summary>
+    public const int HydraSyncDataAssetSlug = 0x60;
+
+    // FActiveHitInteraction, one hit between an attacker and a defender component (CXXHeaderDump:
+    // FTrackedHitData HitData at 0x330, FHitResolutionData ResolutionData at 0x370). The offsets
+    // are the C++ client's (StockDiagnostics.cpp), which played on them.
+    /// <summary>UMvsDefenderComponent*: HitData.Defender.</summary>
+    public const int HitInteractionDefender = 0x330;
+    /// <summary>UMvsAttackerComponent*: HitData.Attacker.</summary>
+    public const int HitInteractionAttacker = 0x338;
+    /// <summary>UObject*: HitData.TriggeringColliderSet, the hitbox set that connected.</summary>
+    public const int HitInteractionColliderSet = 0x340;
+    /// <summary>bool: ResolutionData.IsAllyInteraction, which sends the hit down the game's ally path.</summary>
+    public const int HitInteractionIsAlly = 0x380;
+
+    /// <summary>UActorComponent, AActor*: the component's owner (UE 5.1 OwnerPrivate; the C++ client's).</summary>
+    public const int ActorComponentOwner = 0xA0;
+    /// <summary>AActor, AActor*: Owner, which Unreal moves to whoever holds a caught or thrown actor (CXXHeaderDump).</summary>
+    public const int ActorOwner = 0x150;
+    /// <summary>AActor, APawn*: Instigator (CXXHeaderDump).</summary>
+    public const int ActorInstigator = 0x190;
+    /// <summary>AActor, USceneComponent*: RootComponent (CXXHeaderDump).</summary>
+    public const int ActorRootComponent = 0x1A8;
+    /// <summary>USceneComponent, USceneComponent*: AttachParent (CXXHeaderDump).</summary>
+    public const int SceneComponentAttachParent = 0xC0;
+    /// <summary>AGameModeBase, AGameStateBase*: the match's game state (CXXHeaderDump).</summary>
+    public const int GameModeGameState = 0x300;
+    /// <summary>
+    /// PandaGameState_C, bool: the game state's friendly-fire flag, a Blueprint variable, so not in
+    /// the header dump; the C++ client set it. Its name and type are read back from the class before
+    /// it is written.
+    /// </summary>
+    public const int PandaGameStateFriendlyFire = 0x390;
+    /// <summary>
+    /// PandaGameState_C::PandaGameStateMatchStarted's parameters: the friendly-fire bool after the
+    /// int32 knockouts to win (the C++ client's; checked against the reflected parameters).
+    /// </summary>
+    public const int MatchStartedFriendlyFireParam = 4;
+    /// <summary>
+    /// APfgFixedPawn, int32: RespawnsRemaining (CXXHeaderDump). -1 means unlimited, which online
+    /// matches start with; the native DoRespawn decrements a positive count and still revives at 0.
+    /// </summary>
+    public const int PawnRespawnsRemaining = 0x380;
     // APfgFixedGameStateBase
     /// <summary>Pointer to the game state's UPfgNetcodeSession.</summary>
     public const int GameStateNetcodeSession = 0x4A0;

@@ -138,6 +138,11 @@ public static unsafe partial class Kernel32
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool ReadProcessMemory(nint process, nint address, Span<byte> buffer, nuint size, out nuint bytesRead);
 
+    /// <summary>WriteProcessMemory: a copy that reports an unwritable page instead of faulting.</summary>
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool WriteProcessMemory(nint process, nint address, ReadOnlySpan<byte> buffer, nuint size, out nuint bytesWritten);
+
     /// <summary>Full path of a loaded module; 0 means the host executable.</summary>
     public static string GetModulePath(nint module)
     {

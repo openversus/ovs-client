@@ -9,12 +9,15 @@ namespace OpenVersus.Net;
 /// Polls /ovs/notifications every two seconds and acts on what comes back: a banner in the
 /// game's own notification widget, and for match_cancel, a walk of the pre-match state machine
 /// to send the player back to the lobby the way the native timeout would. Anything that
-/// touches the engine is handed to the game thread.
+/// touches the engine is handed to the game thread. A reidentify notification (the server lost the
+/// Steam session it held for this client's ticket) runs <paramref name="reidentify"/> on a thread of
+/// its own, one at a time: it mints a new ticket, which can wait on Steam, and registers again.
 /// </summary>
-public sealed class NotificationPoller(string serverUrl, IHttpTransport http, ObjectFinder finder, GameImage image, ILogger log)
+public sealed class NotificationPoller(string serverUrl, IHttpTransport http, ObjectFinder finder, GameImage image, ILogger log, Action? reidentify = null)
 {
     // Lives as long as the process; never disposed, since the loop thread may be waiting on it.
     private CancellationTokenSource? _stopping;
+    private int _reidentifying;
 
     /// <summary>
     /// Starts polling on a background thread, after an eight-second wait for the hooks. Does nothing
@@ -129,10 +132,13 @@ public sealed class NotificationPoller(string serverUrl, IHttpTransport http, Ob
     /// </summary>
     public static List<Notification> Parse(string json) => Parse(json, out _);
 
-    private void Dispatch(Notification n)
+    internal void Dispatch(Notification n)
     {
         switch (n.Type!)
         {
+            case "reidentify":
+                Reidentify();
+                break;
             case "match_cancel":
                 log.Info($"[NotifPoller] Match cancel received: {n.Title} — {n.Message}");
                 ShowBanner("Match Canceled", "Opponent left the match", 5.0f);
@@ -149,6 +155,39 @@ public sealed class NotificationPoller(string serverUrl, IHttpTransport http, Ob
                 log.Info($"[NotifPoller] Unknown notification type '{n.Type}' — ignoring");
                 break;
         }
+    }
+
+    // Once at a time: a second notification while one runs (the server queues one per lost session) is dropped.
+    private void Reidentify()
+    {
+        if (reidentify == null)
+        {
+            log.Info("[NotifPoller] Reidentify requested, but this client registers no identity — ignoring");
+            return;
+        }
+
+        if (Interlocked.CompareExchange(ref _reidentifying, 1, 0) != 0)
+        {
+            log.Info("[NotifPoller] Reidentify requested while one is in progress — ignoring");
+            return;
+        }
+
+        log.Info("[NotifPoller] Reidentify requested: the server lost this client's Steam session; registering again with a new ticket");
+        new Thread(() =>
+        {
+            try
+            {
+                reidentify();
+            }
+            catch (Exception e)
+            {
+                log.Warn($"[NotifPoller] Reidentify failed: {e.Message}");
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _reidentifying, 0);
+            }
+        }) { IsBackground = true, Name = "OVS reidentify" }.Start();
     }
 
     private void ShowBanner(string title, string message, float timeoutSeconds)
