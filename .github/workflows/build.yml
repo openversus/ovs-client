@@ -2,10 +2,10 @@
 # cross-compiled on Linux with lld-link and an xwin Windows SDK sysroot.
 #
 # The artifact is the install exactly as it ships: plugins/OpenVersus/ holding
-# OpenVersus_<version>.asi, sample_config.toml (dotnet/sample.toml under a note that it is a
+# OpenVersus_<version>.asi, sample_config.toml (sample.toml under a note that it is a
 # sample; the mod writes its own OpenVersus.toml on first launch, so extracting a release never
 # replaces a player's settings), LICENSE.txt and VERSION.txt, beside the ASI loader as
-# xinput1_3.dll, its license, and readme.txt (from dotnet/release-readme.txt). release.yml
+# xinput1_3.dll, its license, and readme.txt (from release-readme.txt). release.yml
 # publishes the artifact of the build that already ran for a tagged commit rather than building
 # it again, so every commit that may be tagged must get a build of its own: there is no path
 # filter here, and no cancel-in-progress (a build canceled by the next push would leave its
@@ -40,10 +40,10 @@ jobs:
           dotnet-version: "10.0.x"
 
       - name: Build and test
-        run: dotnet/build.sh test
+        run: ./build.sh test
 
       - name: Check formatting
-        run: dotnet format dotnet/OpenVersus.slnx --verify-no-changes
+        run: dotnet format OpenVersus.slnx --verify-no-changes
 
   # ----------------------------------------------------------- windows x64
   windows-x64:
@@ -119,13 +119,13 @@ jobs:
           key: xwin-${{ env.XWIN_VERSION }}-sdk-10.0.22621-${{ env.XwinArches }}
 
       - name: Publish
-        run: dotnet/build.sh publish
+        run: ./build.sh publish
 
       - name: Stage
         run: |
           set -euo pipefail
           version=$(tr -d '[:space:]' < VERSION)
-          asi="dotnet/OpenVersus/bin/Release/net10.0/win-x64/publish/OpenVersus_$version.asi"
+          asi="OpenVersus/bin/Release/net10.0/win-x64/publish/OpenVersus_$version.asi"
           home=dist/plugins/OpenVersus
           rm -rf dist && mkdir -p "$home"
           cp "$asi" "$home/"
@@ -133,8 +133,8 @@ jobs:
               "# A sample of the settings, for reference: the mod reads OpenVersus.toml in this folder," \
               "# which it writes on its first launch with these same defaults and comments." \
               "#"
-            cat dotnet/sample.toml; } > "$home/sample_config.toml"
-          cp dotnet/release-readme.txt dist/readme.txt
+            cat sample.toml; } > "$home/sample_config.toml"
+          cp release-readme.txt dist/readme.txt
           cp LICENSE "$home/LICENSE.txt"
           cp VERSION "$home/VERSION.txt"
           curl -fsSL -o "$RUNNER_TEMP/loader.zip" "$LOADER_URL"
