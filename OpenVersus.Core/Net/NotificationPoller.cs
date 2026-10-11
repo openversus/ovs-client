@@ -187,7 +187,11 @@ public sealed class NotificationPoller(string serverUrl, IHttpTransport http, Ob
             {
                 Interlocked.Exchange(ref _reidentifying, 0);
             }
-        }) { IsBackground = true, Name = "OVS reidentify" }.Start();
+        })
+        {
+            IsBackground = true,
+            Name = "OVS reidentify"
+        }.Start();
     }
 
     private void ShowBanner(string title, string message, float timeoutSeconds)
