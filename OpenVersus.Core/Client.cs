@@ -270,7 +270,6 @@ public sealed class Client
             }
 
             MatchRulesLog.Attach(matchRules);
-            _shutdown.Add(() => FriendlyFireHooks.ReportCost("game closing"));
             _shutdown.Add(matchRules.Dispose);
         }
 

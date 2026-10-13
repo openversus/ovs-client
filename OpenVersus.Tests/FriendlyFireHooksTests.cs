@@ -4,24 +4,24 @@ using OpenVersus.Memory;
 namespace OpenVersus.Tests;
 
 /// <summary>
-/// <see cref="FriendlyFireHooks"/>'s patterns against the real bytes of the functions and the shield's team check,
-/// copied from the game's only build: each pattern finds its bytes, the moved prologues are the functions' first
-/// instructions, and the shield's call goes to IsSameTeam. The hooks themselves are proven in the game.
+/// <see cref="FriendlyFireHooks"/>'s patterns against the real bytes of the functions, the shield's team check and the
+/// hit resolution's response-flags call, copied from the game's only build: each pattern finds its bytes, and both calls
+/// go where the hooks expect. The hooks themselves are proven in the game.
 /// </summary>
 public unsafe class FriendlyFireHooksTests
 {
-    // 0x142951b00
-    private static readonly byte[] s_processActiveHit = Hex("40 55 56 41 56 48 8D AC 24 30 F5 FF FF 48 81 EC D0 0B 00 00");
     // 0x142957c10
     private static readonly byte[] s_getHitResponseFlags = Hex("48 89 5C 24 10 48 89 6C 24 18 57 41 54 41 55 41 56 41 57 48 81 EC E0 0A 00 00");
     // 0x14121bfb0
     private static readonly byte[] s_isSameTeam = Hex("48 85 D2 74 1F 80 7A 30 00 75 19 F7 42 08 00 00 00 60 75 10 8B 89 D0 00 00 00");
-    // 0x142951a00
-    private static readonly byte[] s_getTopLevelAttacker = Hex("48 89 5C 24 10 56 48 83 EC 20 48 8B F1 48 8B 89 A0 00 00 00");
     // 0x142953875 to 0x14295388c: the shield's team check, mov rdx, r14; call IsSameTeam
     private const long ShieldStart = 0x142953875;
     private const long IsSameTeam = 0x14121bfb0;
     private static readonly byte[] s_shield = Hex("80 79 30 00 75 19 F7 41 08 00 00 00 60 75 10 49 8B D6 E8 24 87 8C FE");
+    // 0x1426155e7 to 0x1426155fd: lea r9, [rsi+0x37C]; movzx r8d, bl; mov rdx, rax; mov rcx, rdi; call GetHitResponseFlags
+    private const long ResolveStart = 0x1426155e7;
+    private const long GetHitResponseFlags = 0x142957c10;
+    private static readonly byte[] s_resolve = Hex("4C 8D 8E 7C 03 00 00 44 0F B6 C3 48 8B D0 48 8B CF E8 13 26 34 00");
 
     internal static byte[] Hex(string text) => Convert.FromHexString(text.Replace(" ", ""));
 
@@ -30,18 +30,21 @@ public unsafe class FriendlyFireHooksTests
     [Fact]
     public void EachPatternFindsItsFunction()
     {
-        Assert.Equal(0, Match(s_processActiveHit, FriendlyFireHooks.ProcessActiveHitInteractionPattern));
         Assert.Equal(0, Match(s_getHitResponseFlags, FriendlyFireHooks.GetHitResponseFlagsPattern));
         Assert.Equal(0, Match(s_isSameTeam, FriendlyFireHooks.IsSameTeamPattern));
-        Assert.Equal(0, Match(s_getTopLevelAttacker, FriendlyFireHooks.GetTopLevelAttackerPattern));
         Assert.Equal(0, Match(s_shield, FriendlyFireHooks.ShieldTeamCheckPattern));
+        Assert.Equal(0, Match(s_resolve, FriendlyFireHooks.ResolveResponseCallPattern));
     }
 
     [Fact]
-    public void TheMovedProloguesAreTheFunctionsFirstInstructions()
+    public void TheResolutionCallGoesToGetHitResponseFlags()
     {
-        Assert.Equal(FriendlyFireHooks.s_processActiveHitPrologue, s_processActiveHit[..FriendlyFireHooks.s_processActiveHitPrologue.Length]);
-        Assert.Equal(FriendlyFireHooks.s_getHitResponseFlagsPrologue, s_getHitResponseFlags[..FriendlyFireHooks.s_getHitResponseFlagsPrologue.Length]);
+        int call = Match(s_resolve, FriendlyFireHooks.ResolveResponseCallPattern) + FriendlyFireHooks.ResolveResponseCall;
+        Assert.Equal(CallSite.CallOpcode, s_resolve[call]);
+        fixed (byte* p = s_resolve)
+        {
+            Assert.Equal(GetHitResponseFlags - ResolveStart, CallSite.Destination((nint)(p + call)) - (nint)p);
+        }
     }
 
     [Fact]
@@ -60,11 +63,10 @@ public unsafe class FriendlyFireHooksTests
     {
         byte[] mapped = FinalBuild.Mapped();
 
-        Assert.Equal(0x02951B00, FinalBuild.Single(mapped, FriendlyFireHooks.ProcessActiveHitInteractionPattern));
         Assert.Equal(0x02957C10, FinalBuild.Single(mapped, FriendlyFireHooks.GetHitResponseFlagsPattern));
         Assert.Equal(0x0121BFB0, FinalBuild.Single(mapped, FriendlyFireHooks.IsSameTeamPattern));
-        Assert.Equal(0x02951A00, FinalBuild.Single(mapped, FriendlyFireHooks.GetTopLevelAttackerPattern));
         Assert.Equal(0x02953887, FinalBuild.Single(mapped, FriendlyFireHooks.ShieldTeamCheckPattern) + FriendlyFireHooks.ShieldTeamCheckCall);
+        Assert.Equal(0x026155F8, FinalBuild.Single(mapped, FriendlyFireHooks.ResolveResponseCallPattern) + FriendlyFireHooks.ResolveResponseCall);
     }
 }
 

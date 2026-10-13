@@ -196,7 +196,6 @@ public static unsafe class StockRulesHooks
         }
 
         s_attemptEndMatch(component);
-        HookGuard.Run("StocksAttemptEndMatch", 0, static _ => FriendlyFireHooks.ReportCost("match end"));
     }
 
     /// <summary>
