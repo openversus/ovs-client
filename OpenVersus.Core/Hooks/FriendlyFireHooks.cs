@@ -8,9 +8,10 @@ using Microsoft.Extensions.Logging;
 namespace OpenVersus.Hooks;
 
 /// <summary>
-/// Friendly fire, the OVS mutator <see cref="Slug"/>: in a match whose config carries it, a
-/// fighter's hits land on their teammate as they would on an opponent. Only the server turns it
-/// on, by selecting the mutator.
+/// Friendly fire, the OVS mutator <see cref="Slug"/>: a fighter's hits land on their teammate as they
+/// would on an opponent. It is on wherever the experimental pak's friendly-fire buff is: online the
+/// server's mutator gives it, offline the pak's Lab toggle. The asi has no switch of its own; it follows
+/// the buff, so the Lab and an online match run the same rules.
 /// <para>
 /// The rules live in the experimental pak (OVS_Experimental_P): its buff, MvsBuff_OVS_FriendlyFire,
 /// is on every fighter and answers the defender's OverrideResponseFlags (which GetHitResponseFlags
@@ -79,7 +80,6 @@ public static unsafe class FriendlyFireHooks
     private static ILogger? s_log;
     private static ObjectFinder? s_finder;
     private static bool s_installed;
-    private static bool s_offlineTesting;
     private static volatile bool s_active;
     private static nint s_fighterClass;
     private static FName s_pakBuff;
@@ -97,7 +97,7 @@ public static unsafe class FriendlyFireHooks
 
     /// <summary>
     /// Points the shield's team check and the hit resolution's response-flags call at this class, and hooks ProcessEvent
-    /// through a filter for the match-start event. Nothing changes until <see cref="StartMatch"/> sees the mutator.
+    /// through a filter for the match-start event. Nothing changes for a defender without the pak's friendly-fire buff.
     /// False, with nothing hooked, when a pattern is missing; throws a <see cref="PatchException"/> when this build's code
     /// is not what the disassembly found. The ProcessEvent hook alone may fail (another mod on it), which only loses the
     /// match-start parameter.
@@ -105,7 +105,6 @@ public static unsafe class FriendlyFireHooks
     public static bool Apply(HookContext c)
     {
         s_log = c.Log;
-        s_offlineTesting = c.Settings.FriendlyFireOffline;
         c.Log.Info("==Friendly Fire==");
         var image = c.Image;
         var hitResponse = c.Patterns.Find("FriendlyFireResponse", GetHitResponseFlagsPattern);
@@ -148,7 +147,7 @@ public static unsafe class FriendlyFireHooks
         }
 
         s_installed = true;
-        c.Log.Success($"Friendly fire hooked (shield check at 0x{shieldCall:X}, hit resolution at 0x{resolveCall:X}); it is on only in matches with the Friendly Fire mutator");
+        c.Log.Success($"Friendly fire hooked (shield check at 0x{shieldCall:X}, hit resolution at 0x{resolveCall:X}); it follows the experimental pak's friendly-fire buff");
         return true;
     }
 
@@ -165,8 +164,9 @@ public static unsafe class FriendlyFireHooks
     private static readonly byte[] s_passHitInR8 = [0x4D, 0x89, 0xF8];
 
     /// <summary>
-    /// A new match (<see cref="StockRulesHooks"/>, on the game thread): friendly fire is on when the
-    /// server selected the mutator, off otherwise, including when the settings could not be read.
+    /// A new match (<see cref="StockRulesHooks"/>, on the game thread). The shield check and the gain skip follow the
+    /// pak's buff in every match (a defender without it keeps teammates teammates). The game's own friendly-fire flag and
+    /// match-start parameter are set only when the server selected the mutator.
     /// </summary>
     public static void StartMatch(ObjectFinder finder, nint gameMode, MatchSettings? settings)
     {
@@ -184,12 +184,6 @@ public static unsafe class FriendlyFireHooks
         }
 
         SetWatched(0);
-        if (settings == null || !IsOn(settings, s_offlineTesting))
-        {
-            MatchRulesLog.Line("friendly fire: off");
-            return;
-        }
-
         s_finder = finder;
         s_fighterClass = finder.FindClass("MvsFixedCharacter");
         s_pakBuff = finder.Names.Find(PakBuffClass);
@@ -199,22 +193,21 @@ public static unsafe class FriendlyFireHooks
             return;
         }
 
-        CheckGameStateFlag(finder, gameMode);
-        CheckMatchStarted(finder);
         s_active = true;
-        EnsureGameStateFlag();
-        s_log?.Info($"[FF] friendly fire on ({(settings.HasWorldBuff(Slug) ? "mutator" : "offline testing")})");
-        MatchRulesLog.Line($"friendly fire: ON (the pak's buff {PakBuffClass} {(s_pakBuff.Index != 0 ? "is loaded" : "is not loaded yet")})");
+        bool mutator = settings != null && IsMutator(settings);
+        if (mutator)
+        {
+            CheckGameStateFlag(finder, gameMode);
+            CheckMatchStarted(finder);
+            EnsureGameStateFlag();
+            s_log?.Info("[FF] Friendly Fire mutator: the game's friendly-fire flag is set");
+        }
+
+        MatchRulesLog.Line($"friendly fire: follows the pak's buff {PakBuffClass} ({(s_pakBuff.Index != 0 ? "loaded" : "not loaded yet")}); mutator {(mutator ? "on" : "off")}");
     }
 
-    /// <summary>
-    /// Whether friendly fire is on for a match: the server selected the mutator, or, with
-    /// <paramref name="offlineTesting"/> ([Settings.Debug] FriendlyFireOffline), the match is offline
-    /// Local Play or the Lab. An online match never gets it from the setting, so every player in one
-    /// always runs the same rules.
-    /// </summary>
-    public static bool IsOn(MatchSettings settings, bool offlineTesting) =>
-        settings.HasWorldBuff(Slug) || (offlineTesting && !settings.Online && settings.MatchType is MatchSettings.LocalPlayMatchType or MatchSettings.LabMatchType);
+    /// <summary>Whether the server selected the Friendly Fire mutator for a match.</summary>
+    public static bool IsMutator(MatchSettings settings) => settings.HasWorldBuff(Slug);
 
     /// <summary>Finds the game state through the game mode and checks that its field at the flag's offset is a plain bool.</summary>
     private static void CheckGameStateFlag(ObjectFinder finder, nint gameMode)
@@ -311,14 +304,45 @@ public static unsafe class FriendlyFireHooks
         });
     }
 
-    /// <summary>One of the pak buff's Blueprint rules, resolved once: (AttackInfo[, IsAllyInteraction]) -> a bool.</summary>
+    /// <summary>
+    /// One of the pak buff's Blueprint rules: (AttackInfo[, IsAllyInteraction]) -> a bool. Resolved against the buff's class
+    /// and again whenever that class changes: the game can unload the pak's Blueprint class between matches and load it
+    /// again elsewhere, and a UFunction kept from before is freed memory (an online custom match, then the Lab, crashed in
+    /// ProcessEvent on one).
+    /// </summary>
     private sealed class PakRule(string function, string result, bool ally)
     {
         public string Function { get; } = function;
         public string Result { get; } = result;
         public bool Ally { get; } = ally;
         public GameFunction? Resolved { get; set; }
+        public nint ResolvedClass { get; set; }
         public byte[] Parms { get; set; } = [];
+    }
+
+    /// <summary>
+    /// <paramref name="rule"/>'s UFunction on <paramref name="buffClass"/>, the class of the buff it is called on; null when
+    /// the function found is declared on another class (an older copy of the Blueprint class still listed). Looked up
+    /// directly, not through <see cref="Reflection.Find"/>, whose registry keeps the first one found for the whole session.
+    /// </summary>
+    private static GameFunction? ResolveOn(ObjectFinder finder, PakRule rule, nint buffClass)
+    {
+        nint ufunction = finder.FindFunction(PakBuffClass, rule.Function, out nint owner);
+        if (ufunction == 0 || owner != buffClass)
+        {
+            return null;
+        }
+
+        var signature = Reflection.Describe(finder.Memory, finder.Names, ufunction, PakBuffClass, rule.Function, owner);
+        return new GameFunction
+        {
+            Name = $"{PakBuffClass}::{rule.Function}",
+            Address = ufunction,
+            Source = FunctionSource.Reflected,
+            Image = finder.Image,
+            Origin = "the pak buff's class",
+            Signature = new FunctionSignature { Reflected = signature },
+        };
     }
 
     /// <summary>
@@ -346,7 +370,17 @@ public static unsafe class FriendlyFireHooks
             return false;
         }
 
-        rule.Resolved ??= Reflection.Find(finder, finder.Image, PakBuffClass, rule.Function);
+        if (!CodeWriter.TryRead(buff + Mvs.ObjectClassPrivate, out nint buffClass) || buffClass == 0)
+        {
+            return false;
+        }
+
+        if (rule.Resolved == null || rule.ResolvedClass != buffClass)
+        {
+            rule.Resolved = ResolveOn(finder, rule, buffClass);
+            rule.ResolvedClass = rule.Resolved == null ? 0 : buffClass;
+        }
+
         var sig = rule.Resolved?.Signature.Reflected;
         var info = sig?.Parameters.FirstOrDefault(x => x.Name == "AttackInfo");
         var result = sig?.Parameters.FirstOrDefault(x => x.Name == rule.Result);
