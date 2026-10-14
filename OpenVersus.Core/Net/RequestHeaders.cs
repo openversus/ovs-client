@@ -39,9 +39,9 @@ public sealed unsafe class RequestHeaders
     public const string OvsZstd = "X-OVS-Zstd";
 
     /// <summary>
-    /// The installed OVS_Experimental paks, "name=sha256" of each .utoc separated by semicolons (<see cref="PakUpdate.ExperimentalReport"/>):
-    /// a queue whose mutators live in one (1v1 Testing Grounds) lets in only players with the exact pak, or the match
-    /// would desync. Not sent when there is none.
+    /// Every installed OVS pak, "name=sha256" of each one's .utoc (else its .pak) separated by semicolons
+    /// (<see cref="PakUpdate.InstalledReport"/>): the server checks them against the release and tells a game whose paks
+    /// differ to close, so the next launch's startup update installs the release's. Not sent when there is none.
     /// </summary>
     public const string OvsPaks = "X-OVS-Paks";
 

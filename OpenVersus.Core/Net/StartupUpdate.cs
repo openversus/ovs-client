@@ -12,7 +12,8 @@ namespace OpenVersus.Net;
 /// the plugin at the game's entry point, before the engine opens its paks, so they can be
 /// replaced here. Paks download whatever AutoUpdate says: the game crashes without the paks the
 /// server's content needs, so when they cannot be brought up to date the game is closed rather
-/// than started. A release without paks (Infinity War) leaves this with nothing to do.
+/// than started. OVS paks the release does not list are moved to the backup folder, so only its
+/// paks load. A release without paks (Infinity War) leaves this with nothing to do.
 /// </summary>
 /// <param name="serverUrl">The OVS server.</param>
 /// <param name="autoUpdate">Whether a newer plugin may be installed too.</param>
@@ -81,11 +82,12 @@ public sealed class StartupUpdate(string serverUrl, bool autoUpdate, IHttpTransp
         }
 
         List<UpdateFile> due = [];
+        List<UpdateFile>? listed = null;
         bool releaseHasPaks = false;
         if (paks != null)
         {
             var files = ParseFiles(result.Text, out string? problem);
-            var listed = problem == null ? PakUpdate.Paks(files, out problem, paks.ReleaseOwner) : null;
+            listed = problem == null ? PakUpdate.Paks(files, out problem, paks.ReleaseOwner) : null;
             if (listed == null)
             {
                 log.Warn($"[Update] Not using this release's paks: {problem}");
@@ -107,6 +109,11 @@ public sealed class StartupUpdate(string serverUrl, bool autoUpdate, IHttpTransp
                 return Close(LegacyStuck, "Update not installed");
             }
 
+            if (releaseHasPaks)
+            {
+                paks!.RetireUnlisted(listed!, installed: false);
+            }
+
             log.Info($"[Update] Up to date ({OvsVersion.Current}{(info.IsLatest ? "" : $", server offers {info.LatestVersion}")})");
             return Outcome.UpToDate;
         }
@@ -124,6 +131,12 @@ public sealed class StartupUpdate(string serverUrl, bool autoUpdate, IHttpTransp
         if (failure is { } required)
         {
             return Close(required.Text, required.Caption);
+        }
+
+        if (releaseHasPaks)
+        {
+            // Into the same backup set as what the install just replaced, if anything was installed.
+            paks!.RetireUnlisted(listed!, installed: due.Count > 0);
         }
 
         if (due.Count == 0 && !pluginInstalled)

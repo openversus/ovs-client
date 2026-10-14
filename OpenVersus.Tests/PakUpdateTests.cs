@@ -158,25 +158,32 @@ public class PakUpdateTests : IDisposable
     }
 
     [Fact]
-    public void ExperimentalPaksAreReportedByTheirUtocHash()
+    public void EveryOvsPakIsReportedByItsUtocElseItsPak()
     {
         string hashes = Path.Combine(_plugin, "PakHashes.txt");
-        Assert.Equal("", PakUpdate.ExperimentalReport(_paks, hashes, _log));
+        Assert.Equal("", PakUpdate.InstalledReport(_paks, hashes, _log));
 
-        byte[] b = Bytes("toc b"), a = Bytes("toc a");
+        byte[] b = Bytes("toc b"), a = Bytes("toc a"), p = Bytes("toc p"), old = Bytes("old pak");
         File.WriteAllBytes(Path.Combine(_paks, "OVS_Experimental_60_P.utoc"), b);
         File.WriteAllBytes(Path.Combine(_paks, "OVS_Experimental_50_P.utoc"), a);
         File.WriteAllBytes(Path.Combine(_paks, "OVS_Experimental_50_P.ucas"), Bytes("chunks"));
-        File.WriteAllBytes(Path.Combine(_paks, "OVS_P.utoc"), Bytes("not experimental"));
-        Assert.Equal($"OVS_Experimental_50_P={Sha(a)};OVS_Experimental_60_P={Sha(b)}", PakUpdate.ExperimentalReport(_paks, hashes, _log));
+        File.WriteAllBytes(Path.Combine(_paks, "OVS_P.utoc"), p);
+        File.WriteAllBytes(Path.Combine(_paks, "OVS_P.pak"), Bytes("stub")); // the .utoc is hashed, not the .pak
+        File.WriteAllBytes(Path.Combine(_paks, "ovs_Old.pak"), old); // no .utoc: the .pak is hashed
+        File.WriteAllBytes(Path.Combine(_paks, "ovs_Old.sig"), Bytes("signature"));
+        File.WriteAllBytes(Path.Combine(_paks, "OVS_Loose.ucas"), Bytes("no toc, no pak"));
+        File.WriteAllBytes(Path.Combine(_paks, "OVS_Loose.sig"), Bytes("signature"));
+        File.WriteAllBytes(Path.Combine(_paks, "pakchunk99-Mod.utoc"), Bytes("not ours"));
+        File.WriteAllBytes(Path.Combine(_paks, "OVS_Notes.txt"), Bytes("not a pak"));
+        Assert.Equal($"OVS_Experimental_50_P={Sha(a)};OVS_Experimental_60_P={Sha(b)};ovs_Old={Sha(old)};OVS_P={Sha(p)}", PakUpdate.InstalledReport(_paks, hashes, _log));
 
         // The hash cache learned them: an unchanged size and modified time is not hashed again.
         string path = Path.Combine(_paks, "OVS_Experimental_50_P.utoc");
         var stamp = File.GetLastWriteTimeUtc(path);
         File.WriteAllBytes(path, Bytes("toc A"));
         File.SetLastWriteTimeUtc(path, stamp);
-        Assert.StartsWith($"OVS_Experimental_50_P={Sha(a)};", PakUpdate.ExperimentalReport(_paks, hashes, _log));
-        Assert.Equal("", PakUpdate.ExperimentalReport(Path.Combine(_root, "missing"), hashes, _log));
+        Assert.StartsWith($"OVS_Experimental_50_P={Sha(a)};", PakUpdate.InstalledReport(_paks, hashes, _log));
+        Assert.Equal("", PakUpdate.InstalledReport(Path.Combine(_root, "missing"), hashes, _log));
     }
 
     // Download and install
@@ -503,6 +510,78 @@ public class PakUpdateTests : IDisposable
 
         Assert.Equal(StartupUpdate.Outcome.NoAnswer, Startup(new ServedFiles(), [], []).Run());
         Assert.Equal("old a", File.ReadAllText(Path.Combine(_paks, "OVS_A.pak")));
+    }
+
+    // OVS paks the release does not list
+
+    [Fact]
+    public void PaksTheReleaseDoesNotListAreMovedToTheBackupFolder()
+    {
+        byte[] pak = Bytes("current content");
+        var entry = Entry("OVS_P.pak", pak);
+        File.WriteAllBytes(Path.Combine(_paks, "OVS_P.pak"), pak);
+        File.WriteAllBytes(Path.Combine(_paks, "OVS_Old.pak"), Bytes("no longer released"));
+        File.WriteAllBytes(Path.Combine(_paks, "OVS_Old.utoc"), Bytes("its toc"));
+        File.WriteAllBytes(Path.Combine(_paks, "pakchunk99-Mod.pak"), Bytes("not ours"));
+        Directory.CreateDirectory(Backup);
+        File.WriteAllText(Path.Combine(Backup, "OVS_Last.pak"), "the last install's backup");
+        var told = new List<string>();
+        var http = new ServedFiles { [VersionUrl] = VersionJson(entry) };
+
+        Assert.Equal(StartupUpdate.Outcome.UpToDate, Startup(http, told, []).Run());
+        Assert.Empty(told);
+        Assert.Equal(pak, File.ReadAllBytes(Path.Combine(_paks, "OVS_P.pak")));
+        Assert.True(File.Exists(Path.Combine(_paks, "pakchunk99-Mod.pak")));
+        Assert.False(File.Exists(Path.Combine(_paks, "OVS_Old.pak")));
+        Assert.Equal("no longer released", File.ReadAllText(Path.Combine(Backup, "OVS_Old.pak")));
+        // One backup set: the folder was emptied first, as an install empties it.
+        Assert.Equal(["OVS_Old.pak", "OVS_Old.utoc"], Directory.EnumerateFiles(Backup).Select(f => Path.GetFileName(f)).Order(StringComparer.Ordinal));
+        Assert.Contains(_log.Lines, l => l.Contains("OVS_Old.utoc: not in the release"));
+        Assert.Equal($"OVS_P={Sha(pak)}", PakUpdate.InstalledReport(_paks, Path.Combine(_plugin, "PakHashes.txt"), _log));
+
+        // Nothing left over: the next launch leaves the backup folder alone.
+        Assert.Equal(StartupUpdate.Outcome.UpToDate, Startup(http, told, []).Run());
+        Assert.True(File.Exists(Path.Combine(Backup, "OVS_Old.pak")));
+    }
+
+    [Fact]
+    public void PaksTheReleaseDoesNotListJoinTheInstallsBackups()
+    {
+        byte[] pak = Bytes("new content");
+        var entry = Entry("OVS_P.pak", pak);
+        File.WriteAllBytes(Path.Combine(_paks, "OVS_P.pak"), Bytes("old content"));
+        File.WriteAllBytes(Path.Combine(_paks, "OVS_Old.pak"), Bytes("no longer released"));
+        Directory.CreateDirectory(Backup);
+        File.WriteAllText(Path.Combine(Backup, "OVS_Last.pak"), "the last install's backup");
+        var told = new List<string>();
+        var http = new ServedFiles { [VersionUrl] = VersionJson(entry), [entry.DownloadUrl!] = pak };
+
+        Assert.Equal(StartupUpdate.Outcome.Installed, Startup(http, told, []).Run());
+        Assert.Equal(["Update complete", "exit"], told);
+        Assert.Equal(pak, File.ReadAllBytes(Path.Combine(_paks, "OVS_P.pak")));
+        Assert.False(File.Exists(Path.Combine(_paks, "OVS_Old.pak")));
+        Assert.Equal(["manifest.json", "OVS_Old.pak", "OVS_P.pak"], Directory.EnumerateFiles(Backup).Select(f => Path.GetFileName(f)).Order(StringComparer.OrdinalIgnoreCase));
+        Assert.Equal("old content", File.ReadAllText(Path.Combine(Backup, "OVS_P.pak")));
+
+        // The manifest is the install's alone: undoing it never touches the moved pak.
+        Assert.Equal(["OVS_P.pak"], ReadManifest(Updater(http)).Files.Select(f => f.Name));
+    }
+
+    [Fact]
+    public void AReleaseWithoutPaksMovesNoPaks()
+    {
+        File.WriteAllBytes(Path.Combine(_paks, "OVS_P.pak"), Bytes("installed"));
+        var http = new ServedFiles { [VersionUrl] = VersionJson() };
+
+        Assert.Equal(StartupUpdate.Outcome.UpToDate, Startup(http, [], []).Run());
+        Assert.True(File.Exists(Path.Combine(_paks, "OVS_P.pak")));
+        Assert.False(Directory.Exists(Backup));
+
+        // Nor does a release whose pak list is refused.
+        http[VersionUrl] = VersionJson(Entry("OVS_Q.pak", Bytes("x"), url: "https://example.com/OVS_Q.pak"));
+        Assert.Equal(StartupUpdate.Outcome.UpToDate, Startup(http, [], []).Run());
+        Assert.True(File.Exists(Path.Combine(_paks, "OVS_P.pak")));
+        Assert.False(Directory.Exists(Backup));
     }
 
     // Hand installs in the game's Content\Paks, which outranks Saved\Paks

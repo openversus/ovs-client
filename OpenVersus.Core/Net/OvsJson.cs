@@ -139,9 +139,9 @@ public sealed class LenientBoolConverter : JsonConverter<bool>
 }
 
 /// <summary>One item of /ovs/notifications. Type is null when the server sent none, and such items are skipped.</summary>
-/// <param name="Type">type: match_cancel, toast_received or admin_banner.</param>
+/// <param name="Type">type: match_cancel, toast_received, admin_banner, reidentify or update_required.</param>
 /// <param name="Title">title: the banner's caption.</param>
-/// <param name="Message">message: the banner's text.</param>
+/// <param name="Message">message: the banner's text; for update_required, what the player is told before the game closes.</param>
 /// <param name="Timeout">timeout: seconds an admin banner stays up; 8 when absent.</param>
 public sealed record Notification(string? Type, string Title = "", string Message = "", double? Timeout = null);
 

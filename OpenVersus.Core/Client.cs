@@ -283,10 +283,10 @@ public sealed class Client
     }
 
     /// <summary>
-    /// <see cref="PakUpdate.ExperimentalReport"/> for this install (the pak updater's folders), or "" without a local
+    /// <see cref="PakUpdate.InstalledReport"/> for this install (the pak updater's folders), or "" without a local
     /// AppData folder.
     /// </summary>
-    private string ExperimentalPaksReport()
+    private string InstalledPaksReport()
     {
         string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         if (string.IsNullOrEmpty(localAppData))
@@ -295,8 +295,8 @@ public sealed class Client
         }
 
         string saved = Path.Combine(localAppData, "MultiVersus", "Saved");
-        string report = PakUpdate.ExperimentalReport(Path.Combine(saved, "Paks"), Path.Combine(saved, Layout.FolderName, "PakHashes.txt"), Log);
-        Log.Info($"[Paks] Experimental paks reported to the server: {(report.Length == 0 ? "none" : report.Split(';').Length.ToString())}");
+        string report = PakUpdate.InstalledReport(Path.Combine(saved, "Paks"), Path.Combine(saved, Layout.FolderName, "PakHashes.txt"), Log);
+        Log.Info($"[Paks] OVS paks reported to the server: {(report.Length == 0 ? "none" : report.Split(';').Length.ToString())}");
         return report;
     }
 
@@ -392,8 +392,10 @@ public sealed class Client
         if (Settings.EnableServerProxy && !string.IsNullOrEmpty(Settings.ServerUrl))
         {
             // A reidentify from the server: a new Steam ticket, the identity as it stands (IdentityRegistration.Run filled it).
+            // An update_required: new content is out, so the game closes for the next launch to install it.
             var poller = new NotificationPoller(Settings.ServerUrl, Http, Objects, Image, Log,
-                reidentify: () => IdentityRegistration.Reidentify(Env!, Settings.ServerUrl, Http, ServerIdentity, Log));
+                reidentify: () => IdentityRegistration.Reidentify(Env!, Settings.ServerUrl, Http, ServerIdentity, Log),
+                closeForUpdate: CloseForUpdate);
             poller.Start();
             _shutdown.Add(poller.Stop);
 
@@ -579,10 +581,10 @@ public sealed class Client
         var headers = new RequestHeaders([Settings.ServerUrl, Settings.ProdServerUrl], Log);
         headers.Add(new HeaderRule(RequestHeaders.HydraAccessToken, () => identity.Token, Path: "/access", OnlyIfMissing: true));
         headers.Add(new HeaderRule(RequestHeaders.OvsIdentity, () => identity.Token));
-        // Not a setting: the experimental paks this game mounted, for the queues that need them. Taken once, at the first
-        // request to the server, after the startup update has installed what it installs.
-        var experimentalPaks = new Lazy<string>(ExperimentalPaksReport);
-        headers.Add(new HeaderRule(RequestHeaders.OvsPaks, () => experimentalPaks.Value));
+        // Not a setting: the OVS paks this game mounted, for the server to check against the release. Taken once, at the
+        // first request to the server, after the startup update has installed what it installs.
+        var installedPaks = new Lazy<string>(InstalledPaksReport);
+        headers.Add(new HeaderRule(RequestHeaders.OvsPaks, () => installedPaks.Value));
         // Not a setting: the Beta Speed this game runs (the server's, once ClientSettingsFetch has it), for the queues that run it.
         headers.Add(new HeaderRule(RequestHeaders.OvsBetaSpeed, static () => GameSpeedHooks.BetaSpeedPercent.ToString(CultureInfo.InvariantCulture)));
         RequestHeaders = headers;
@@ -668,6 +670,30 @@ public sealed class Client
         Log.Info("game window gone; closing the log");
         Shutdown();
         Log.Close();
+    }
+
+    /// <summary>
+    /// The server's update_required: tells the player <paramref name="message"/>, stops the background work (the rollback
+    /// node, the poller, ...), closes the log and ends the process, so the relaunch's startup update installs the new
+    /// content. Runs on the poller's thread, which the message box holds until the player answers it.
+    /// </summary>
+    private static readonly TimeSpan s_updateCloseDelay = TimeSpan.FromSeconds(5);
+
+    private void CloseForUpdate(string message)
+    {
+        Log.Info($"[Update] New OpenVersus content is out; closing the game in {s_updateCloseDelay.TotalSeconds:0} s so the next launch installs it");
+        // The box on a thread of its own, so the game closes after the delay whether or not it is answered (the game plays on
+        // behind it); OK closes at once. On top and in front: a plain box opened behind the game's window (Lab 2026-10-14).
+        var answered = new ManualResetEventSlim(); // not disposed: the box may still answer it while the game shuts down
+        new Thread(() =>
+        {
+            User32.MessageBox(0, message, "Update required", User32.MB_ICONINFORMATION | User32.MB_TOPMOST | User32.MB_SETFOREGROUND);
+            answered.Set();
+        }) { IsBackground = true, Name = "OVS update notice" }.Start();
+        answered.Wait(s_updateCloseDelay);
+        Shutdown();
+        Log.Close(); // TerminateProcess gives no exit moment, so the log is closed and archived here
+        Firmware.TerminateProcess(Kernel32.GetCurrentProcess(), 0);
     }
 
     /// <summary>Stops the background work. Called from the exit watch; a host that has a real exit moment may call it too.</summary>
