@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using OpenVersus.Game;
 using OpenVersus.Hooking;
@@ -193,6 +194,14 @@ public static unsafe class FriendlyFireHooks
             return;
         }
 
+        // Looked up now, while the match loads: found on the first hit instead, the scan of every object was a visible
+        // blip on the first shield hit of each match (Lab 2026-10-13).
+        long started = Stopwatch.GetTimestamp();
+        Prepare(finder, s_overrideFlags);
+        Prepare(finder, s_skipsGains);
+        MatchRulesLog.Line($"friendly fire: the pak's rules looked up at match start in {Stopwatch.GetElapsedTime(started).TotalMilliseconds:F1} ms "
+            + $"({s_overrideFlags.Function} {(s_overrideFlags.Resolved != null ? "found" : "not found")}, {s_skipsGains.Function} {(s_skipsGains.Resolved != null ? "found" : "not found")})");
+
         s_active = true;
         bool mutator = settings != null && IsMutator(settings);
         if (mutator)
@@ -305,10 +314,11 @@ public static unsafe class FriendlyFireHooks
     }
 
     /// <summary>
-    /// One of the pak buff's Blueprint rules: (AttackInfo[, IsAllyInteraction]) -> a bool. Resolved against the buff's class
-    /// and again whenever that class changes: the game can unload the pak's Blueprint class between matches and load it
-    /// again elsewhere, and a UFunction kept from before is freed memory (an online custom match, then the Lab, crashed in
-    /// ProcessEvent on one).
+    /// One of the pak buff's Blueprint rules: (AttackInfo[, IsAllyInteraction]) -> a bool. The game can unload the pak's
+    /// Blueprint class between matches and load it again, elsewhere or at the same address, and a UFunction kept from
+    /// before is then freed memory (an online custom match, then the Lab, crashed in ProcessEvent on one). So the rule is
+    /// forgotten at every match start, resolved on the buff's own class, and checked to still be that class's function
+    /// before each call. A class without the function is remembered too, so it is looked for once, not on every hit.
     /// </summary>
     private sealed class PakRule(string function, string result, bool ally)
     {
@@ -318,22 +328,43 @@ public static unsafe class FriendlyFireHooks
         public GameFunction? Resolved { get; set; }
         public nint ResolvedClass { get; set; }
         public byte[] Parms { get; set; } = [];
+
+        public void Forget()
+        {
+            Resolved = null;
+            ResolvedClass = 0;
+        }
     }
 
     /// <summary>
-    /// <paramref name="rule"/>'s UFunction on <paramref name="buffClass"/>, the class of the buff it is called on; null when
-    /// the function found is declared on another class (an older copy of the Blueprint class still listed). Looked up
-    /// directly, not through <see cref="Reflection.Find"/>, whose registry keeps the first one found for the whole session.
+    /// At a match start: forgets <paramref name="rule"/>, then looks it up on the pak buff's class as it is loaded now. A
+    /// hit on a buff of another class (the class loaded later or again) still looks it up then (<see cref="AskPak"/>).
+    /// </summary>
+    private static void Prepare(ObjectFinder finder, PakRule rule)
+    {
+        rule.Forget();
+        nint ufunction = finder.FindFunction(PakBuffClass, rule.Function, out nint owner);
+        if (ufunction != 0)
+        {
+            rule.Resolved = Describe(finder, rule, ufunction, owner);
+            rule.ResolvedClass = owner;
+        }
+    }
+
+    /// <summary>
+    /// <paramref name="rule"/>'s UFunction declared on <paramref name="buffClass"/>, the class of the buff it is called on,
+    /// or null. Looked up on that class, so an older copy of the Blueprint class still listed is skipped, and not through
+    /// <see cref="Reflection.Find"/>, whose registry keeps the first one found for the whole session.
     /// </summary>
     private static GameFunction? ResolveOn(ObjectFinder finder, PakRule rule, nint buffClass)
     {
-        nint ufunction = finder.FindFunction(PakBuffClass, rule.Function, out nint owner);
-        if (ufunction == 0 || owner != buffClass)
-        {
-            return null;
-        }
+        nint ufunction = finder.FindFunction(buffClass, rule.Function);
+        return ufunction == 0 ? null : Describe(finder, rule, ufunction, buffClass);
+    }
 
-        var signature = Reflection.Describe(finder.Memory, finder.Names, ufunction, PakBuffClass, rule.Function, owner);
+    private static GameFunction Describe(ObjectFinder finder, PakRule rule, nint ufunction, nint buffClass)
+    {
+        var signature = Reflection.Describe(finder.Memory, finder.Names, ufunction, PakBuffClass, rule.Function, buffClass);
         return new GameFunction
         {
             Name = $"{PakBuffClass}::{rule.Function}",
@@ -364,7 +395,7 @@ public static unsafe class FriendlyFireHooks
 
         nint fighter = Read(Read(hit, Mvs.HitInteractionDefender), Mvs.ActorComponentOwner);
         nint buff = !IsFighterObject(fighter) || s_pakBuff.Index == 0 ? 0
-            : ReadArray(Read(Read(fighter, PawnComponentCache), ComponentCacheBuff), BuffActiveBuffs, 16).FirstOrDefault(b => ClassIs(b, s_pakBuff));
+            : FindBuff(Read(Read(fighter, PawnComponentCache), ComponentCacheBuff), s_pakBuff);
         if (buff == 0)
         {
             return false;
@@ -375,10 +406,13 @@ public static unsafe class FriendlyFireHooks
             return false;
         }
 
-        if (rule.Resolved == null || rule.ResolvedClass != buffClass)
+        if (rule.ResolvedClass != buffClass
+            || (rule.Resolved is { } known && !finder.IsFunctionOf(known.Address, buffClass, rule.Function)))
         {
+            long started = Stopwatch.GetTimestamp();
             rule.Resolved = ResolveOn(finder, rule, buffClass);
-            rule.ResolvedClass = rule.Resolved == null ? 0 : buffClass;
+            rule.ResolvedClass = buffClass;
+            MatchRulesLog.Line($"friendly fire: {rule.Function} looked up on a hit in {Stopwatch.GetElapsedTime(started).TotalMilliseconds:F1} ms ({(rule.Resolved != null ? "found" : "not found")})");
         }
 
         var sig = rule.Resolved?.Signature.Reflected;
@@ -487,20 +521,32 @@ public static unsafe class FriendlyFireHooks
 
     private static nint Read(nint obj, int offset) => obj != 0 && CodeWriter.TryRead(obj + offset, out nint value) ? value : 0;
 
-    /// <summary>The pointers of a TArray at <paramref name="obj"/> + <paramref name="offset"/>, at most <paramref name="max"/>.</summary>
-    private static List<nint> ReadArray(nint obj, int offset, int max)
+    /// <summary>The most active buffs looked through: far more than a fighter carries, only a guard against a bad count.</summary>
+    private const int MaxActiveBuffs = 256;
+
+    /// <summary>
+    /// The first of <paramref name="buffComponent"/>'s active buffs (its ActiveBuffs TArray: data, count, then capacity at
+    /// +12) whose class is named <paramref name="buffClass"/>, or 0.
+    /// </summary>
+    private static nint FindBuff(nint buffComponent, FName buffClass)
     {
-        var items = new List<nint>();
-        nint data = Read(obj, offset);
-        if (data != 0 && CodeWriter.TryRead(obj + offset + 8, out int count))
+        nint data = Read(buffComponent, BuffActiveBuffs);
+        if (data == 0 || !CodeWriter.TryRead(buffComponent + BuffActiveBuffs + 8, out int count)
+            || !CodeWriter.TryRead(buffComponent + BuffActiveBuffs + 12, out int capacity) || count < 0 || count > capacity)
         {
-            for (int i = 0; i < Math.Min(count, max); i++)
+            return 0;
+        }
+
+        for (int i = 0; i < Math.Min(count, MaxActiveBuffs); i++)
+        {
+            nint buff = Read(data, i * nint.Size);
+            if (ClassIs(buff, buffClass))
             {
-                items.Add(Read(data, i * nint.Size));
+                return buff;
             }
         }
 
-        return items;
+        return 0;
     }
 
     /// <summary>
