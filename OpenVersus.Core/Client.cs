@@ -689,7 +689,8 @@ public sealed class Client
         {
             User32.MessageBox(0, message, "Update required", User32.MB_ICONINFORMATION | User32.MB_TOPMOST | User32.MB_SETFOREGROUND);
             answered.Set();
-        }) { IsBackground = true, Name = "OVS update notice" }.Start();
+        })
+        { IsBackground = true, Name = "OVS update notice" }.Start();
         answered.Wait(s_updateCloseDelay);
         Shutdown();
         Log.Close(); // TerminateProcess gives no exit moment, so the log is closed and archived here

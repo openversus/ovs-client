@@ -325,7 +325,8 @@ public static unsafe class StockRulesHooks
                     TakeOffCameraWhatTheyLeft(t.camera, t.off);
                 }));
             }
-        })) { IsBackground = true, Name = "OVS stocks camera guard" }.Start();
+        }))
+        { IsBackground = true, Name = "OVS stocks camera guard" }.Start();
     }
 
     /// <summary>
