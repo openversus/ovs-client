@@ -66,6 +66,7 @@ public static unsafe class StockRulesHooks
     // Fighters kept dead and taken off the camera's framing; a rematch that reuses one puts it back.
     private static readonly HashSet<nint> s_offCamera = [];
     private static CameraTargets? s_camera;
+    private static nint s_guardedMatch;   // the match GuardCamera runs for (under s_offCamera's lock)
 
     private static ILogger? s_log;
     private static ObjectFinder? s_finder;
@@ -168,12 +169,7 @@ public static unsafe class StockRulesHooks
         bool keepDead = HookGuard.Run("StocksRespawn", victim, static v => s_match is { } match && match.IsFighter(v) && TryReadInt(v + Mvs.PawnRespawnsRemaining, out int respawns) && respawns == 0, false);
         if (keepDead)
         {
-            bool first = HookGuard.Run("StocksRespawnCamera", victim, static v => { lock (s_offCamera) { return s_offCamera.Add(v); } }, false);
-            if (first)
-            {
-                MatchRulesLog.Line("stocks: a fighter out of lives is kept dead (not destroyed) and taken off the camera");
-                SetOnCamera(victim, on: false);
-            }
+            HookGuard.Run("StocksRespawnCamera", victim, static v => TakeOffCamera(v));
             return;
         }
 
@@ -239,6 +235,138 @@ public static unsafe class StockRulesHooks
         if (wasOffCamera)
         {
             SetOnCamera(character, on: true);
+        }
+    }
+
+    /// <summary>
+    /// A fighter out of lives off the camera, once (at its last death or at its respawn timer, whichever comes first), then
+    /// kept off by <see cref="GuardCamera"/>.
+    /// </summary>
+    private static void TakeOffCamera(nint victim)
+    {
+        bool first;
+        lock (s_offCamera)
+        {
+            first = s_offCamera.Add(victim);
+        }
+
+        if (first)
+        {
+            MatchRulesLog.Line("stocks: a fighter out of lives is kept dead (not destroyed) and taken off the camera");
+            SetOnCamera(victim, on: false);
+            GuardCamera(s_gameMode);
+        }
+    }
+
+    /// <summary>
+    /// Keeps the fighters out of lives off the camera for the rest of the match: twice a second, one that is framed again is
+    /// taken off again. Testers saw the camera zoom in on an eliminated Iron Giant (after Rage Mode, on the live server); it
+    /// never happened on a LAN, where the camera log showed him off for good: something (most likely a rollback over his
+    /// death) puts the fighter back after the one removal. The camera is each client's own view, so this cannot desync. One
+    /// guard per match; it ends with the match.
+    /// </summary>
+    private static void GuardCamera(nint gameMode)
+    {
+        lock (s_offCamera)
+        {
+            if (s_guardedMatch == gameMode)
+            {
+                return;
+            }
+
+            s_guardedMatch = gameMode;
+        }
+
+        new Thread(() => HookGuard.Run("StocksCameraGuard", gameMode, static match =>
+        {
+            while (s_gameMode == match)
+            {
+                Thread.Sleep(500);
+                nint[] off;
+                lock (s_offCamera)
+                {
+                    off = [.. s_offCamera];
+                }
+
+                if (off.Length == 0 || FindCamera(match) is not { } camera || s_finder is not { } finder)
+                {
+                    continue;
+                }
+
+                GameThread.Post("StocksCameraGuard", () => HookGuard.Run("StocksCameraGuard", (camera, off), static t =>
+                {
+                    foreach (nint pawn in t.off)
+                    {
+                        if (s_finder is not { } f || !f.IsLive(pawn))
+                        {
+                            continue;
+                        }
+
+                        // A death a rollback undid: the fighter has lives again, so it goes back on the camera.
+                        if (TryReadInt(pawn + Mvs.PawnRespawnsRemaining, out int respawns) && respawns > 0)
+                        {
+                            lock (s_offCamera)
+                            {
+                                s_offCamera.Remove(pawn);
+                            }
+
+                            MatchRulesLog.Line($"stocks: a fighter taken off the camera has {respawns} lives again (a rollback); back on the camera");
+                            CallCamera(t.camera, pawn, on: true);
+                            continue;
+                        }
+
+                        if (t.camera.Cameras.Where(f.IsLive).Any(cam => IsRegistered(t.camera, cam, pawn)))
+                        {
+                            MatchRulesLog.Line("stocks: a fighter out of lives was back on the camera (a rollback?); taken off again");
+                            CallCamera(t.camera, pawn, on: false);
+                        }
+                    }
+
+                    TakeOffCameraWhatTheyLeft(t.camera, t.off);
+                }));
+            }
+        })) { IsBackground = true, Name = "OVS stocks camera guard" }.Start();
+    }
+
+    /// <summary>
+    /// What a fighter out of lives left framed: an actor the camera tracks whose owner or instigator is that fighter. Iron
+    /// Giant spawns Mvs_SpawnedKeepOnCamera actors (IronGiant_Fighter references the class) that the camera frames; eliminated,
+    /// he is off the camera but they stayed where he died, and every screen zoomed out to the corner (Tuggernuts, 2026-10-14,
+    /// in Rage Mode; the camera log showed two of them at the top left). Read from the camera's TrackedActors (MvsCamera
+    /// 0xA38, FMvsTrackedActorState 0x20 each, the actor first; AActor Owner 0x150, Instigator 0x190: the game's dump).
+    /// Game thread.
+    /// </summary>
+    private static void TakeOffCameraWhatTheyLeft(CameraTargets camera, nint[] off)
+    {
+        if (s_finder is not { } finder || off.Length == 0)
+        {
+            return;
+        }
+
+        var memory = finder.Memory;
+        var left = new List<nint>();
+        foreach (nint cam in camera.Cameras.Where(finder.IsLive))
+        {
+            if (!memory.TryRead(cam + Mvs.CameraTrackedActors, out nint data) || !memory.TryRead(cam + Mvs.CameraTrackedActors + 8, out int count) || count is < 0 or > 64)
+            {
+                continue;
+            }
+
+            for (int i = 0; i < count; i++)
+            {
+                if (memory.TryRead(data + i * Mvs.CameraTrackedActorSize, out nint actor) && actor != 0 && !off.Contains(actor) && !left.Contains(actor)
+                    && ((memory.TryRead(actor + Mvs.ActorOwner, out nint owner) && off.Contains(owner))
+                        || (memory.TryRead(actor + Mvs.ActorInstigator, out nint instigator) && off.Contains(instigator))))
+                {
+                    left.Add(actor);
+                }
+            }
+        }
+
+        foreach (nint actor in left)
+        {
+            MatchRulesLog.Line("stocks: an actor of a fighter out of lives was framed by the camera; taken off it");
+            CallCamera(camera, actor, on: false);
         }
     }
 
@@ -419,6 +547,8 @@ public static unsafe class StockRulesHooks
         if (respawns == 0)
         {
             s_log?.Info($"[Stocks] fighter out ({match.EliminatedCount}/{match.FighterCount})");
+            // Off the camera from the last death, not only at the respawn timer (Respawn), and kept off (GuardCamera).
+            TakeOffCamera(victim);
         }
 
         // The HUD shows each FFA player's own score; a 2v2 HUD shows team scores, left to the game.
