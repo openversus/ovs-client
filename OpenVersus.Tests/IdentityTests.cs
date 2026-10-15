@@ -483,6 +483,70 @@ public class IdentityTests : IDisposable
         Assert.Equal("", identity.Headers());
     }
 
+    // A copied plugin folder (2026-10-14): the server says the install id is another player's.
+
+    [Fact]
+    public void AReplacedInstallIdIsNewAndStored()
+    {
+        var state = new State(_dir).Load();
+        string first = state.LoadOrCreateInstallId();
+
+        string second = state.ReplaceInstallId(first);
+
+        Assert.True(State.IsValidInstallId(second));
+        Assert.NotEqual(first, second);
+        Assert.Equal(second, state.InstallId);
+        Assert.Equal(second, new State(_dir).Load().InstallId);
+        // Already replaced (another registration got there first): the current one, no third.
+        Assert.Equal(second, state.ReplaceInstallId(first));
+        Assert.Equal(second, new State(_dir).Load().InstallId);
+    }
+
+    [Fact]
+    public void ATakenInstallIdIsReplacedAndRegisteredAgainOnce()
+    {
+        const string New = "fedcba9876543210fedcba9876543210";
+        var http = new ScriptedPosts(
+            Json($"{{\"ok\":true,\"token\":\"{Token}\",\"accountId\":null,\"installIdTaken\":true}}"),
+            Json($"{{\"ok\":true,\"token\":\"{Token}\",\"accountId\":null,\"installIdTaken\":true}}"));
+        var identity = new ServerIdentity { InstallId = InstallId };
+        var env = SteamEnv();
+        env.InstallId = InstallId;
+        var replaced = new List<string>();
+
+        IdentityRegistration.Run(env, "http://ovs.test", http, identity, new ListLogger(), _ => { }, replaceInstallId: taken => { replaced.Add(taken); return New; });
+
+        Assert.Equal([InstallId], replaced);
+        Assert.Equal(2, http.Posts.Count);
+        Assert.Contains(InstallId, http.Posts[0].Body);
+        Assert.Contains(New, http.Posts[1].Body);
+        Assert.Equal(New, env.InstallId);
+        Assert.Equal(New, identity.InstallId);
+    }
+
+    [Fact]
+    public void AnInstallIdThatCannotBeReplacedIsKept()
+    {
+        var http = new ScriptedPosts(Json($"{{\"ok\":true,\"token\":\"{Token}\",\"installIdTaken\":true}}"));
+        var identity = new ServerIdentity { InstallId = InstallId };
+        var env = SteamEnv();
+        env.InstallId = InstallId;
+        var log = new ListLogger();
+
+        IdentityRegistration.Run(env, "http://ovs.test", http, identity, log, _ => { }, replaceInstallId: taken => taken);
+
+        Assert.Single(http.Posts);
+        Assert.Equal(InstallId, env.InstallId);
+        Assert.Equal(Token, identity.Token);
+    }
+
+    [Fact]
+    public void TheIdentifyResponseSaysWhetherTheInstallIdIsTaken()
+    {
+        Assert.True(IdentityRegistration.ParseResponse("{\"ok\":true,\"installIdTaken\":true}")!.InstallIdTaken);
+        Assert.False(IdentityRegistration.ParseResponse("{\"ok\":true}")!.InstallIdTaken);
+    }
+
     [Fact]
     public void TheIdentifyResponseForgivesTheServer()
     {

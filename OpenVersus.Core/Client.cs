@@ -394,7 +394,7 @@ public sealed class Client
             // A reidentify from the server: a new Steam ticket, the identity as it stands (IdentityRegistration.Run filled it).
             // An update_required: new content is out, so the game closes for the next launch to install it.
             var poller = new NotificationPoller(Settings.ServerUrl, Http, Objects, Image, Log,
-                reidentify: () => IdentityRegistration.Reidentify(Env!, Settings.ServerUrl, Http, ServerIdentity, Log),
+                reidentify: () => IdentityRegistration.Reidentify(Env!, Settings.ServerUrl, Http, ServerIdentity, Log, replaceInstallId: State.ReplaceInstallId),
                 closeForUpdate: CloseForUpdate);
             poller.Start();
             _shutdown.Add(poller.Stop);
@@ -415,7 +415,7 @@ public sealed class Client
             {
                 if (EpicIdentity.Probe(image, epicEnv.EpicId, Log)?.Token is { Length: > 0 } token)
                 {
-                    IdentityRegistration.RegisterEpicToken(epicEnv, token, Settings.ServerUrl, Http, epicIdentity, Log);
+                    IdentityRegistration.RegisterEpicToken(epicEnv, token, Settings.ServerUrl, Http, epicIdentity, Log, replaceInstallId: State.ReplaceInstallId);
                 }
             });
         }
@@ -441,8 +441,10 @@ public sealed class Client
         var env = Env!;
         var serverIdentity = ServerIdentity;
         var node = _node;
+        // A copied plugin folder carries its owner's install id: the server says so, and this install makes its own.
+        var installState = State;
         Start("OVS identity", () => IdentityRegistration.Run(env, Settings.ServerUrl, Http, serverIdentity, Log,
-            waitForNodePort: node == null ? null : timeout => node.WaitForPort(timeout)));
+            waitForNodePort: node == null ? null : timeout => node.WaitForPort(timeout), replaceInstallId: installState.ReplaceInstallId));
 
         if (Settings.AutoUpdate && _startupCheckAnswered)
         {

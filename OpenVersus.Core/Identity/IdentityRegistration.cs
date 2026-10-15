@@ -44,7 +44,7 @@ public static class IdentityRegistration
     /// is fetched once (<see cref="SteamId.SessionTicket"/>, or <paramref name="resolveSteamTicket"/> in
     /// tests) and sent with every registration; without one the server takes the id as a claim only.
     /// </summary>
-    public static void Run(EnvInfo env, string serverUrl, IHttpTransport http, ServerIdentity identity, ILogger log, Action<TimeSpan>? sleep = null, Func<string>? resolveSteamId = null, Func<TimeSpan, int>? waitForNodePort = null, Func<string>? resolveSteamTicket = null)
+    public static void Run(EnvInfo env, string serverUrl, IHttpTransport http, ServerIdentity identity, ILogger log, Action<TimeSpan>? sleep = null, Func<string>? resolveSteamId = null, Func<TimeSpan, int>? waitForNodePort = null, Func<string>? resolveSteamTicket = null, Func<string, string>? replaceInstallId = null)
     {
         if (string.IsNullOrEmpty(serverUrl))
         {
@@ -85,7 +85,7 @@ public static class IdentityRegistration
         bool registered = false;
         for (int attempt = 0; ; attempt++)
         {
-            var outcome = Send(env, url, http, identity, log);
+            var outcome = Send(env, url, http, identity, log, replaceInstallId);
             if (outcome != Outcome.NoAnswer)
             {
                 registered = outcome == Outcome.Registered;
@@ -107,7 +107,7 @@ public static class IdentityRegistration
             if (UseSteamId(env, resolveSteamId()))
             {
                 UseSteamTicket(env, resolveSteamTicket(), log);
-                registered = Send(env, url, http, identity, log) == Outcome.Registered || registered;
+                registered = Send(env, url, http, identity, log, replaceInstallId) == Outcome.Registered || registered;
             }
             else if (!registered)
             {
@@ -137,7 +137,7 @@ public static class IdentityRegistration
     /// the node's port included, is sent as it stands. Nothing is sent for a client without Steam, or when no ticket
     /// could be minted; false then, else whether the server registered it.
     /// </summary>
-    public static bool Reidentify(EnvInfo env, string serverUrl, IHttpTransport http, ServerIdentity identity, ILogger log, Action<TimeSpan>? sleep = null, Func<string>? resolveSteamTicket = null)
+    public static bool Reidentify(EnvInfo env, string serverUrl, IHttpTransport http, ServerIdentity identity, ILogger log, Action<TimeSpan>? sleep = null, Func<string>? resolveSteamTicket = null, Func<string, string>? replaceInstallId = null)
     {
         if (string.IsNullOrEmpty(serverUrl) || Urls.Join(serverUrl, "/api/identify") is not { } url)
         {
@@ -161,7 +161,7 @@ public static class IdentityRegistration
         log.Info("[OVS] Reidentify: registering again with a new Steam session ticket");
         for (int attempt = 0; ; attempt++)
         {
-            var outcome = Send(env, url, http, identity, log);
+            var outcome = Send(env, url, http, identity, log, replaceInstallId);
             if (outcome != Outcome.NoAnswer)
             {
                 return outcome == Outcome.Registered;
@@ -183,7 +183,7 @@ public static class IdentityRegistration
     /// stands: the server adds the proof to what the first registration stored for this install. False when nothing
     /// was sent (no token, no server), else whether the server registered it.
     /// </summary>
-    public static bool RegisterEpicToken(EnvInfo env, string token, string serverUrl, IHttpTransport http, ServerIdentity identity, ILogger log, Action<TimeSpan>? sleep = null)
+    public static bool RegisterEpicToken(EnvInfo env, string token, string serverUrl, IHttpTransport http, ServerIdentity identity, ILogger log, Action<TimeSpan>? sleep = null, Func<string, string>? replaceInstallId = null)
     {
         if (token.Length == 0 || string.IsNullOrEmpty(serverUrl) || Urls.Join(serverUrl, "/api/identify") is not { } url)
         {
@@ -195,7 +195,7 @@ public static class IdentityRegistration
         log.Info("[OVS] RegisterIdentity: registering again with the game's Epic account ID token");
         for (int attempt = 0; ; attempt++)
         {
-            var outcome = Send(env, url, http, identity, log);
+            var outcome = Send(env, url, http, identity, log, replaceInstallId);
             if (outcome != Outcome.NoAnswer)
             {
                 return outcome == Outcome.Registered;
@@ -241,8 +241,12 @@ public static class IdentityRegistration
         NoAnswer,
     }
 
-    /// <summary>One POST. A server error counts as no answer, so it is retried; any other refusal is final.</summary>
-    private static Outcome Send(EnvInfo env, Uri url, IHttpTransport http, ServerIdentity identity, ILogger log)
+    /// <summary>
+    /// One POST. A server error counts as no answer, so it is retried; any other refusal is final. When the server says
+    /// the install id is another player's (installIdTaken: their plugin folder was copied here), <paramref name="replaceInstallId"/>
+    /// makes this install its own (<see cref="Config.State.ReplaceInstallId"/>) and the registration is sent once more with it.
+    /// </summary>
+    private static Outcome Send(EnvInfo env, Uri url, IHttpTransport http, ServerIdentity identity, ILogger log, Func<string, string>? replaceInstallId = null)
     {
         // The body is not logged: the install id stands in for an account for players without a
         // Steam or Epic id, and logs get shared.
@@ -250,9 +254,24 @@ public static class IdentityRegistration
         var result = http.Post(url, "application/json", Encoding.UTF8.GetBytes(Body(env)), TimeSpan.FromSeconds(5));
         if (result.Ok)
         {
-            string? token = ParseResponse(result.Text)?.Token;
-            identity.Token = token ?? "";
+            var response = ParseResponse(result.Text);
+            identity.Token = response?.Token ?? "";
             log.Debug($"[OVS] RegisterIdentity: done ({(identity.Token.Length > 0 ? "token kept" : "no token")})");
+            if (response?.InstallIdTaken == true && replaceInstallId != null && env.InstallId.Length > 0)
+            {
+                string id = replaceInstallId(env.InstallId);
+                if (id == env.InstallId)
+                {
+                    log.Warn("[OVS] RegisterIdentity: the server says this install id is another player's, and a new one could not be stored");
+                    return Outcome.Registered;
+                }
+
+                env.InstallId = id;
+                identity.InstallId = id;
+                log.Info("[OVS] RegisterIdentity: the server says this install id is another player's (a copied plugin folder); registering again with a new one");
+                return Send(env, url, http, identity, log);
+            }
+
             return Outcome.Registered;
         }
 
