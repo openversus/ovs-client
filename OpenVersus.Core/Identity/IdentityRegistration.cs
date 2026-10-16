@@ -69,7 +69,8 @@ public static class IdentityRegistration
 
         sleep ??= Thread.Sleep;
         resolveSteamId ??= () => SteamId.Resolve(log, allowLoginUsers: env.Runtime == RuntimeEnvironment.NativeWindows);
-        resolveSteamTicket ??= () => OperatingSystem.IsWindows() ? SteamId.SessionTicket(log) : "";
+        // A Steam launch waits for the game to load its Steam API (SteamId.ModuleWait): asked at once there is none yet.
+        resolveSteamTicket ??= () => OperatingSystem.IsWindows() ? SteamId.SessionTicket(log, env.IsSteamLaunch ? SteamId.ModuleWait : TimeSpan.Zero) : "";
         bool steamIdMissing = env.SteamId is "Unknown" or "";
         if (steamIdMissing && env.IsSteamLaunch)
         {

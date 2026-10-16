@@ -97,13 +97,37 @@ public static unsafe class SteamId
     /// then believes the Steam id. Steamworks 1.57+ (SteamUser_v023) takes a fourth argument, the remote identity; the
     /// game's 1.53 (v021) takes three. The ticket stays valid while the game runs; it is never logged.
     /// </summary>
-    public static string SessionTicket(ILogger log)
+    public static string SessionTicket(ILogger log) => SessionTicket(log, TimeSpan.Zero);
+
+    /// <summary>
+    /// How long a Steam launch's first registration waits for the game to load its Steam API
+    /// (<see cref="IdentityRegistration.Run"/>). The client starts within the first second of the game, when the engine
+    /// has not loaded steam_api64.dll yet; asked then, there was no module, no ticket, and the server never took the
+    /// Steam id as proven (2026-10-16: every Steam launch on Windows, so a reinstall's new install id made a new account).
+    /// The game's own login needs Steam too, so waiting for it does not hold the registration past the login.
+    /// </summary>
+    public static readonly TimeSpan ModuleWait = TimeSpan.FromSeconds(30);
+
+    /// <summary><see cref="SessionTicket(ILogger)"/>, waiting up to <paramref name="moduleWait"/> for the Steam API module.</summary>
+    public static string SessionTicket(ILogger log, TimeSpan moduleWait)
     {
+        var waited = System.Diagnostics.Stopwatch.StartNew();
         nint module = FindSteamModule();
+        while (module == 0 && waited.Elapsed < moduleWait)
+        {
+            Thread.Sleep(250);
+            module = FindSteamModule();
+        }
+
         if (module == 0)
         {
-            log.Warn("[OVS] session ticket: no Steam API module");
+            log.Warn($"[OVS] session ticket: no Steam API module after {waited.Elapsed.TotalSeconds:F0} s");
             return "";
+        }
+
+        if (waited.ElapsedMilliseconds >= 250)
+        {
+            log.Info($"[OVS] session ticket: the game loaded its Steam API after {waited.ElapsedMilliseconds} ms");
         }
 
         string? version = null;
