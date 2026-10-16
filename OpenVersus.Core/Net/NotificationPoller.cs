@@ -11,13 +11,20 @@ namespace OpenVersus.Net;
 /// to send the player back to the lobby the way the native timeout would. Anything that
 /// touches the engine is handed to the game thread. A reidentify notification (the server lost the
 /// Steam session it held for this client's ticket) runs <paramref name="reidentify"/> on a thread of
-/// its own, one at a time: it mints a new ticket, which can wait on Steam, and registers again.
+/// its own, one at a time: it mints a new ticket, which can wait on Steam, and registers again. An
+/// update_required notification (new OpenVersus content is out) runs <paramref name="closeForUpdate"/>
+/// once, with the message to show: it tells the player and closes the game, and the relaunch's startup
+/// update installs the content.
 /// </summary>
-public sealed class NotificationPoller(string serverUrl, IHttpTransport http, ObjectFinder finder, GameImage image, ILogger log, Action? reidentify = null)
+public sealed class NotificationPoller(string serverUrl, IHttpTransport http, ObjectFinder finder, GameImage image, ILogger log, Action? reidentify = null, Action<string>? closeForUpdate = null)
 {
+    /// <summary>Shown when an update_required notification carries no message of its own.</summary>
+    public const string UpdateRequiredMessage = "New OpenVersus content is out. MultiVersus will close in 5 seconds; please relaunch it to install the update.";
+
     // Lives as long as the process; never disposed, since the loop thread may be waiting on it.
     private CancellationTokenSource? _stopping;
     private int _reidentifying;
+    private int _closingForUpdate;
 
     /// <summary>
     /// Starts polling on a background thread, after an eight-second wait for the hooks. Does nothing
@@ -139,6 +146,9 @@ public sealed class NotificationPoller(string serverUrl, IHttpTransport http, Ob
             case "reidentify":
                 Reidentify();
                 break;
+            case "update_required":
+                CloseForUpdate(string.IsNullOrEmpty(n.Message) ? UpdateRequiredMessage : n.Message);
+                break;
             case "match_cancel":
                 log.Info($"[NotifPoller] Match cancel received: {n.Title} — {n.Message}");
                 ShowBanner("Match Canceled", "Opponent left the match", 5.0f);
@@ -192,6 +202,25 @@ public sealed class NotificationPoller(string serverUrl, IHttpTransport http, Ob
             IsBackground = true,
             Name = "OVS reidentify"
         }.Start();
+    }
+
+    // Once per process: the game is closing, so a second one (the server sent it again) is dropped.
+    private void CloseForUpdate(string message)
+    {
+        if (closeForUpdate == null)
+        {
+            log.Info("[NotifPoller] Update required, but this client cannot close the game — ignoring");
+            return;
+        }
+
+        if (Interlocked.Exchange(ref _closingForUpdate, 1) != 0)
+        {
+            log.Info("[NotifPoller] Update required while the game is already closing — ignoring");
+            return;
+        }
+
+        log.Info($"[NotifPoller] Update required: {message}");
+        closeForUpdate(message);
     }
 
     private void ShowBanner(string title, string message, float timeoutSeconds)

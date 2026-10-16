@@ -114,6 +114,55 @@ public sealed class PakUpdate(string paksDirectory, string stagingDirectory, str
         }
     }
 
+    /// <summary>
+    /// Moves every OVS pak in the pak folder that <paramref name="paks"/> does not list into the backup folder, so the
+    /// game mounts, and reports, the release's paks only. The backup folder holds one set: after an install this launch
+    /// (<paramref name="installed"/>) they join that install's backups, else it is emptied first, as
+    /// <see cref="Install"/> does. Not recorded in <see cref="ManifestPath"/>, which is for undoing an install. A file
+    /// that cannot be moved stays, with the reason logged.
+    /// </summary>
+    public void RetireUnlisted(IReadOnlyList<UpdateFile> paks, bool installed)
+    {
+        List<string> extra;
+        try
+        {
+            var listed = paks.Select(f => f.Name!).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            extra = Directory.Exists(paksDirectory)
+                ? Directory.EnumerateFiles(paksDirectory).Where(f => IsPakName(Path.GetFileName(f)) && !listed.Contains(Path.GetFileName(f))).ToList()
+                : [];
+            if (extra.Count == 0)
+            {
+                return;
+            }
+
+            if (!installed && Directory.Exists(backupDirectory))
+            {
+                Directory.Delete(backupDirectory, recursive: true);
+            }
+
+            Directory.CreateDirectory(backupDirectory);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            log.Warn($"[Paks] Cannot move OVS paks the release does not list out of {paksDirectory} ({e.Message}); they stay");
+            return;
+        }
+
+        foreach (string path in extra)
+        {
+            string name = Path.GetFileName(path);
+            try
+            {
+                File.Move(path, Path.Combine(backupDirectory, name), overwrite: true);
+                log.Info($"[Paks] {name}: not in the release; moved to {backupDirectory}");
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                log.Warn($"[Paks] {name}: not in the release, but could not be moved to {backupDirectory} ({e.Message}); it stays");
+            }
+        }
+    }
+
     /// <summary>More files than a release would ever carry; a manifest with more is refused.</summary>
     public const int MaxFiles = 64;
     /// <summary>GitHub's limit for one release asset.</summary>
@@ -578,17 +627,17 @@ public sealed class PakUpdate(string paksDirectory, string stagingDirectory, str
     }
 
     /// <summary>
-    /// The installed OVS_Experimental paks for the X-OVS-Paks header: "name=sha256" per .utoc (name without the
-    /// extension), in name order, separated by semicolons; "" when there is none. The .utoc holds every chunk's hash, so it
-    /// changes with any of the pak's content, and it is small. Hashes come from the hash cache while a file's size and
-    /// modified time are unchanged.
+    /// Every installed OVS pak for the X-OVS-Paks header: "name=sha256" per pak (name without the extension), in name
+    /// order, separated by semicolons; "" when there is none. A pak is hashed by its .utoc, else by its .pak; its .ucas
+    /// and .sig are not. The .utoc holds every chunk's hash, so it changes with any of the pak's content, and it is
+    /// small. Hashes come from the hash cache while a file's size and modified time are unchanged.
     /// </summary>
-    public static string ExperimentalReport(string paksDirectory, string hashCachePath, ILogger log)
+    public static string InstalledReport(string paksDirectory, string hashCachePath, ILogger log)
     {
-        string[] files;
+        HashSet<string> files;
         try
         {
-            files = Directory.GetFiles(paksDirectory, "OVS_Experimental*_P.utoc");
+            files = Directory.EnumerateFiles(paksDirectory).Select(f => Path.GetFileName(f)).Where(IsPakName).ToHashSet(StringComparer.OrdinalIgnoreCase);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
@@ -598,9 +647,14 @@ public sealed class PakUpdate(string paksDirectory, string stagingDirectory, str
         var cache = HashCache.Load(hashCachePath);
         bool changed = false;
         var report = new List<string>();
-        foreach (string path in files.Order(StringComparer.OrdinalIgnoreCase))
+        foreach (string pak in files.Select(f => Path.GetFileNameWithoutExtension(f)).Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase))
         {
-            string name = Path.GetFileName(path);
+            if (!files.TryGetValue(pak + ".utoc", out string? name) && !files.TryGetValue(pak + ".pak", out name))
+            {
+                continue;
+            }
+
+            string path = Path.Combine(paksDirectory, name);
             var info = new FileInfo(path);
             string? hash = cache.Find(name, info.Length, info.LastWriteTimeUtc.Ticks);
             if (hash == null && (hash = HashFile(path)) != null)
@@ -621,6 +675,54 @@ public sealed class PakUpdate(string paksDirectory, string stagingDirectory, str
         }
 
         return string.Join(';', report);
+    }
+
+    /// <summary>The game's own paks in its Content\Paks (the final build's, which no update will change): any other pak is someone else's.</summary>
+    private static readonly string[] s_stockPaks = ["global", "pakchunk0-Windows"];
+
+    /// <summary>The most other paks one report names.</summary>
+    public const int MaxOtherPaks = 20;
+
+    /// <summary>
+    /// Every pak the game mounts from <paramref name="directories"/> (each with its subfolders, as the engine mounts them)
+    /// that is neither one of the game's own nor OVS_*: its name without the extension, characters other than letters,
+    /// digits and . _ - + as _, distinct, sorted, at most <see cref="MaxOtherPaks"/>, ";"-separated. A container is its
+    /// .pak or .utoc. A folder that is missing or cannot be read adds nothing. The server logs them (a pak that changes
+    /// gameplay desyncs a match; a skin does not), and can be set to keep such a game out of online play.
+    /// </summary>
+    public static string OtherPaksReport(IEnumerable<string?> directories)
+    {
+        var names = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (string? directory in directories)
+        {
+            if (string.IsNullOrEmpty(directory) || !Directory.Exists(directory))
+            {
+                continue;
+            }
+
+            try
+            {
+                foreach (string path in Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories))
+                {
+                    string file = Path.GetFileName(path);
+                    if (IsPakName(file) || !(file.EndsWith(".pak", StringComparison.OrdinalIgnoreCase) || file.EndsWith(".utoc", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        continue;
+                    }
+
+                    string name = Path.GetFileNameWithoutExtension(file);
+                    if (!s_stockPaks.Contains(name, StringComparer.OrdinalIgnoreCase))
+                    {
+                        names.Add(new string(name.Take(100).Select(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '_' or '-' or '+' ? c : '_').ToArray()));
+                    }
+                }
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+            }
+        }
+
+        return string.Join(';', names.Take(MaxOtherPaks));
     }
 
     /// <summary>The SHA-256 of a file as lowercase hex, or null when it cannot be read.</summary>

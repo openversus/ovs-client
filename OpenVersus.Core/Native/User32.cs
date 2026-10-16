@@ -11,6 +11,10 @@ public static unsafe partial class User32
     public const uint MB_ICONEXCLAMATION = 0x30;
     /// <summary>MessageBox: the error icon.</summary>
     public const uint MB_ICONERROR = 0x10;
+    /// <summary>MessageBox: above every other window, the game's included.</summary>
+    public const uint MB_TOPMOST = 0x40000;
+    /// <summary>MessageBox: brought to the foreground when it opens.</summary>
+    public const uint MB_SETFOREGROUND = 0x10000;
     /// <summary>SetWindowsHookEx: a keyboard hook on one thread's message queue.</summary>
     public const int WH_KEYBOARD = 2;
     /// <summary>The F1 key.</summary>

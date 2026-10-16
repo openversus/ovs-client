@@ -456,10 +456,9 @@ public sealed class ObjectFinder(GameImage image, IMemory memory, IGameNames nam
             return 0;
         }
 
-        nint vtNative = image.Address(Mvs.UFunctionVTableNativeRva), vtBlueprint = image.Address(Mvs.UFunctionVTableBlueprintRva);
         foreach (var h in Candidates(fn.Index))
         {
-            if (h.VTable != vtNative && h.VTable != vtBlueprint)
+            if (!IsUFunction(h))
             {
                 continue;
             }
@@ -474,6 +473,41 @@ public sealed class ObjectFinder(GameImage image, IMemory memory, IGameNames nam
         }
         return 0;
     }
+
+    /// <summary>
+    /// The UFunction <paramref name="functionName"/> declared on the class at <paramref name="ownerClass"/> itself, or 0.
+    /// For a class that can be unloaded and loaded again (a pak's Blueprint class): an older copy of it, with the same
+    /// name, is skipped instead of found first.
+    /// </summary>
+    public nint FindFunction(nint ownerClass, string functionName)
+    {
+        FName fn = names.Find(functionName);
+        if (fn.Index == 0 || ownerClass == 0)
+        {
+            return 0;
+        }
+
+        foreach (var h in Candidates(fn.Index))
+        {
+            if (h.Outer == ownerClass && IsUFunction(h))
+            {
+                return h.Address;
+            }
+        }
+        return 0;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="ufunction"/> is still the UFunction <paramref name="functionName"/> declared on
+    /// <paramref name="ownerClass"/>: a real UFunction by vtable, with that outer and name. Cheap: one header read.
+    /// </summary>
+    public bool IsFunctionOf(nint ufunction, nint ownerClass, string functionName) =>
+        ObjectHeader.TryRead(memory, ufunction, out var h) && IsUFunction(h) && h.Outer == ownerClass
+        && h.Name.Number == 0 && h.Name.Index == names.Find(functionName).Index;
+
+    // Only a real UFunction (by vtable) may be handed to ProcessEvent.
+    private bool IsUFunction(ObjectHeader h) =>
+        h.VTable == image.Address(Mvs.UFunctionVTableNativeRva) || h.VTable == image.Address(Mvs.UFunctionVTableBlueprintRva);
 
     private IEnumerable<ObjectHeader> Candidates(int nameIndex)
     {

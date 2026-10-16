@@ -124,6 +124,10 @@ public static class Mvs
     public const int ActorInstigator = 0x190;
     /// <summary>AActor, USceneComponent*: RootComponent (CXXHeaderDump).</summary>
     public const int ActorRootComponent = 0x1A8;
+    /// <summary>AMvsCamera, TArray&lt;FMvsTrackedActorState&gt;: TrackedActors (CppSDK dump); each entry 0x20 bytes, the AActor* first.</summary>
+    public const int CameraTrackedActors = 0xA38;
+    /// <summary>FMvsTrackedActorState's size (CppSDK dump).</summary>
+    public const int CameraTrackedActorSize = 0x20;
     /// <summary>USceneComponent, USceneComponent*: AttachParent (CXXHeaderDump).</summary>
     public const int SceneComponentAttachParent = 0xC0;
     /// <summary>AGameModeBase, AGameStateBase*: the match's game state (CXXHeaderDump).</summary>

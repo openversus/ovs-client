@@ -139,9 +139,9 @@ public sealed class LenientBoolConverter : JsonConverter<bool>
 }
 
 /// <summary>One item of /ovs/notifications. Type is null when the server sent none, and such items are skipped.</summary>
-/// <param name="Type">type: match_cancel, toast_received or admin_banner.</param>
+/// <param name="Type">type: match_cancel, toast_received, admin_banner, reidentify or update_required.</param>
 /// <param name="Title">title: the banner's caption.</param>
-/// <param name="Message">message: the banner's text.</param>
+/// <param name="Message">message: the banner's text; for update_required, what the player is told before the game closes.</param>
 /// <param name="Timeout">timeout: seconds an admin banner stays up; 8 when absent.</param>
 public sealed record Notification(string? Type, string Title = "", string Message = "", double? Timeout = null);
 
@@ -162,10 +162,12 @@ public sealed record IdentityBody(string SteamId, string SteamTicket, string Epi
 /// <param name="Ok">ok: whether the identity was registered.</param>
 /// <param name="Token">token: a token the server resolves the player from on the client's own calls.</param>
 /// <param name="Error">error: why not, such as "client_update_required".</param>
+/// <param name="InstallIdTaken">installIdTaken: the install id is another player's (a copied plugin folder); make a new one.</param>
 public sealed record IdentifyResponse(
     [property: JsonConverter(typeof(LenientBoolConverter))] bool Ok,
     [property: JsonConverter(typeof(LenientStringConverter))] string? Token,
-    [property: JsonConverter(typeof(LenientStringConverter))] string? Error);
+    [property: JsonConverter(typeof(LenientStringConverter))] string? Error,
+    [property: JsonConverter(typeof(LenientBoolConverter))] bool InstallIdTaken = false);
 
 /// <summary>
 /// The JSON the client reads and writes, compiled ahead of time: NativeAOT has no reflection

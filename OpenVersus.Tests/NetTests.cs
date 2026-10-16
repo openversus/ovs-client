@@ -86,6 +86,28 @@ public class NetTests
     }
 
     [Fact]
+    public void AnUpdateRequiredNotificationClosesTheGameOnce()
+    {
+        var closes = new List<string>();
+        var log = new ListLogger();
+        var poller = new NotificationPoller("http://ovs.test", new NoHttp(), null!, null!, log, closeForUpdate: closes.Add);
+        var list = NotificationPoller.Parse("""[{"type":"update_required","title":"","message":"New paks are out.","data":{},"timestamp":1},{"type":"update_required","message":"Again."}]""");
+
+        foreach (var n in list)
+        {
+            poller.Dispatch(n);
+        }
+
+        Assert.Equal(["New paks are out."], closes);
+        Assert.Contains(log.Lines, l => l.Contains("already closing"));
+        // Without a message of its own the player is told the default; without a close, it is logged and dropped.
+        new NotificationPoller("http://ovs.test", new NoHttp(), null!, null!, log, closeForUpdate: closes.Add).Dispatch(new Notification("update_required"));
+        Assert.Equal(NotificationPoller.UpdateRequiredMessage, closes[1]);
+        new NotificationPoller("http://ovs.test", new NoHttp(), null!, null!, log).Dispatch(list[0]);
+        Assert.Contains(log.Lines, l => l.Contains("cannot close the game"));
+    }
+
+    [Fact]
     public void NotificationsParseAndUnknownFieldsAreTolerated()
     {
         var list = NotificationPoller.Parse("""[{"type":"admin_banner","title":"Top","message":"Bottom","timeout":10.0,"timestamp":1},{"type":"match_cancel"},{"nope":1},{"type":"toast_received","message":"X toasted you!","extra":[1,2]}]""");
