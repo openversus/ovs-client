@@ -46,6 +46,13 @@ public sealed unsafe class RequestHeaders
     public const string OvsPaks = "X-OVS-Paks";
 
     /// <summary>
+    /// The paks this game mounts that are neither the game's own nor OVS_*, by name, separated by semicolons
+    /// (<see cref="PakUpdate.OtherPaksReport"/>): the server keeps a game running any out of online play, which they would
+    /// desync; offline (the Lab, Local Play) they work as ever. Not sent when there is none.
+    /// </summary>
+    public const string OvsOtherPaks = "X-OVS-Other-Paks";
+
+    /// <summary>
     /// The Beta Speed this game runs, in percent (<see cref="Hooks.GameSpeedHooks.BetaSpeedPercent"/>: the server's, read
     /// at startup): a queue that runs Beta Speed (1v1 Testing Grounds) lets in only games at the server's speed, or the
     /// match would desync.

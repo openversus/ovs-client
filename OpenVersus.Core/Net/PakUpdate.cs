@@ -677,6 +677,54 @@ public sealed class PakUpdate(string paksDirectory, string stagingDirectory, str
         return string.Join(';', report);
     }
 
+    /// <summary>The game's own paks in its Content\Paks (the final build's, which no update will change): any other pak is someone else's.</summary>
+    private static readonly string[] s_stockPaks = ["global", "pakchunk0-Windows"];
+
+    /// <summary>The most other paks one report names.</summary>
+    public const int MaxOtherPaks = 20;
+
+    /// <summary>
+    /// Every pak the game mounts from <paramref name="directories"/> (each with its subfolders, as the engine mounts them)
+    /// that is neither one of the game's own nor OVS_*: its name without the extension, characters other than letters,
+    /// digits and . _ - + as _, distinct, sorted, at most <see cref="MaxOtherPaks"/>, ";"-separated. A container is its
+    /// .pak or .utoc. A folder that is missing or cannot be read adds nothing. The server keeps a game that runs any out
+    /// of online play (they change the simulation, so a match with them desyncs); the Lab and Local Play stay open.
+    /// </summary>
+    public static string OtherPaksReport(IEnumerable<string?> directories)
+    {
+        var names = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (string? directory in directories)
+        {
+            if (string.IsNullOrEmpty(directory) || !Directory.Exists(directory))
+            {
+                continue;
+            }
+
+            try
+            {
+                foreach (string path in Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories))
+                {
+                    string file = Path.GetFileName(path);
+                    if (IsPakName(file) || !(file.EndsWith(".pak", StringComparison.OrdinalIgnoreCase) || file.EndsWith(".utoc", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        continue;
+                    }
+
+                    string name = Path.GetFileNameWithoutExtension(file);
+                    if (!s_stockPaks.Contains(name, StringComparer.OrdinalIgnoreCase))
+                    {
+                        names.Add(new string(name.Take(100).Select(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '_' or '-' or '+' ? c : '_').ToArray()));
+                    }
+                }
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+            }
+        }
+
+        return string.Join(';', names.Take(MaxOtherPaks));
+    }
+
     /// <summary>The SHA-256 of a file as lowercase hex, or null when it cannot be read.</summary>
     public static string? HashFile(string path)
     {

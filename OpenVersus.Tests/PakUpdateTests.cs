@@ -186,6 +186,43 @@ public class PakUpdateTests : IDisposable
         Assert.Equal("", PakUpdate.InstalledReport(Path.Combine(_root, "missing"), hashes, _log));
     }
 
+    [Fact]
+    public void EveryPakThatIsNeitherTheGamesNorOursIsReportedByName()
+    {
+        string content = Path.Combine(_root, "Content", "Paks");
+        Directory.CreateDirectory(Path.Combine(content, "~mods", "MVSI"));
+        Assert.Equal("", PakUpdate.OtherPaksReport([content, _paks, null, Path.Combine(_root, "missing")]));
+
+        // The game's own: never reported.
+        foreach (string stock in new[] { "global.utoc", "global.ucas", "pakchunk0-Windows.pak", "pakchunk0-Windows.utoc", "pakchunk0-Windows.ucas", "pakchunk0-Windows.sig" })
+        {
+            File.WriteAllBytes(Path.Combine(content, stock), Bytes("stock"));
+        }
+
+        // Ours: never reported, wherever they are.
+        File.WriteAllBytes(Path.Combine(_paks, "OVS_P.utoc"), Bytes("ours"));
+        File.WriteAllBytes(Path.Combine(content, "OVS_Old_P.pak"), Bytes("ours, hand installed"));
+        Assert.Equal("", PakUpdate.OtherPaksReport([content, _paks]));
+
+        // Someone else's: by its .pak or .utoc, in either folder and their subfolders, once each, odd characters as _.
+        File.WriteAllBytes(Path.Combine(content, "pakchunk99-OVS-BananaGuard-Test-Windows_P.pak"), Bytes("tweak"));
+        File.WriteAllBytes(Path.Combine(content, "pakchunk99-OVS-BananaGuard-Test-Windows_P.utoc"), Bytes("tweak"));
+        File.WriteAllBytes(Path.Combine(content, "pakchunk99-OVS-BananaGuard-Test-Windows_P.ucas"), Bytes("tweak"));
+        File.WriteAllBytes(Path.Combine(content, "~mods", "MVSI", "MVSI Pack (v2)_P.pak"), Bytes("mvsi"));
+        File.WriteAllBytes(Path.Combine(_paks, "zMod_P.utoc"), Bytes("mod"));
+        File.WriteAllBytes(Path.Combine(_paks, "Readme.txt"), Bytes("not a pak"));
+        File.WriteAllBytes(Path.Combine(_paks, "Loose.ucas"), Bytes("no toc, no pak: not mounted"));
+        Assert.Equal("MVSI_Pack__v2__P;pakchunk99-OVS-BananaGuard-Test-Windows_P;zMod_P", PakUpdate.OtherPaksReport([content, _paks]));
+
+        // At most MaxOtherPaks.
+        for (int i = 0; i < PakUpdate.MaxOtherPaks + 5; i++)
+        {
+            File.WriteAllBytes(Path.Combine(_paks, $"Extra{i:D2}_P.pak"), Bytes("extra"));
+        }
+
+        Assert.Equal(PakUpdate.MaxOtherPaks, PakUpdate.OtherPaksReport([content, _paks]).Split(';').Length);
+    }
+
     // Download and install
 
     [Fact]
