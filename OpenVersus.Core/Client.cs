@@ -302,7 +302,7 @@ public sealed class Client
 
     /// <summary>
     /// <see cref="PakUpdate.OtherPaksReport"/> for this install: the game's Content\Paks and %LOCALAPPDATA%\MultiVersus\Saved\Paks,
-    /// the folders the engine mounts paks from. Logged by name, so a player turned away from online play can see why.
+    /// the folders the engine mounts paks from. Logged by name, as the server logs them.
     /// </summary>
     private string OtherPaksReport()
     {
@@ -313,7 +313,7 @@ public sealed class Client
             gameDirectory == null ? null : Path.Combine(gameDirectory, "Content", "Paks"),
             string.IsNullOrEmpty(localAppData) ? null : Path.Combine(localAppData, "MultiVersus", "Saved", "Paks"),
         ]);
-        Log.Info(report.Length == 0 ? "[Paks] No other paks installed" : $"[Paks] Other paks installed (online play is off while they are): {report.Replace(";", ", ")}");
+        Log.Info(report.Length == 0 ? "[Paks] No other paks installed" : $"[Paks] Other paks installed (reported to the server): {report.Replace(";", ", ")}");
         return report;
     }
 
@@ -604,8 +604,8 @@ public sealed class Client
         // first request to the server, after the startup update has installed what it installs.
         var installedPaks = new Lazy<string>(InstalledPaksReport);
         headers.Add(new HeaderRule(RequestHeaders.OvsPaks, () => installedPaks.Value));
-        // Not a setting: the paks this game mounts that are neither the game's nor OpenVersus's; the server keeps such a
-        // game out of online play. Taken once, like the OVS paks.
+        // Not a setting: the paks this game mounts that are neither the game's nor OpenVersus's, which the server logs (one that
+        // changes gameplay desyncs a match). Taken once, like the OVS paks.
         var otherPaks = new Lazy<string>(OtherPaksReport);
         headers.Add(new HeaderRule(RequestHeaders.OvsOtherPaks, () => otherPaks.Value));
         // Not a setting: the Beta Speed this game runs (the server's, once ClientSettingsFetch has it), for the queues that run it.

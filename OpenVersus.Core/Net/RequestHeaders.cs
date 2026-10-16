@@ -47,8 +47,8 @@ public sealed unsafe class RequestHeaders
 
     /// <summary>
     /// The paks this game mounts that are neither the game's own nor OVS_*, by name, separated by semicolons
-    /// (<see cref="PakUpdate.OtherPaksReport"/>): the server keeps a game running any out of online play, which they would
-    /// desync; offline (the Lab, Local Play) they work as ever. Not sent when there is none.
+    /// (<see cref="PakUpdate.OtherPaksReport"/>): the server logs them (a pak that changes gameplay desyncs a match; a skin
+    /// does not), and can be set to keep such a game out of online play. Not sent when there is none.
     /// </summary>
     public const string OvsOtherPaks = "X-OVS-Other-Paks";
 

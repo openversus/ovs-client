@@ -687,8 +687,8 @@ public sealed class PakUpdate(string paksDirectory, string stagingDirectory, str
     /// Every pak the game mounts from <paramref name="directories"/> (each with its subfolders, as the engine mounts them)
     /// that is neither one of the game's own nor OVS_*: its name without the extension, characters other than letters,
     /// digits and . _ - + as _, distinct, sorted, at most <see cref="MaxOtherPaks"/>, ";"-separated. A container is its
-    /// .pak or .utoc. A folder that is missing or cannot be read adds nothing. The server keeps a game that runs any out
-    /// of online play (they change the simulation, so a match with them desyncs); the Lab and Local Play stay open.
+    /// .pak or .utoc. A folder that is missing or cannot be read adds nothing. The server logs them (a pak that changes
+    /// gameplay desyncs a match; a skin does not), and can be set to keep such a game out of online play.
     /// </summary>
     public static string OtherPaksReport(IEnumerable<string?> directories)
     {
