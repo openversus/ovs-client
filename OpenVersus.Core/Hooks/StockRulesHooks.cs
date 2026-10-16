@@ -214,7 +214,7 @@ public static unsafe class StockRulesHooks
             FriendlyFireHooks.StartMatch(finder, gameMode, settings);
             GameSpeedHooks.StartMatch(finder, gameMode, settings);
             s_endBlockLogged = false;
-            if (s_match is { LastFighterWins: true })
+            if (s_match != null)
             {
                 StartHudSeeding();
             }
@@ -552,11 +552,9 @@ public static unsafe class StockRulesHooks
             TakeOffCamera(victim);
         }
 
-        // The HUD shows each FFA player's own score; a 2v2 HUD shows team scores, left to the game.
-        if (match.LastFighterWins)
-        {
-            PostLivesToHud(match);
-        }
+        // The HUD's player scores show each fighter's own lives: in FFA, and in 2v2 Individual Stocks too (Tuggernuts: "the
+        // free-for-all UI of showing how many lives each person has"), where the game would show team scores.
+        PostLivesToHud(match);
 
         if (winningTeam is not int team)
         {
@@ -584,7 +582,8 @@ public static unsafe class StockRulesHooks
     /// </summary>
     private static void PostLivesToHud(StockRules match)
     {
-        var update = new HudUpdate(s_gameMode, match.LivesLeft(), match.PlayerIndexes.ToArray(), match.Lives, Interlocked.Increment(ref s_hudSequence));
+        var update = new HudUpdate(s_gameMode, match.LivesLeft(), match.PlayerIndexes.ToArray(), match.Lives, Interlocked.Increment(ref s_hudSequence),
+            ShowScores: !match.LastFighterWins);
         ThreadPool.QueueUserWorkItem(static u => HookGuard.Run("FfaLivesHud", u, static u =>
         {
             if (FindHud(u.GameMode) is { } hud)
@@ -637,7 +636,8 @@ public static unsafe class StockRulesHooks
             finder.FindInstancesOfClass(finder.FindClass("UI_IGv3_PlayerScore_C")).ToArray(),
             Reflection.Find(finder, finder.Image, "UI_Broker_C", "SetMaxScoreForPlayer"),
             Reflection.Find(finder, finder.Image, "UI_Broker_C", "SetScoreForPlayer"),
-            Reflection.Find(finder, finder.Image, "UI_IGv3_PlayerScore_C", "OnScore"));
+            Reflection.Find(finder, finder.Image, "UI_IGv3_PlayerScore_C", "OnScore"),
+            Reflection.Find(finder, finder.Image, "Widget", "SetVisibility"));
         s_hud = hud;
         if (hud.Widgets.Length == 0 || s_hudLoggedFor == gameMode)
         {
@@ -676,12 +676,29 @@ public static unsafe class StockRulesHooks
             calls += Call(hud.SetMax, hud.Broker, parameters);
 
             BitConverter.TryWriteBytes(parameters[4..], u.Lives[player]);
-            parameters[8] = (byte)(u.Lives[player] == highest ? 1 : 0);
-            parameters[9] = (byte)(u.Lives[player] == highest && tied ? 1 : 0);
+            // The leader's crown (over the fighter's head and on the portrait) is FFA's: in 2v2 Individual Stocks nobody leads
+            // (Tuggernuts: "get rid of the crown above each person's head"; with equal lives every fighter wore one).
+            bool leads = !u.ShowScores && u.Lives[player] == highest;
+            parameters[8] = (byte)(leads ? 1 : 0);
+            parameters[9] = (byte)(leads && tied ? 1 : 0);
             calls += Call(hud.SetScore, hud.Broker, parameters);
             foreach (nint widget in hud.Widgets)
             {
                 calls += Call(hud.OnScore, widget, parameters);
+            }
+        }
+
+        // 2v2 Individual Stocks: the portraits' score numbers, which a team HUD keeps hidden (it shows team dots), are shown,
+        // as in FFA. Pushed with every update, so a layout refresh that hides them again is undone by the next one.
+        if (u.ShowScores && hud.SetVisibility?.Signature.Reflected is { ParmsSize: >= 1 } visibility)
+        {
+            Span<byte> visible = stackalloc byte[visibility.ParmsSize];
+            visible.Clear();
+            visible[0] = SelfHitTestInvisible;
+            foreach (nint widget in hud.Widgets)
+            {
+                Reflection.Invoke(hud.SetVisibility!, widget, visible);
+                calls++;
             }
         }
 
@@ -699,9 +716,13 @@ public static unsafe class StockRulesHooks
         return 1;
     }
 
-    private sealed record HudTargets(nint GameMode, nint Broker, nint[] Widgets, GameFunction? SetMax, GameFunction? SetScore, GameFunction? OnScore);
+    // ESlateVisibility::SelfHitTestInvisible: drawn, never takes the mouse (as the HUD's own widgets).
+    private const byte SelfHitTestInvisible = 4;
 
-    private sealed record HudUpdate(nint GameMode, int[] Lives, int[] Players, int MaxLives, long Sequence);
+    private sealed record HudTargets(nint GameMode, nint Broker, nint[] Widgets, GameFunction? SetMax, GameFunction? SetScore, GameFunction? OnScore,
+        GameFunction? SetVisibility);
+
+    private sealed record HudUpdate(nint GameMode, int[] Lives, int[] Players, int MaxLives, long Sequence, bool ShowScores);
 
     /// <summary>Whether a HUD function starts with (int32 player, int32 score), the layout the push writes.</summary>
     private static bool TakesPlayerAndScore(GameFunction? function)
