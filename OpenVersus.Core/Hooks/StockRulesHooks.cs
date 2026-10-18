@@ -63,6 +63,11 @@ public static unsafe class StockRulesHooks
     private static delegate* unmanaged<nint, void> s_attemptEndMatch;
     private static delegate* unmanaged<nint, int, void> s_setRespawnsRemaining;
     private static delegate* unmanaged<nint, nint, void> s_respawn;
+    private static delegate* unmanaged<nint, nint, nint, void> s_getEnemyPawns;
+    private static bool s_enemyPawnsTried;
+    // A fighter out of lives taken out of its teammates' Allies: (the Allies array, the fighter), for putting it back when
+    // the fighter is registered again. Game thread.
+    private static readonly List<(nint Allies, nint Pawn)> s_alliesRemoved = [];
     // Fighters kept dead and taken off the camera's framing; a rematch that reuses one puts it back.
     private static readonly HashSet<nint> s_offCamera = [];
     private static CameraTargets? s_camera;
@@ -169,6 +174,7 @@ public static unsafe class StockRulesHooks
         bool keepDead = HookGuard.Run("StocksRespawn", victim, static v => s_match is { } match && match.IsFighter(v) && TryReadInt(v + Mvs.PawnRespawnsRemaining, out int respawns) && respawns == 0, false);
         if (keepDead)
         {
+            HookGuard.Run("StocksRespawnAllies", victim, static v => RemoveFromAllies(v));
             HookGuard.Run("StocksRespawnCamera", victim, static v => TakeOffCamera(v));
             return;
         }
@@ -236,7 +242,157 @@ public static unsafe class StockRulesHooks
         {
             SetOnCamera(character, on: true);
         }
+
+        PutBackInAllies(finder, character);
     }
+
+    /// <summary>
+    /// A fighter out of lives out of its teammates' Allies, as destroying it did. Kept alive (dead), it stayed in there, and
+    /// Velma's Mark (Mvs_Velma_Mark_Projectile, which homes on the nearest of Allies) went to the dead teammate (Tuggernuts,
+    /// 2026-10-17, in 2v2 Individual Stocks). Called where the game would have destroyed it, at its respawn timer
+    /// (<see cref="Respawn"/>): simulation, seconds after the death, past any rollback that could undo it, so every peer
+    /// takes it out on the same frame. Game thread.
+    /// </summary>
+    private static void RemoveFromAllies(nint victim)
+    {
+        if (s_match is not { } match)
+        {
+            return;
+        }
+
+        foreach (nint fighter in match.Pawns)
+        {
+            if (fighter != victim && CodeWriter.TryRead(fighter + Mvs.FixedCharacterTeamComponent, out nint team) && team != 0)
+            {
+                nint allies = team + Mvs.TeamComponentAllies;
+                if (RemoveWhere(allies, victim, static (pawn, v) => pawn == v) > 0)
+                {
+                    s_alliesRemoved.Add((allies, victim));
+                    MatchRulesLog.Line("stocks: a fighter out of lives taken out of a teammate's allies");
+                }
+            }
+        }
+    }
+
+    /// <summary>A fighter registered again (a new game reusing its pawn) back in the Allies it was taken out of, if it is not there already.</summary>
+    private static void PutBackInAllies(ObjectFinder finder, nint character)
+    {
+        for (int i = s_alliesRemoved.Count - 1; i >= 0; i--)
+        {
+            var (allies, pawn) = s_alliesRemoved[i];
+            if (pawn != character)
+            {
+                continue;
+            }
+
+            s_alliesRemoved.RemoveAt(i);
+            if (finder.IsLive(allies - Mvs.TeamComponentAllies) && CodeWriter.TryRead(allies, out nint data) && CodeWriter.TryRead(allies + 8, out int count)
+                && CodeWriter.TryRead(allies + 12, out int max) && data != 0 && count >= 0 && count < max && !Contains(data, count, character)
+                && CodeWriter.TryWrite(data + count * sizeof(nint), character) && CodeWriter.TryWrite(allies + 8, count + 1))
+            {
+                MatchRulesLog.Line("stocks: a fighter registered again is back in a teammate's allies");
+            }
+        }
+    }
+
+    private static bool Contains(nint data, int count, nint pawn)
+    {
+        for (int i = 0; i < count; i++)
+        {
+            if (CodeWriter.TryRead(data + i * sizeof(nint), out nint item) && item == pawn)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Takes the pointers <paramref name="drop"/> picks out of the TArray at <paramref name="array"/>, in place and in order
+    /// (the allocation stays; only the count goes down). Returns how many; 0, with nothing written, when it cannot be read.
+    /// </summary>
+    private static int RemoveWhere<T>(nint array, T state, Func<nint, T, bool> drop)
+    {
+        if (!CodeWriter.TryRead(array, out nint data) || !CodeWriter.TryRead(array + 8, out int count) || data == 0 || count is <= 0 or > 64)
+        {
+            return 0;
+        }
+
+        Span<nint> items = stackalloc nint[count];
+        for (int i = 0; i < count; i++)
+        {
+            if (!CodeWriter.TryRead(data + i * sizeof(nint), out items[i]))
+            {
+                return 0;
+            }
+        }
+
+        int kept = 0;
+        foreach (nint item in items)
+        {
+            if (!drop(item, state))
+            {
+                if (items[kept] != item)
+                {
+                    CodeWriter.TryWrite(data + kept * sizeof(nint), item);
+                }
+
+                items[kept++] = item;
+            }
+        }
+
+        if (kept != count)
+        {
+            CodeWriter.TryWrite(array + 8, kept);
+        }
+
+        return count - kept;
+    }
+
+    /// <summary>
+    /// PfgFunctionLibrary::GetEnemyPawns without the fighters out of lives, as when they were destroyed: Velma's bubble
+    /// (Mvs_Velma_HitAlly_Projectile) picks its target from it and went to an eliminated fighter. Its UFunction's exec thunk
+    /// is swapped for <see cref="GetEnemyPawns"/>, once, when the first stock match loads; Blueprints call it through there.
+    /// </summary>
+    private static void HookEnemyPawns(ObjectFinder finder)
+    {
+        if (s_enemyPawnsTried)
+        {
+            return;
+        }
+
+        s_enemyPawnsTried = true;
+        var function = Reflection.Find(finder, finder.Image, "PfgFunctionLibrary", "GetEnemyPawns");
+        if (function?.Signature.Reflected is not { NativeFunc: not 0, ReturnValueOffset: >= 0 } sig)
+        {
+            s_log?.Warn("[Stocks] PfgFunctionLibrary::GetEnemyPawns not found; fighters out of lives stay targets of homing moves");
+            return;
+        }
+
+        s_getEnemyPawns = (delegate* unmanaged<nint, nint, nint, void>)sig.NativeFunc;
+        CodeWriter.SwapPointer(sig.UFunction + Reflection.UFunctionFunc, sig.NativeFunc, (nint)(delegate* unmanaged<nint, nint, nint, void>)&GetEnemyPawns);
+        s_log?.Debug($"[Stocks] the exec thunk of GetEnemyPawns (0x{sig.NativeFunc:X}) wrapped");
+    }
+
+    /// <summary>
+    /// The exec thunk (UObject* context, FFrame&amp; stack, TArray&lt;APfgFixedPawn*&gt;* result): the game's, then the fighters
+    /// out of lives (dead with no respawns left, both simulation state, so every peer drops the same ones) taken out of the
+    /// result.
+    /// </summary>
+    [UnmanagedCallersOnly]
+    private static void GetEnemyPawns(nint context, nint stack, nint result)
+    {
+        s_getEnemyPawns(context, stack, result);
+        if (s_match != null && result != 0)
+        {
+            HookGuard.Run("StocksEnemyPawns", result, static r => RemoveWhere(r, 0, static (pawn, _) => IsOutOfLives(pawn)));
+        }
+    }
+
+    private static bool IsOutOfLives(nint pawn) =>
+        s_match is { } match && match.IsFighter(pawn) && CodeWriter.TryRead(pawn + Mvs.PawnIsDead, out byte dead) && dead != 0
+        && TryReadInt(pawn + Mvs.PawnRespawnsRemaining, out int respawns) && respawns == 0;
 
     /// <summary>
     /// A fighter out of lives off the camera, once (at its last death or at its respawn timer, whichever comes first), then
@@ -504,6 +660,8 @@ public static unsafe class StockRulesHooks
             s_log?.Warn("[Stocks] AMvsGameModeBase::EndMatch not found; stock rules off for this match");
             return null;
         }
+
+        HookGuard.Run("StocksEnemyPawnsHook", finder, static f => HookEnemyPawns(f));
 
         s_log?.Info($"[Stocks] {match.Name} stock rules on: {match.Lives} lives each (server ringouts {settings.NumRingouts})");
         MatchRulesLog.Line($"stocks: {match.Name}, {match.Lives} lives each");
