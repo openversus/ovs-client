@@ -149,6 +149,24 @@ public static unsafe class SteamId
             return "";
         }
 
+        // The module is loaded before the game's SteamAPI_Init has run: until then SteamAPI_GetHSteamUser is 0 and there is
+        // no user to ask. Asked in that window, the user stayed null for the whole wait (2026-10-19, twice on Windows with
+        // the rollback node off, which no longer delays the registration by its start), so the server got no ticket and the
+        // game's login no identity. Wait for the game's init first, as long as the module wait allows.
+        var steamUserHandle = (delegate* unmanaged[Cdecl]<int>)Kernel32.GetProcAddress(module, "SteamAPI_GetHSteamUser");
+        if (steamUserHandle != null && moduleWait > TimeSpan.Zero && steamUserHandle() == 0)
+        {
+            var init = System.Diagnostics.Stopwatch.StartNew();
+            while (steamUserHandle() == 0 && init.Elapsed < moduleWait)
+            {
+                Thread.Sleep(100);
+            }
+
+            log.Info(steamUserHandle() != 0
+                ? $"[OVS] session ticket: the game started Steam {init.ElapsedMilliseconds} ms after loading it"
+                : $"[OVS] session ticket: the game had not started Steam after {init.Elapsed.TotalSeconds:F0} s");
+        }
+
         var steamUser = (delegate* unmanaged[Cdecl]<nint>)accessor;
         nint user = 0;
         for (int i = 0; i < 60 && user == 0; i++)
