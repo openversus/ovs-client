@@ -416,6 +416,11 @@ public sealed class Client
             poller.Start();
             _shutdown.Add(poller.Stop);
 
+            // The main menu's server panel: players online and the queues, from the server's live-matches feed.
+            var panel = new ServerStatusPanel(Settings.ServerUrl, Http, Objects, Image, Log);
+            panel.Start();
+            _shutdown.Add(panel.Stop);
+
             // The Beta Speed a match with the mutator runs at is the server's: every player and the rollback server must agree.
             Start("OVS client settings", () => new ClientSettingsFetch(Settings.ServerUrl, Http, Log, GameSpeedHooks.SetBetaSpeed).Run());
         }
