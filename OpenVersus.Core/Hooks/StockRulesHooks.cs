@@ -274,9 +274,14 @@ public static unsafe class StockRulesHooks
         }
     }
 
-    /// <summary>A fighter registered again (a new game reusing its pawn) back in the Allies it was taken out of, if it is not there already.</summary>
+    /// <summary>
+    /// A fighter registered again (a new game reusing its pawn) back in the Allies it was taken out of, if it is not there
+    /// already. The team component must still be one: this writes a pointer into it, and an address kept from an earlier
+    /// match may hold another object by now, which the object array alone (<see cref="ObjectFinder.IsLive"/>) cannot tell.
+    /// </summary>
     private static void PutBackInAllies(ObjectFinder finder, nint character)
     {
+        nint teamClass = 0;
         for (int i = s_alliesRemoved.Count - 1; i >= 0; i--)
         {
             var (allies, pawn) = s_alliesRemoved[i];
@@ -286,7 +291,14 @@ public static unsafe class StockRulesHooks
             }
 
             s_alliesRemoved.RemoveAt(i);
-            if (finder.IsLive(allies - Mvs.TeamComponentAllies) && CodeWriter.TryRead(allies, out nint data) && CodeWriter.TryRead(allies + 8, out int count)
+            nint team = allies - Mvs.TeamComponentAllies;
+            if (teamClass == 0)
+            {
+                teamClass = finder.FindClass("MvsTeamComponent");
+            }
+
+            if (teamClass != 0 && finder.IsLive(team) && CodeWriter.TryRead(team + Mvs.ObjectClassPrivate, out nint cls) && ObjectFinder.Inherits(finder.Memory, cls, teamClass)
+                && CodeWriter.TryRead(allies, out nint data) && CodeWriter.TryRead(allies + 8, out int count)
                 && CodeWriter.TryRead(allies + 12, out int max) && data != 0 && count >= 0 && count < max && !Contains(data, count, character)
                 && CodeWriter.TryWrite(data + count * sizeof(nint), character) && CodeWriter.TryWrite(allies + 8, count + 1))
             {
@@ -419,7 +431,8 @@ public static unsafe class StockRulesHooks
     /// taken off again. Testers saw the camera zoom in on an eliminated Iron Giant (after Rage Mode, on the live server); it
     /// never happened on a LAN, where the camera log showed him off for good: something (most likely a rollback over his
     /// death) puts the fighter back after the one removal. The camera is each client's own view, so this cannot desync. One
-    /// guard per match; it ends with the match.
+    /// guard per match; it ends when the match's fighters are gone with its level (or when the next match registers), and
+    /// not before: the fighters it watches are kept alive, dead, until then.
     /// </summary>
     private static void GuardCamera(nint gameMode)
     {
@@ -435,54 +448,97 @@ public static unsafe class StockRulesHooks
 
         new Thread(() => HookGuard.Run("StocksCameraGuard", gameMode, static match =>
         {
-            while (s_gameMode == match)
+            try
             {
-                Thread.Sleep(500);
-                nint[] off;
-                lock (s_offCamera)
+                while (s_gameMode == match)
                 {
-                    off = [.. s_offCamera];
-                }
-
-                if (off.Length == 0 || FindCamera(match) is not { } camera || s_finder is not { } finder)
-                {
-                    continue;
-                }
-
-                GameThread.Post("StocksCameraGuard", () => HookGuard.Run("StocksCameraGuard", (camera, off), static t =>
-                {
-                    foreach (nint pawn in t.off)
+                    Thread.Sleep(500);
+                    nint[] off;
+                    lock (s_offCamera)
                     {
-                        if (s_finder is not { } f || !f.IsLive(pawn))
-                        {
-                            continue;
-                        }
-
-                        // A death a rollback undid: the fighter has lives again, so it goes back on the camera.
-                        if (TryReadInt(pawn + Mvs.PawnRespawnsRemaining, out int respawns) && respawns > 0)
-                        {
-                            lock (s_offCamera)
-                            {
-                                s_offCamera.Remove(pawn);
-                            }
-
-                            MatchRulesLog.Line($"stocks: a fighter taken off the camera has {respawns} lives again (a rollback); back on the camera");
-                            CallCamera(t.camera, pawn, on: true);
-                            continue;
-                        }
-
-                        if (t.camera.Cameras.Where(f.IsLive).Any(cam => IsRegistered(t.camera, cam, pawn)))
-                        {
-                            MatchRulesLog.Line("stocks: a fighter out of lives was back on the camera (a rollback?); taken off again");
-                            CallCamera(t.camera, pawn, on: false);
-                        }
+                        off = [.. s_offCamera];
                     }
 
-                    TakeOffCameraWhatTheyLeft(t.camera, t.off);
-                }));
+                    if (off.Length == 0 || s_finder is not { } finder)
+                    {
+                        continue;
+                    }
+
+                    // None of them is an object any more: the match is over. Left running until the next match registered,
+                    // the guard scanned every object for the dead cameras twice a second, through the results screens and
+                    // the menu (and warned "camera not found" each time).
+                    if (!off.Any(finder.IsLive))
+                    {
+                        break;
+                    }
+
+                    if (FindCamera(match) is not { } camera)
+                    {
+                        continue;
+                    }
+
+                    GameThread.Post("StocksCameraGuard", () => HookGuard.Run("StocksCameraGuard", (camera, off), static t =>
+                    {
+                        foreach (nint pawn in t.off)
+                        {
+                            if (s_finder is not { } f || !f.IsLive(pawn))
+                            {
+                                continue;
+                            }
+
+                            // A death a rollback undid: the fighter has lives again, so it goes back on the camera.
+                            if (TryReadInt(pawn + Mvs.PawnRespawnsRemaining, out int respawns) && respawns > 0)
+                            {
+                                lock (s_offCamera)
+                                {
+                                    s_offCamera.Remove(pawn);
+                                }
+
+                                MatchRulesLog.Line($"stocks: a fighter taken off the camera has {respawns} lives again (a rollback); back on the camera");
+                                CallCamera(t.camera, pawn, on: true);
+                                continue;
+                            }
+
+                            if (t.camera.Cameras.Where(f.IsLive).Any(cam => IsRegistered(t.camera, cam, pawn)))
+                            {
+                                MatchRulesLog.Line("stocks: a fighter out of lives was back on the camera (a rollback?); taken off again");
+                                CallCamera(t.camera, pawn, on: false);
+                            }
+                        }
+
+                        TakeOffCameraWhatTheyLeft(t.camera, t.off);
+                    }));
+                }
+            }
+            finally
+            {
+                EndCameraGuard(match);
             }
         }))
         { IsBackground = true, Name = "OVS stocks camera guard" }.Start();
+    }
+
+    /// <summary>
+    /// The guard for <paramref name="match"/> is over: a later match whose game mode lands at the same address gets a guard
+    /// of its own (<see cref="s_guardedMatch"/> is not left pointing here), and the fighters that are gone leave the
+    /// off-camera set, so the next guard does not read through their old addresses. One still alive stays, for a rematch
+    /// that reuses it (<see cref="OnRegisterCharacter"/> puts it back on the camera).
+    /// </summary>
+    private static void EndCameraGuard(nint match)
+    {
+        var finder = s_finder;
+        lock (s_offCamera)
+        {
+            if (s_guardedMatch == match)
+            {
+                s_guardedMatch = 0;
+            }
+
+            if (finder != null)
+            {
+                s_offCamera.RemoveWhere(pawn => !finder.IsLive(pawn));
+            }
+        }
     }
 
     /// <summary>

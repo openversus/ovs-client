@@ -37,7 +37,8 @@ public sealed unsafe class ServerStatusPanel(string serverUrl, IHttpTransport ht
     private nint _lastState;
     private string _lastScreen = "";
     private GameFunction? _screenId;
-    private bool _failed;
+    // Set on the game thread (Fail), read by the loop: once set, nothing is fetched or posted again.
+    private volatile bool _failed;
     private readonly HashSet<string> _logged = [];
 
     private sealed record Status(int Online, int Queue1v1, int Queue2v2, int QueueEvent, bool EventIsFfa, bool EventOpen, int QueueArena, bool ArenaOpen);
@@ -63,7 +64,10 @@ public sealed unsafe class ServerStatusPanel(string serverUrl, IHttpTransport ht
     {
         var lastFetch = DateTime.MinValue;
         bool wasOnFrontend = false;
-        while (!token.IsCancellationRequested)
+        // Ends when the panel is off for good (Fail): _onFrontend is only ever written by Update, which no longer runs
+        // then, so a loop that went on would have kept fetching every FetchEvery for the rest of the session, in matches
+        // too, with nothing to show the numbers on.
+        while (!token.IsCancellationRequested && !_failed)
         {
             bool onFrontend = _onFrontend;
             if (onFrontend && (!wasOnFrontend || DateTime.UtcNow - lastFetch >= FetchEvery))
@@ -74,12 +78,17 @@ public sealed unsafe class ServerStatusPanel(string serverUrl, IHttpTransport ht
 
             wasOnFrontend = onFrontend;
 
-            if (!_failed && Engine.IsUp)
+            if (Engine.IsUp)
             {
                 GameThread.Post("ServerPanel", () => Hooking.HookGuard.Run("ServerPanel", this, static p => p.Update()));
             }
 
             token.WaitHandle.WaitOne(TickEvery);
+        }
+
+        if (_failed)
+        {
+            log.Info("[ServerPanel] stopped: the server is not asked again this session");
         }
     }
 
