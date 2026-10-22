@@ -58,12 +58,15 @@ jobs:
       # The x64 SDK libraries only; the cross-compile package fetches aarch64 as well by
       # default. An environment variable reaches MSBuild as a property of the same name.
       XwinArches: x86_64
-      # The ASI loader's xinput1_3 build exists only under upstream's moving x64-latest
-      # release, so it is pinned by digest: when upstream replaces it, this build fails
-      # instead of shipping a loader nobody has looked at. To take the new one, check it and
-      # update the digest (and the license's tag, below, to the release it came from).
-      LOADER_URL: https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases/download/x64-latest/xinput1_3-x64.zip
-      LOADER_SHA256: f1f5bc1e37b4872c92335a9487053764f0ef3800aed948cf8cdc16775a338b47
+      # The ASI loader, pinned to a tagged upstream release and to its digest. Upstream ships one
+      # DLL per release (dinput8.dll in Ultimate-ASI-Loader_x64.zip) that takes its role from its
+      # file name, so it is renamed to xinput1_3.dll here; the pre-renamed xinput1_3-x64.zip
+      # exists only under the moving x64-latest release, which upstream replaces with every
+      # release (v10.0.0 on 2026-10-21 broke the build that pinned its digest). To move to a
+      # newer loader, check it, then change the tag in both URLs and the digest together.
+      LOADER_TAG: v9.7.4
+      LOADER_URL: https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases/download/v9.7.4/Ultimate-ASI-Loader_x64.zip
+      LOADER_SHA256: 8272d83b2692662098746f2d0ad0e2d85f3c8358ab1d63f75fbe835c2c8135fd
       LOADER_LICENSE_URL: https://raw.githubusercontent.com/ThirteenAG/Ultimate-ASI-Loader/v9.7.4/license
     steps:
       - name: Checkout
@@ -139,8 +142,10 @@ jobs:
           cp VERSION "$home/VERSION.txt"
           curl -fsSL -o "$RUNNER_TEMP/loader.zip" "$LOADER_URL"
           echo "$LOADER_SHA256  $RUNNER_TEMP/loader.zip" | sha256sum -c - \
-            || { echo "::error::the ASI loader at $LOADER_URL has changed; check the new one and update LOADER_SHA256 in build.yml"; exit 1; }
-          unzip -q -j "$RUNNER_TEMP/loader.zip" xinput1_3.dll -d dist
+            || { echo "::error::the ASI loader $LOADER_TAG at $LOADER_URL is not the file that was checked; verify it and update LOADER_SHA256 in build.yml"; exit 1; }
+          # The release's one DLL, under the name the game loads it by (the loader reads its own file name).
+          unzip -q -j "$RUNNER_TEMP/loader.zip" dinput8.dll -d "$RUNNER_TEMP"
+          mv "$RUNNER_TEMP/dinput8.dll" dist/xinput1_3.dll
           curl -fsSL -o dist/LICENSE_Ultimate_ASI_Loader.txt "$LOADER_LICENSE_URL"
 
       - name: Guard - the artifact is what ships
