@@ -92,7 +92,8 @@ public sealed partial class State
 
     /// <summary>
     /// This install's random id (32 hex characters), or "" when there is none yet. The server
-    /// resolves a player by it when there is no Steam or Epic id, so it must never change.
+    /// resolves a player by it when there is no Steam or Epic id, so it must never change, unless the server says it
+    /// is another player's (<see cref="ReplaceInstallId"/>).
     /// </summary>
     public string InstallId { get; private set; } = "";
 
@@ -118,13 +119,32 @@ public sealed partial class State
     /// Returns "" when it cannot be stored: an id that is not on disk would be a different one
     /// next launch, and the server would take that for a new install.
     /// </summary>
-    public string LoadOrCreateInstallId()
-    {
-        if (InstallId.Length > 0)
-        {
-            return InstallId;
-        }
+    public string LoadOrCreateInstallId() => InstallId.Length > 0 ? InstallId : CreateInstallId();
 
+    /// <summary>
+    /// A new install id in place of <paramref name="taken"/>, when the server says that one is another player's: their
+    /// plugin folder, this file included, was copied here. Returns the id to use: the new one, the current one when it is
+    /// no longer <paramref name="taken"/> (another registration replaced it first), or <paramref name="taken"/> when a new
+    /// one cannot be stored.
+    /// </summary>
+    public string ReplaceInstallId(string taken)
+    {
+        lock (_installLock)
+        {
+            if (InstallId != taken)
+            {
+                return InstallId;
+            }
+
+            string id = CreateInstallId();
+            return id.Length > 0 ? id : taken;
+        }
+    }
+
+    private readonly object _installLock = new();
+
+    private string CreateInstallId()
+    {
         string id = Convert.ToHexStringLower(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16));
         _toml.Set("Identity", "InstallId", SettingKind.String, id);
         if (!_toml.Save())

@@ -85,8 +85,6 @@ public sealed class Settings
         public static readonly SettingDef ReleaseOwner = SettingDef.Str("Settings.Debug", "ReleaseOwner", "openversus");
         /// <summary>Writes logs/MatchRules.log: each match's settings, stock deaths and friendly-fire hits (<see cref="Hooks.MatchRulesLog"/>).</summary>
         public static readonly SettingDef MatchRulesLog = SettingDef.Bool("Settings.Debug", "MatchRulesLog", false);
-        /// <summary>Turns friendly fire on in offline matches (Local Play, the Lab) without the mutator, for testing (<see cref="Hooks.FriendlyFireHooks"/>). Never online.</summary>
-        public static readonly SettingDef FriendlyFireOffline = SettingDef.Bool("Settings.Debug", "FriendlyFireOffline", false);
         /// <summary>Game speed in percent for offline matches (Local Play, the Lab), for testing (<see cref="Hooks.GameSpeedHooks"/>); 100 is normal. Never online.</summary>
         public static readonly SettingDef LabGameSpeedPercent = SettingDef.Int("Settings.Debug", "LabGameSpeedPercent", 100);
         // Settings
@@ -209,7 +207,6 @@ public sealed class Settings
         Rows.CountSunsetCalls,
         Rows.ReleaseOwner,
         Rows.MatchRulesLog,
-        Rows.FriendlyFireOffline,
         Rows.LabGameSpeedPercent,
         Rows.ServerUrl,
         Rows.ProdServerUrl,
@@ -219,7 +216,7 @@ public sealed class Settings
         Rows.P2PRegistryPort,
     ];
 
-    /// <summary>Keys the C++ client read and this one does not.</summary>
+    /// <summary>Keys the C++ client, or an earlier version of this one, read and this one does not.</summary>
     public static readonly IReadOnlyList<RetiredSetting> RetiredKeys =
     [
         new("Settings", "LogSize", "logs/OpenVersus.log starts fresh each launch and older logs are archived, so there is no size to cap"),
@@ -227,6 +224,7 @@ public sealed class Settings
         new("Settings", "AntiCheatEngine", "it named a function the C++ client looked up, and this client does not use it"),
         new("Settings", "CurlSetOpt", "it named a function the C++ client looked up, and this client does not use it"),
         new("Settings", "CurlPerform", "it named a function the C++ client looked up, and this client does not use it"),
+        new("Settings.Debug", "FriendlyFireOffline", "friendly fire follows the experimental pak: its Lab toggle turns it on offline, the server's mutator online"),
     ];
 
     /// <summary>The row at <paramref name="section"/> and <paramref name="key"/>, regardless of case, or null.</summary>
@@ -481,8 +479,6 @@ public sealed class Settings
     public string ReleaseOwner => Get(Rows.ReleaseOwner);
     /// <inheritdoc cref="Rows.MatchRulesLog"/>
     public bool MatchRulesLog => GetBool(Rows.MatchRulesLog);
-    /// <inheritdoc cref="Rows.FriendlyFireOffline"/>
-    public bool FriendlyFireOffline => GetBool(Rows.FriendlyFireOffline);
     /// <inheritdoc cref="Rows.LabGameSpeedPercent"/>
     public int LabGameSpeedPercent => (int)Math.Min(GetInt(Rows.LabGameSpeedPercent), int.MaxValue);
     // Settings

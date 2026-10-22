@@ -97,13 +97,37 @@ public static unsafe class SteamId
     /// then believes the Steam id. Steamworks 1.57+ (SteamUser_v023) takes a fourth argument, the remote identity; the
     /// game's 1.53 (v021) takes three. The ticket stays valid while the game runs; it is never logged.
     /// </summary>
-    public static string SessionTicket(ILogger log)
+    public static string SessionTicket(ILogger log) => SessionTicket(log, TimeSpan.Zero);
+
+    /// <summary>
+    /// How long a Steam launch's first registration waits for the game to load its Steam API
+    /// (<see cref="IdentityRegistration.Run"/>). The client starts within the first second of the game, when the engine
+    /// has not loaded steam_api64.dll yet; asked then, there was no module, no ticket, and the server never took the
+    /// Steam id as proven (2026-10-16: every Steam launch on Windows, so a reinstall's new install id made a new account).
+    /// The game's own login needs Steam too, so waiting for it does not hold the registration past the login.
+    /// </summary>
+    public static readonly TimeSpan ModuleWait = TimeSpan.FromSeconds(30);
+
+    /// <summary><see cref="SessionTicket(ILogger)"/>, waiting up to <paramref name="moduleWait"/> for the Steam API module.</summary>
+    public static string SessionTicket(ILogger log, TimeSpan moduleWait)
     {
+        var waited = System.Diagnostics.Stopwatch.StartNew();
         nint module = FindSteamModule();
+        while (module == 0 && waited.Elapsed < moduleWait)
+        {
+            Thread.Sleep(250);
+            module = FindSteamModule();
+        }
+
         if (module == 0)
         {
-            log.Warn("[OVS] session ticket: no Steam API module");
+            log.Warn($"[OVS] session ticket: no Steam API module after {waited.Elapsed.TotalSeconds:F0} s");
             return "";
+        }
+
+        if (waited.ElapsedMilliseconds >= 250)
+        {
+            log.Info($"[OVS] session ticket: the game loaded its Steam API after {waited.ElapsedMilliseconds} ms");
         }
 
         string? version = null;
@@ -123,6 +147,24 @@ public static unsafe class SteamId
         {
             log.Warn("[OVS] session ticket: the Steam API has no user accessor or GetAuthSessionTicket");
             return "";
+        }
+
+        // The module is loaded before the game's SteamAPI_Init has run: until then SteamAPI_GetHSteamUser is 0 and there is
+        // no user to ask. Asked in that window, the user stayed null for the whole wait (2026-10-19, twice on Windows with
+        // the rollback node off, which no longer delays the registration by its start), so the server got no ticket and the
+        // game's login no identity. Wait for the game's init first, as long as the module wait allows.
+        var steamUserHandle = (delegate* unmanaged[Cdecl]<int>)Kernel32.GetProcAddress(module, "SteamAPI_GetHSteamUser");
+        if (steamUserHandle != null && moduleWait > TimeSpan.Zero && steamUserHandle() == 0)
+        {
+            var init = System.Diagnostics.Stopwatch.StartNew();
+            while (steamUserHandle() == 0 && init.Elapsed < moduleWait)
+            {
+                Thread.Sleep(100);
+            }
+
+            log.Info(steamUserHandle() != 0
+                ? $"[OVS] session ticket: the game started Steam {init.ElapsedMilliseconds} ms after loading it"
+                : $"[OVS] session ticket: the game had not started Steam after {init.Elapsed.TotalSeconds:F0} s");
         }
 
         var steamUser = (delegate* unmanaged[Cdecl]<nint>)accessor;

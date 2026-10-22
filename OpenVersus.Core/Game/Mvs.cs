@@ -124,6 +124,10 @@ public static class Mvs
     public const int ActorInstigator = 0x190;
     /// <summary>AActor, USceneComponent*: RootComponent (CXXHeaderDump).</summary>
     public const int ActorRootComponent = 0x1A8;
+    /// <summary>AMvsCamera, TArray&lt;FMvsTrackedActorState&gt;: TrackedActors (CppSDK dump); each entry 0x20 bytes, the AActor* first.</summary>
+    public const int CameraTrackedActors = 0xA38;
+    /// <summary>FMvsTrackedActorState's size (CppSDK dump).</summary>
+    public const int CameraTrackedActorSize = 0x20;
     /// <summary>USceneComponent, USceneComponent*: AttachParent (CXXHeaderDump).</summary>
     public const int SceneComponentAttachParent = 0xC0;
     /// <summary>AGameModeBase, AGameStateBase*: the match's game state (CXXHeaderDump).</summary>
@@ -144,6 +148,15 @@ public static class Mvs
     /// matches start with; the native DoRespawn decrements a positive count and still revives at 0.
     /// </summary>
     public const int PawnRespawnsRemaining = 0x380;
+    /// <summary>APfgFixedPawn, bool: IsDead (CXXHeaderDump), simulation state; a fighter out of lives stays dead.</summary>
+    public const int PawnIsDead = 0x350;
+    /// <summary>AMvsFixedCharacter, UMvsTeamComponent*: TeamComponent (CXXHeaderDump).</summary>
+    public const int FixedCharacterTeamComponent = 0x3F0;
+    /// <summary>
+    /// UMvsTeamComponent, TArray&lt;AMvsFixedCharacter*&gt;: Allies, the fighter's teammates (CXXHeaderDump). Blueprints read
+    /// it directly: Velma's Mark projectile homes on the nearest one.
+    /// </summary>
+    public const int TeamComponentAllies = 0xD8;
     // APfgFixedGameStateBase
     /// <summary>Pointer to the game state's UPfgNetcodeSession.</summary>
     public const int GameStateNetcodeSession = 0x4A0;

@@ -126,6 +126,9 @@ public sealed class StockRules
         _livesLeft[playerIndex] = Lives;
     }
 
+    /// <summary>The registered fighters' pawns.</summary>
+    public IEnumerable<nint> Pawns => _fighters.Select(f => f.Pawn);
+
     /// <summary>Whether <paramref name="pawn"/> is a registered fighter.</summary>
     public bool IsFighter(nint pawn) => _fighters.Any(f => f.Pawn == pawn);
 

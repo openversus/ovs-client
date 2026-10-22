@@ -63,20 +63,15 @@ public class MatchSettingsTests
     }
 
     [Fact]
-    public void FriendlyFireIsOnWithTheMutatorOrOfflineWhenTesting()
+    public void TheFriendlyFireMutatorIsTheServersWorldBuff()
     {
         var withMutator = new MatchSettings("2v2", 4, ["ovs_friendly_fire"], 5, true);
         var online = new MatchSettings("2v2", 4, [], 5, true);
-        var localPlay = new MatchSettings("2v2", 4, [], MatchSettings.LocalPlayMatchType, false);
         var lab = new MatchSettings("1v1", 4, [], MatchSettings.LabMatchType, false);
 
-        Assert.True(FriendlyFireHooks.IsOn(withMutator, offlineTesting: false));
-        Assert.False(FriendlyFireHooks.IsOn(online, offlineTesting: true));
-        Assert.False(FriendlyFireHooks.IsOn(localPlay, offlineTesting: false));
-        Assert.True(FriendlyFireHooks.IsOn(localPlay, offlineTesting: true));
-        Assert.True(FriendlyFireHooks.IsOn(lab, offlineTesting: true));
-        // An online match never takes it from the setting, whatever its type says.
-        Assert.False(FriendlyFireHooks.IsOn(localPlay with { Online = true }, offlineTesting: true));
+        Assert.True(FriendlyFireHooks.IsMutator(withMutator));
+        Assert.False(FriendlyFireHooks.IsMutator(online));
+        Assert.False(FriendlyFireHooks.IsMutator(lab));
     }
 
     [Fact]
