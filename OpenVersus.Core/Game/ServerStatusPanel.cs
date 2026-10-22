@@ -158,32 +158,35 @@ public sealed unsafe class ServerStatusPanel(string serverUrl, IHttpTransport ht
         SetVisibility(HitTestInvisible);
         Span<byte> parameters = stackalloc byte[_setStatus!.Signature.Reflected!.ParmsSize];
         parameters.Clear();
+        // Engine names ignore case and keep the spelling registered first: on a PC where something else in the game made
+        // "online" before the panel loaded, the parameter reads back as "online", so its count was never written (the
+        // panel showed 0 online while the queues, whose names nothing else uses, were right). Matched in any capitals.
         foreach (var p in _setStatus.Signature.Reflected.Parameters)
         {
-            switch (p.Name)
+            switch (p.Name.ToLowerInvariant())
             {
-                case "Online":
+                case "online":
                     BitConverter.TryWriteBytes(parameters[p.Offset..], status.Online);
                     break;
-                case "Queue1v1":
+                case "queue1v1":
                     BitConverter.TryWriteBytes(parameters[p.Offset..], status.Queue1v1);
                     break;
-                case "Queue2v2":
+                case "queue2v2":
                     BitConverter.TryWriteBytes(parameters[p.Offset..], status.Queue2v2);
                     break;
-                case "QueueEvent":
+                case "queueevent":
                     BitConverter.TryWriteBytes(parameters[p.Offset..], status.QueueEvent);
                     break;
-                case "EventIsFfa":
+                case "eventisffa":
                     parameters[p.Offset] = (byte)(status.EventIsFfa ? 1 : 0);
                     break;
-                case "QueueArena":
+                case "queuearena":
                     BitConverter.TryWriteBytes(parameters[p.Offset..], status.QueueArena);
                     break;
-                case "ArenaOpen":
+                case "arenaopen":
                     parameters[p.Offset] = (byte)(status.ArenaOpen ? 1 : 0);
                     break;
-                case "EventOpen":
+                case "eventopen":
                     parameters[p.Offset] = (byte)(status.EventOpen ? 1 : 0);
                     break;
             }
@@ -252,11 +255,11 @@ public sealed unsafe class ServerStatusPanel(string serverUrl, IHttpTransport ht
         parameters.Clear();
         foreach (var p in create.Parameters)
         {
-            if (p.Name == "WorldContextObject")
+            if (string.Equals(p.Name, "WorldContextObject", StringComparison.OrdinalIgnoreCase))
             {
                 BitConverter.TryWriteBytes(parameters[p.Offset..], (long)worldContext);
             }
-            else if (p.Name == "WidgetType")
+            else if (string.Equals(p.Name, "WidgetType", StringComparison.OrdinalIgnoreCase))
             {
                 BitConverter.TryWriteBytes(parameters[p.Offset..], (long)_class);
             }
