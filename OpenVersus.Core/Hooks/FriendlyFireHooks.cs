@@ -69,6 +69,8 @@ public static unsafe class FriendlyFireHooks
     // The pak's friendly-fire buff, whose Blueprint rules are called through ProcessEvent, and the hit's size.
     private const string PakBuffClass = "MvsBuff_OVS_FriendlyFire_C";
     private const int ActiveHitInteractionSize = 0x390;
+    /// <summary>The most parameter bytes a pak rule may take, since they go on the caller's stack (the hit and a few flags are about 0x3A0).</summary>
+    private const int MaxRuleParmsSize = 4096;
 
     /// <summary>The most lines one match writes to <see cref="MatchRulesLog"/>; a repeat of the line before counts once.</summary>
     private const int MaxLoggedPerMatch = 2000;
@@ -327,7 +329,6 @@ public static unsafe class FriendlyFireHooks
         public bool Ally { get; } = ally;
         public GameFunction? Resolved { get; set; }
         public nint ResolvedClass { get; set; }
-        public byte[] Parms { get; set; } = [];
 
         public void Forget()
         {
@@ -419,17 +420,15 @@ public static unsafe class FriendlyFireHooks
         var info = sig?.Parameters.FirstOrDefault(x => x.Name == "AttackInfo");
         var result = sig?.Parameters.FirstOrDefault(x => x.Name == rule.Result);
         var isAlly = sig?.Parameters.FirstOrDefault(x => x.Name == "IsAllyInteraction");
-        if (sig == null || info == null || result == null || info.Size != ActiveHitInteractionSize || (rule.Ally && isAlly == null))
+        if (sig == null || info == null || result == null || info.Size != ActiveHitInteractionSize || (rule.Ally && isAlly == null)
+            || sig.ParmsSize > MaxRuleParmsSize)
         {
             return false;
         }
 
-        if (rule.Parms.Length != sig.ParmsSize)
-        {
-            rule.Parms = new byte[sig.ParmsSize];
-        }
-
-        Span<byte> parms = rule.Parms;
+        // The parameters on this call's own stack, not in a buffer shared by every call of the rule: two hits asked about
+        // at once (hits trade, and a rule could reach another hit before returning) must not read each other's answer.
+        Span<byte> parms = stackalloc byte[sig.ParmsSize];
         parms.Clear();
         if (!CodeWriter.TryRead(hit, parms.Slice(info.Offset, ActiveHitInteractionSize)))
         {
