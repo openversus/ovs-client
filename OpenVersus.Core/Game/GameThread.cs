@@ -21,8 +21,27 @@ public static unsafe class GameThread
     /// <summary>Sets the logger the queue reports to; until then it logs nothing.</summary>
     public static void Attach(ILogger log) => s_log = log;
 
-    /// <summary>The game's main window (class UnrealWindow), or 0 before it exists. Its message pump runs the queued work.</summary>
-    public static nint Window => User32.FindWindow("UnrealWindow", null);
+    /// <summary>
+    /// The game's main window: this process's top-level window of class UnrealWindow, or 0 before it exists. Its message pump
+    /// runs the queued work. Every Unreal program's windows have that class (the Epic Games Launcher's too), so the first one
+    /// on the desktop can be another program's: SetTimer refuses that one (error 5) and nothing posted would run.
+    /// </summary>
+    public static nint Window
+    {
+        get
+        {
+            for (nint window = User32.FindWindowEx(0, 0, "UnrealWindow", null); window != 0; window = User32.FindWindowEx(0, window, "UnrealWindow", null))
+            {
+                User32.GetWindowThreadProcessId(window, out uint process);
+                if (process == (uint)Environment.ProcessId)
+                {
+                    return window;
+                }
+            }
+
+            return 0;
+        }
+    }
 
     /// <summary>Queues <paramref name="work"/> to run once; false if the game window does not exist yet.</summary>
     public static bool Post(string name, Action work) => Post(name, () =>
