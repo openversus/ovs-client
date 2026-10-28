@@ -129,11 +129,16 @@ public sealed unsafe class ServerStatusPanel(string serverUrl, IHttpTransport ht
         var numbers = new Dictionary<string, int>
         {
             ["online"] = root.TryGetProperty("onlinePlayers", out var o) && o.TryGetInt32(out int on) ? on : 0,
-            ["queue1v1"] = Count("searching", "1v1"), ["playing1v1"] = Count("playing", "1v1"),
-            ["queue2v2"] = Count("searching", "2v2"), ["playing2v2"] = Count("playing", "2v2"),
-            ["queuetg1"] = Count("searching", "1v1 Testing Grounds"), ["playingtg1"] = Count("playing", "1v1 Testing Grounds"),
-            ["queueevent"] = Count("searching", eventQueue), ["playingevent"] = Count("playing", eventQueue),
-            ["queuearena"] = Count("searching", "Arena"), ["playingarena"] = Count("playing", "Arena"),
+            ["queue1v1"] = Count("searching", "1v1"),
+            ["playing1v1"] = Count("playing", "1v1"),
+            ["queue2v2"] = Count("searching", "2v2"),
+            ["playing2v2"] = Count("playing", "2v2"),
+            ["queuetg1"] = Count("searching", "1v1 Testing Grounds"),
+            ["playingtg1"] = Count("playing", "1v1 Testing Grounds"),
+            ["queueevent"] = Count("searching", eventQueue),
+            ["playingevent"] = Count("playing", eventQueue),
+            ["queuearena"] = Count("searching", "Arena"),
+            ["playingarena"] = Count("playing", "Arena"),
         };
         var flags = new Dictionary<string, bool>
         {
