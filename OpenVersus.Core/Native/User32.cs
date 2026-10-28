@@ -45,6 +45,14 @@ public static unsafe partial class User32
     [LibraryImport("user32.dll", EntryPoint = "FindWindowA", StringMarshalling = StringMarshalling.Utf8)]
     public static partial nint FindWindow(string? className, string? windowName);
 
+    /// <summary>FindWindowExA: the next window under <paramref name="parent"/> (0: the desktop's top-level windows) after <paramref name="after"/>, by class and title, either of which may be null; 0 when there is none.</summary>
+    [LibraryImport("user32.dll", EntryPoint = "FindWindowExA", StringMarshalling = StringMarshalling.Utf8)]
+    public static partial nint FindWindowEx(nint parent, nint after, string? className, string? windowName);
+
+    /// <summary>GetWindowThreadProcessId: the thread that made the window; the process it belongs to in <paramref name="processId"/>.</summary>
+    [LibraryImport("user32.dll")]
+    public static partial uint GetWindowThreadProcessId(nint window, out uint processId);
+
     /// <summary>SetTimer: the procedure runs on the window's thread when the timer fires; 0 on failure.</summary>
     [LibraryImport("user32.dll", SetLastError = true)]
     public static partial nuint SetTimer(nint window, nuint id, uint milliseconds, nint procedure);
