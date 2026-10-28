@@ -6,9 +6,10 @@ using Microsoft.Extensions.Logging;
 namespace OpenVersus.Game;
 
 /// <summary>
-/// The main menu's server panel (Tuggernuts, 2026-10-21, after FDAVersus's "PLAYERS ONLINE / IN QUEUE" box): players online
-/// and who is queueing for 1v1, 2v2, the open event queue (FFA or Testing Grounds) and Arenas while it is on. The panel is the experimental pak's
-/// WBP_OVS_ServerStatus; what a Blueprint cannot do is here: reading the server's numbers (GET /api/matches, the website's
+/// The main menu's server panel (Tuggernuts, 2026-10-21, after FDAVersus's "PLAYERS ONLINE / IN QUEUE" box; 2026-10-27: every
+/// open queue on its own line): players online, then how many are playing and searching in 1v1, 2v2, 1v1 Testing Grounds, the
+/// event slot (2v2 Testing Grounds, or FFA on its days) and Arenas while it is on, and whether Twosday is on (1v1 is off then).
+/// The panel is the experimental pak's WBP_OVS_ServerStatus; what a Blueprint cannot do is here: reading the server's numbers (GET /api/matches, the website's
 /// live-matches feed, every <see cref="FetchEvery"/>), loading the widget class from the pak, putting it on screen on the
 /// main menu (<see cref="HomeScreen"/>) and passing it the numbers (its OVS_SetStatus formats them). Anywhere else it is
 /// hidden, and nothing is fetched: only a game on the main menu asks (every <see cref="FetchEvery"/>, and at once on
@@ -39,9 +40,14 @@ public sealed unsafe class ServerStatusPanel(string serverUrl, IHttpTransport ht
     private GameFunction? _screenId;
     // Set on the game thread (Fail), read by the loop: once set, nothing is fetched or posted again.
     private volatile bool _failed;
+    // Creates in a row that returned no widget (EnsureWidget): after a logout the class may have gone with the old world.
+    private int _createFailures;
+    private const int MaxCreateFailures = 5;
+    private const string WidgetClassName = "WBP_OVS_ServerStatus_C";
     private readonly HashSet<string> _logged = [];
 
-    private sealed record Status(int Online, int Queue1v1, int Queue2v2, int QueueEvent, bool EventIsFfa, bool EventOpen, int QueueArena, bool ArenaOpen);
+    // OVS_SetStatus's inputs by name, lowercased (the engine may keep another spelling: Update), ints and bools apart.
+    private sealed record Status(IReadOnlyDictionary<string, int> Numbers, IReadOnlyDictionary<string, bool> Flags);
 
     /// <summary>Starts the fetch-and-update thread.</summary>
     public void Start()
@@ -104,20 +110,40 @@ public sealed unsafe class ServerStatusPanel(string serverUrl, IHttpTransport ht
         try
         {
             using var doc = JsonDocument.Parse(result.Body);
-            var root = doc.RootElement;
-            int Count(string queue) => root.TryGetProperty("searching", out var s) && s.TryGetProperty(queue, out var n) && n.TryGetInt32(out int v) ? v : 0;
-            bool ffaOpen = root.TryGetProperty("ffaOpen", out var f) && f.ValueKind == JsonValueKind.True;
-            int online = root.TryGetProperty("onlinePlayers", out var o) && o.TryGetInt32(out int on) ? on : 0;
-            bool arenaOpen = root.TryGetProperty("arenaOpen", out var a) && a.ValueKind == JsonValueKind.True;
-            // During Twosday neither FFA nor Testing Grounds is open: the event entry is left out.
-            bool testingGroundsOpen = root.TryGetProperty("testingGroundsOpen", out var t) && t.ValueKind == JsonValueKind.True;
-            _status = new Status(online, Count("1v1"), Count("2v2"), ffaOpen ? Count("FFA") : Count("1v1 Testing Grounds"), ffaOpen,
-                ffaOpen || testingGroundsOpen, Count("Arena"), arenaOpen);
+            _status = StatusOf(doc.RootElement);
         }
         catch (JsonException e)
         {
             LogOnce("parse", $"[ServerPanel] /api/matches is not the expected JSON: {e.Message} (logged once)");
         }
+    }
+
+    // The panel's inputs from the feed: each queue's searching and playing (a server without "playing" leaves them 0), the event
+    // slot FFA while its queue is open, else 2v2 Testing Grounds (during Twosday neither, nor 1v1 Testing Grounds).
+    private static Status StatusOf(JsonElement root)
+    {
+        int Count(string list, string queue) => root.TryGetProperty(list, out var s) && s.TryGetProperty(queue, out var n) && n.TryGetInt32(out int v) ? v : 0;
+        bool Flag(string name) => root.TryGetProperty(name, out var f) && f.ValueKind == JsonValueKind.True;
+        bool ffaOpen = Flag("ffaOpen");
+        string eventQueue = ffaOpen ? "FFA" : "2v2 Testing Grounds";
+        var numbers = new Dictionary<string, int>
+        {
+            ["online"] = root.TryGetProperty("onlinePlayers", out var o) && o.TryGetInt32(out int on) ? on : 0,
+            ["queue1v1"] = Count("searching", "1v1"), ["playing1v1"] = Count("playing", "1v1"),
+            ["queue2v2"] = Count("searching", "2v2"), ["playing2v2"] = Count("playing", "2v2"),
+            ["queuetg1"] = Count("searching", "1v1 Testing Grounds"), ["playingtg1"] = Count("playing", "1v1 Testing Grounds"),
+            ["queueevent"] = Count("searching", eventQueue), ["playingevent"] = Count("playing", eventQueue),
+            ["queuearena"] = Count("searching", "Arena"), ["playingarena"] = Count("playing", "Arena"),
+        };
+        var flags = new Dictionary<string, bool>
+        {
+            ["eventisffa"] = ffaOpen,
+            ["eventopen"] = ffaOpen || Flag("testingGrounds2v2Open"),
+            ["tg1open"] = Flag("testingGroundsOpen"),
+            ["arenaopen"] = Flag("arenaOpen"),
+            ["twosday"] = Flag("twosday"),
+        };
+        return new Status(numbers, flags);
     }
 
     // Game thread: on the frontend, the panel on screen with the latest numbers; elsewhere, hidden.
@@ -161,34 +187,17 @@ public sealed unsafe class ServerStatusPanel(string serverUrl, IHttpTransport ht
         // Engine names ignore case and keep the spelling registered first: on a PC where something else in the game made
         // "online" before the panel loaded, the parameter reads back as "online", so its count was never written (the
         // panel showed 0 online while the queues, whose names nothing else uses, were right). Matched in any capitals.
+        // An input the widget has and the feed does not stays 0 (an older pak's panel takes only the inputs it has).
         foreach (var p in _setStatus.Signature.Reflected.Parameters)
         {
-            switch (p.Name.ToLowerInvariant())
+            string key = p.Name.ToLowerInvariant();
+            if (status.Numbers.TryGetValue(key, out int number))
             {
-                case "online":
-                    BitConverter.TryWriteBytes(parameters[p.Offset..], status.Online);
-                    break;
-                case "queue1v1":
-                    BitConverter.TryWriteBytes(parameters[p.Offset..], status.Queue1v1);
-                    break;
-                case "queue2v2":
-                    BitConverter.TryWriteBytes(parameters[p.Offset..], status.Queue2v2);
-                    break;
-                case "queueevent":
-                    BitConverter.TryWriteBytes(parameters[p.Offset..], status.QueueEvent);
-                    break;
-                case "eventisffa":
-                    parameters[p.Offset] = (byte)(status.EventIsFfa ? 1 : 0);
-                    break;
-                case "queuearena":
-                    BitConverter.TryWriteBytes(parameters[p.Offset..], status.QueueArena);
-                    break;
-                case "arenaopen":
-                    parameters[p.Offset] = (byte)(status.ArenaOpen ? 1 : 0);
-                    break;
-                case "eventopen":
-                    parameters[p.Offset] = (byte)(status.EventOpen ? 1 : 0);
-                    break;
+                BitConverter.TryWriteBytes(parameters[p.Offset..], number);
+            }
+            else if (status.Flags.TryGetValue(key, out bool flag))
+            {
+                parameters[p.Offset] = (byte)(flag ? 1 : 0);
             }
         }
 
@@ -213,7 +222,9 @@ public sealed unsafe class ServerStatusPanel(string serverUrl, IHttpTransport ht
         }
 
         _widget = 0;
-        if (_class == 0 || !finder.IsLive(_class))
+        // The class is loaded, not kept: a logout (the game's travel back to its login map) can collect it and give its
+        // slot to another object, so a pointer that is live but no longer our class is loaded again.
+        if (_class == 0 || !finder.IsLive(_class) || ObjectName(_class) != WidgetClassName)
         {
             _class = LoadClass(WidgetClassPath);
             if (_class == 0)
@@ -269,9 +280,21 @@ public sealed unsafe class ServerStatusPanel(string serverUrl, IHttpTransport ht
         _widget = create.ReturnValueOffset >= 0 ? (nint)BitConverter.ToInt64(parameters[create.ReturnValueOffset..]) : 0;
         if (_widget == 0)
         {
-            Fail("WidgetBlueprintLibrary::Create returned no widget");
+            // Seen 2026-10-27 after a disconnect and a new login: the panel stayed off for the session. Try again with the
+            // class loaded afresh (the next update), and only give up after MaxCreateFailures in a row.
+            _createFailures++;
+            log.Warn($"[ServerPanel] WidgetBlueprintLibrary::Create returned no widget ({_createFailures}/{MaxCreateFailures}): " +
+                $"class 0x{_class:X} {ObjectName(_class) ?? "(unreadable)"}, world context 0x{worldContext:X} {ClassName(worldContext) ?? "(unreadable)"}");
+            _class = 0;
+            if (_createFailures >= MaxCreateFailures)
+            {
+                Fail("WidgetBlueprintLibrary::Create returned no widget");
+            }
+
             return false;
         }
+
+        _createFailures = 0;
 
         Span<byte> z = stackalloc byte[Math.Max(_addToViewport!.Signature.Reflected!.ParmsSize, 4)];
         z.Clear();
@@ -376,6 +399,9 @@ public sealed unsafe class ServerStatusPanel(string serverUrl, IHttpTransport ht
         var name = MemoryMarshal.Read<FName>(parameters[sig.ReturnValueOffset..]);
         return name.Index == 0 ? "" : finder.Names.ToString(name) ?? "";
     }
+
+    private string? ObjectName(nint obj) =>
+        ObjectHeader.TryRead(finder.Memory, obj, out var header) ? finder.Names.ToString(header.Name) : null;
 
     private string? ClassName(nint obj) =>
         ObjectHeader.TryRead(finder.Memory, obj, out var header) && ObjectHeader.TryRead(finder.Memory, header.ClassPrivate, out var cls)
