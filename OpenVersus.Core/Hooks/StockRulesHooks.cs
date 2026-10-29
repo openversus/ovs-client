@@ -57,6 +57,15 @@ public static unsafe class StockRulesHooks
     // test rdx, rdx; je rel32
     internal static readonly byte[] s_respawnPrologue = [0x48, 0x85, 0xD2, 0x0F, 0x84, 0xE3, 0x02, 0x00, 0x00];
 
+    // The Epic Games Store's build (GameBuild): the other patterns match it as they are; PlayerDied saves other registers
+    // (push r12; push r13; push r14; sub rsp, 0x60; mov r13, rcx), and both test-rdx functions' je reach elsewhere.
+    // AMvsGameModeBase::PlayerDied is Epic's 0x028F7690, the function both of its callers that Steam's build shares
+    // (Steam 0x02638627 and 0x02638679) call there.
+    /// <summary>AMvsGameModeBase::PlayerDied in the Epic Games Store's build.</summary>
+    internal const string EpicPlayerDiedPattern = "48 85 D2 0F 84 ? ? ? ? 41 54 41 55 41 56 48 83 EC 60 4C 8B E9";
+    internal static readonly byte[] s_epicPlayerDiedPrologue = [0x48, 0x85, 0xD2, 0x0F, 0x84, 0x54, 0x05, 0x00, 0x00];
+    internal static readonly byte[] s_epicRespawnPrologue = [0x48, 0x85, 0xD2, 0x0F, 0x84, 0xD3, 0x02, 0x00, 0x00];
+
     private static delegate* unmanaged<nint, nint, nint, void> s_playerDied;
     private static delegate* unmanaged<nint, nint, void> s_registerCharacter;
     private static delegate* unmanaged<nint, void> s_doRespawn;
@@ -97,7 +106,8 @@ public static unsafe class StockRulesHooks
         s_log = c.Log;
         c.Log.Info("==Stock Rules==");
         var image = c.Image;
-        var playerDied = c.Patterns.Find("StocksPlayerDied", PlayerDiedPattern);
+        bool epic = GameBuild.Current.IsEpic;
+        var playerDied = c.Patterns.Find("StocksPlayerDied", epic ? EpicPlayerDiedPattern : PlayerDiedPattern);
         var registerCharacter = c.Patterns.Find("StocksRegisterCharacter", RegisterCharacterPattern);
         var doRespawn = c.Patterns.Find("StocksDoRespawn", DoRespawnPattern);
         var attemptEndMatch = c.Patterns.Find("StocksAttemptEndMatch", AttemptEndMatchPattern);
@@ -112,10 +122,10 @@ public static unsafe class StockRulesHooks
         s_setRespawnsRemaining = (delegate* unmanaged<nint, int, void>)setRespawns.Address;
         GameFunctions.Register("APfgFixedPawn::SetRespawnsRemaining", setRespawns, FunctionSource.Pattern, "StocksSetRespawnsRemaining", "void APfgFixedPawn::SetRespawnsRemaining(APfgFixedPawn* this, int32 limit)", image);
 
-        s_playerDied = (delegate* unmanaged<nint, nint, nint, void>)Hook(image, "AMvsGameModeBase::PlayerDied", playerDied, s_playerDiedPrologue, (nint)(delegate* unmanaged<nint, nint, nint, void>)&PlayerDied, "void AMvsGameModeBase::PlayerDied(AMvsGameModeBase* this, AMvsFixedCharacter* victim, AMvsFixedCharacter* attacker)", endsInConditionalJump: true);
+        s_playerDied = (delegate* unmanaged<nint, nint, nint, void>)Hook(image, "AMvsGameModeBase::PlayerDied", playerDied, epic ? s_epicPlayerDiedPrologue : s_playerDiedPrologue, (nint)(delegate* unmanaged<nint, nint, nint, void>)&PlayerDied, "void AMvsGameModeBase::PlayerDied(AMvsGameModeBase* this, AMvsFixedCharacter* victim, AMvsFixedCharacter* attacker)", endsInConditionalJump: true);
         s_registerCharacter = (delegate* unmanaged<nint, nint, void>)Hook(image, "AMvsGameModeBase::RegisterCharacter", registerCharacter, s_registerCharacterPrologue, (nint)(delegate* unmanaged<nint, nint, void>)&RegisterCharacter, "void AMvsGameModeBase::RegisterCharacter(AMvsGameModeBase* this, APfgFixedPawn* character)");
         s_doRespawn = (delegate* unmanaged<nint, void>)Hook(image, "APfgFixedPawn::DoRespawn", doRespawn, s_doRespawnPrologue, (nint)(delegate* unmanaged<nint, void>)&DoRespawn, "void APfgFixedPawn::DoRespawn(APfgFixedPawn* this)");
-        s_respawn = (delegate* unmanaged<nint, nint, void>)Hook(image, "AMvsGameModeBase::Respawn", respawn, s_respawnPrologue, (nint)(delegate* unmanaged<nint, nint, void>)&Respawn, "void AMvsGameModeBase::Respawn(AMvsGameModeBase* this, AMvsFixedCharacter* victim)", endsInConditionalJump: true);
+        s_respawn = (delegate* unmanaged<nint, nint, void>)Hook(image, "AMvsGameModeBase::Respawn", respawn, epic ? s_epicRespawnPrologue : s_respawnPrologue, (nint)(delegate* unmanaged<nint, nint, void>)&Respawn, "void AMvsGameModeBase::Respawn(AMvsGameModeBase* this, AMvsFixedCharacter* victim)", endsInConditionalJump: true);
         s_attemptEndMatch = (delegate* unmanaged<nint, void>)Hook(image, "UMvsGameModeDefaultGameEndHandlerComponent::AttemptEndMatch", attemptEndMatch, s_attemptEndMatchPrologue, (nint)(delegate* unmanaged<nint, void>)&AttemptEndMatch, "void UMvsGameModeDefaultGameEndHandlerComponent::AttemptEndMatch(UMvsGameModeDefaultGameEndHandlerComponent* this)");
 
         c.Log.Success("Stock rules hooked");

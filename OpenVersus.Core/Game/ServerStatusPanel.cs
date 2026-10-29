@@ -154,6 +154,14 @@ public sealed unsafe class ServerStatusPanel(string serverUrl, IHttpTransport ht
     // Game thread: on the frontend, the panel on screen with the latest numbers; elsewhere, hidden.
     private void Update()
     {
+        // Every lookup scans the heap once the object array is given up on: about a second each, on the game thread,
+        // and longer as the heap grows. An Epic Games Store build with Steam's RVAs (2026-10-28) froze its menu that way.
+        if (finder.GaveUpOnObjectArray)
+        {
+            Fail("the object array could not be opened, and the panel will not scan the heap on the game thread");
+            return;
+        }
+
         var (frontend, state) = GameUi.FrontendState();
         if (state != _lastState)
         {

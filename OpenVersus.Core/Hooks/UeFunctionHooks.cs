@@ -54,7 +54,7 @@ public static unsafe class UeFunctionHooks
 
         GameFunctions.Register(UE.FNameCtorWideName, wcfname.Address - 32, FunctionSource.Pattern, "WCFName-32", "void FName::FName(FName* this, const wchar_t* name, EFindName find)", image);
 
-        GameFunctions.FromRva(UE.ProcessEventName, GameFunctions.ProcessEventRva, "void UObject::ProcessEvent(UObject* this, UFunction* function, void* params)", image);
+        GameFunctions.FromRva(UE.ProcessEventName, GameBuild.Current.ProcessEventRva, "void UObject::ProcessEvent(UObject* this, UFunction* function, void* params)", image);
 
         foreach (string name in new[] { UE.FTextFromStringName, UE.FTextFromNameName, UE.FTextGetEmptyName, UE.FNameToStringName, UE.FNameCtorCharName, UE.FNameCtorWideName, UE.ProcessEventName })
         {

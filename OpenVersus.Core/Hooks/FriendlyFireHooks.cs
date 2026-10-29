@@ -53,6 +53,12 @@ public static unsafe class FriendlyFireHooks
     /// <summary>Where the call to IsSameTeam is, from the start of <see cref="ShieldTeamCheckPattern"/>.</summary>
     internal const int ShieldTeamCheckCall = 18;
     /// <summary>
+    /// <see cref="ShieldTeamCheckPattern"/> in the Epic Games Store's build (GameBuild), its call at the same offset: the
+    /// other team component is in rsi there (mov rdx, rsi), not r14. The check is Epic's 0x028BC9E8, in the function
+    /// whose instructions are Steam's 0x029537BE's (102 against 104, the call 0xC7 in against 0xC9).
+    /// </summary>
+    internal const string EpicShieldTeamCheckPattern = "80 79 30 00 75 19 F7 41 08 00 00 00 60 75 10 48 8B D6 E8 ? ? ? ?";
+    /// <summary>
     /// The hit resolution's call to GetHitResponseFlags (0x026155F8): lea r9, [rsi+0x37C] (the hit's ResponseFlags, passed
     /// as the out pointer); movzx r8d, bl; mov rdx, rax; mov rcx, rdi; call. The hit it passes in rdx is a copy, so the
     /// real hit is reached through the flags pointer.
@@ -112,7 +118,8 @@ public static unsafe class FriendlyFireHooks
         var image = c.Image;
         var hitResponse = c.Patterns.Find("FriendlyFireResponse", GetHitResponseFlagsPattern);
         var isSameTeam = c.Patterns.Find("FriendlyFireIsSameTeam", IsSameTeamPattern);
-        var shield = c.Patterns.Find("FriendlyFireShield", ShieldTeamCheckPattern);
+        bool epic = GameBuild.Current.IsEpic;
+        var shield = c.Patterns.Find("FriendlyFireShield", epic ? EpicShieldTeamCheckPattern : ShieldTeamCheckPattern);
         var resolve = c.Patterns.Find("FriendlyFireResolveResponse", ResolveResponseCallPattern);
         if (!hitResponse.Found || !isSameTeam.Found || !shield.Found || !resolve.Found)
         {
@@ -135,13 +142,13 @@ public static unsafe class FriendlyFireHooks
         s_isSameTeam = (delegate* unmanaged<nint, nint, byte>)isSameTeam.Address;
         GameFunctions.Register("UMvsTeamComponent::IsSameTeam", isSameTeam, FunctionSource.Pattern, "FriendlyFireIsSameTeam", "bool UMvsTeamComponent::IsSameTeam(UMvsTeamComponent* this, UMvsTeamComponent* other)", image);
         GameFunctions.Register("UMvsDefenderComponent::GetHitResponseFlags", hitResponse, FunctionSource.Pattern, "FriendlyFireResponse", "void UMvsDefenderComponent::GetHitResponseFlags(UMvsDefenderComponent* this, const FActiveHitInteraction* hit, bool isAlly, int32* flags)", image);
-        RedirectShieldCheckWithHit(shieldCall);
+        RedirectShieldCheckWithHit(shieldCall, epic ? s_passHitInR8Epic : s_passHitInR8);
         s_resolveResponse = (delegate* unmanaged<nint, nint, byte, int*, void>)CallSite.Redirect(resolveCall,
             (nint)(delegate* unmanaged<nint, nint, byte, int*, void>)&ResolveResponse);
 
         try
         {
-            s_processEvent = (delegate* unmanaged<nint, nint, nint, void>)EntryHook.InstallFiltered(image.Address(GameFunctions.ProcessEventRva), s_processEventPrologue,
+            s_processEvent = (delegate* unmanaged<nint, nint, nint, void>)EntryHook.InstallFiltered(image.Address(GameBuild.Current.ProcessEventRva), s_processEventPrologue,
                 (nint)(delegate* unmanaged<nint, nint, nint, void>)&MatchStarted, out s_watchSlot);
         }
         catch (PatchException e)
@@ -158,13 +165,17 @@ public static unsafe class FriendlyFireHooks
     /// Points the shield's IsSameTeam call at <see cref="ShieldIsSameTeam"/> through a stub that also passes the hit
     /// being checked. The shield code (in the function at 0x02953020, which takes the FActiveHitInteraction as its
     /// second argument and keeps it in r15: mov r15, rdx; it reads [r15+0x330], the defender, just before) runs before
-    /// the hit's response flags are asked for, so the hit is not otherwise known yet. The stub's prelude is mov r8, r15.
+    /// the hit's response flags are asked for, so the hit is not otherwise known yet. The stub's prelude is mov r8, r15;
+    /// in the Epic Games Store's build the same function (0x028BC0F0) keeps the hit in r13 (mov r13, rdx), so there it is
+    /// mov r8, r13.
     /// </summary>
-    private static void RedirectShieldCheckWithHit(nint shieldCall) =>
-        CallSite.InjectWithPrelude(shieldCall, s_passHitInR8, (nint)(delegate* unmanaged<nint, nint, nint, byte>)&ShieldIsSameTeam, jump: false);
+    private static void RedirectShieldCheckWithHit(nint shieldCall, byte[] prelude) =>
+        CallSite.InjectWithPrelude(shieldCall, prelude, (nint)(delegate* unmanaged<nint, nint, nint, byte>)&ShieldIsSameTeam, jump: false);
 
     // mov r8, r15
     private static readonly byte[] s_passHitInR8 = [0x4D, 0x89, 0xF8];
+    // mov r8, r13
+    private static readonly byte[] s_passHitInR8Epic = [0x4D, 0x89, 0xE8];
 
     /// <summary>
     /// A new match (<see cref="StockRulesHooks"/>, on the game thread). The shield check and the gain skip follow the
