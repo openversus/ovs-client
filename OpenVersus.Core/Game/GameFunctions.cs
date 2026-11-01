@@ -16,6 +16,8 @@ public static class GameFunctions
     public const uint ProcessEventRva = 0x02D3D810;
     /// <summary>UMvsNotificationManager getter in the final build, used if its pattern fails.</summary>
     public const uint GetNotificationManagerRva = 0x028B1D60;
+    /// <summary><see cref="GetNotificationManagerRva"/> in the Epic Games Store's build: the call at Notifications+19 there.</summary>
+    public const uint EpicGetNotificationManagerRva = 0x027C78C0;
 
     /// <summary>Adds <paramref name="function"/> under its name, replacing any earlier function of that name, and returns it.</summary>
     public static GameFunction Register(GameFunction function)

@@ -299,6 +299,14 @@ public sealed class ObjectFinder(GameImage image, IMemory memory, IGameNames nam
     public bool IsLive(nint obj) => _array is not { } array || array.Contains(obj);
 
     /// <summary>
+    /// Whether <paramref name="obj"/> is still in the object array and still of <paramref name="uclass"/> or a subclass. A live
+    /// slot alone is not enough for an address kept from earlier: a destroyed object's slot is given to the next object
+    /// created, and a call through the old address then lands on that object.
+    /// </summary>
+    public bool IsLiveOf(nint obj, nint uclass) =>
+        uclass != 0 && IsLive(obj) && ObjectHeader.TryRead(memory, obj, out var header) && Inherits(memory, header.ClassPrivate, uclass);
+
+    /// <summary>
     /// The object array, opened on first use rather than at plugin load: the plugin loads before
     /// the engine has created a single object, so validating then would always fail. A failed
     /// attempt is retried a few seconds later, <see cref="MaxArrayAttempts"/> times; after that

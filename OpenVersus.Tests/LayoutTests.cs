@@ -152,4 +152,26 @@ public class LayoutTests : IDisposable
         Assert.True(Layout.SameFolder(Home, Path.Combine(_plugins, "openversus")));
         Assert.False(Layout.SameFolder(Home, _plugins));
     }
+
+    /// <summary>The programs of an install that find the game's ASI loader: only the game runs the plugin.</summary>
+    [Fact]
+    public void OnlyTheGameTheCopyIsInstalledForRunsIt()
+    {
+        string install = Path.Combine(_plugins, "MultiVersus");
+        string win64 = Path.Combine(install, "MultiVersus", "Binaries", "Win64");
+        string home = Path.Combine(win64, "plugins", "OpenVersus");
+        Assert.Equal(Path.GetFullPath(win64), Layout.OwnerFolder(home));
+        Assert.Equal(Path.GetFullPath(win64), Layout.OwnerFolder(Path.Combine(win64, "plugins")));
+        Assert.Equal(Path.GetFullPath(win64), Layout.OwnerFolder(Path.Combine(win64, "scripts")));
+        Assert.Equal(Path.GetFullPath(win64), Layout.OwnerFolder(win64));
+
+        Assert.False(Layout.IsGuest(home, Path.Combine(win64, "MultiVersus-Win64-Shipping.exe")));
+        Assert.False(Layout.IsGuest(Path.Combine(win64, "plugins"), Path.Combine(win64, "MultiVersus-Win64-Shipping.exe")));
+        // The crash reporter and the launcher find the loader too.
+        Assert.True(Layout.IsGuest(home, Path.Combine(install, "Engine", "Binaries", "Win64", "CrashReportClient.exe")));
+        Assert.True(Layout.IsGuest(home, Path.Combine(install, "MultiVersus.exe")));
+        // The game is never a guest, wherever its plugin is; and with no host path nothing is decided.
+        Assert.False(Layout.IsGuest(Path.Combine(_plugins, "elsewhere"), Path.Combine(win64, "MultiVersus-Win64-Shipping.exe")));
+        Assert.False(Layout.IsGuest(home, null));
+    }
 }

@@ -477,7 +477,7 @@ public static unsafe class StockRulesHooks
                     // None of them is an object any more: the match is over. Left running until the next match registered,
                     // the guard scanned every object for the dead cameras twice a second, through the results screens and
                     // the menu (and warned "camera not found" each time).
-                    if (!off.Any(finder.IsLive))
+                    if (!off.Any(pawn => finder.IsLive(pawn) && IsFighter(finder, pawn)))
                     {
                         break;
                     }
@@ -491,7 +491,7 @@ public static unsafe class StockRulesHooks
                     {
                         foreach (nint pawn in t.off)
                         {
-                            if (s_finder is not { } f || !f.IsLive(pawn))
+                            if (s_finder is not { } f || !f.IsLive(pawn) || !IsFighter(f, pawn))
                             {
                                 continue;
                             }
@@ -509,7 +509,7 @@ public static unsafe class StockRulesHooks
                                 continue;
                             }
 
-                            if (t.camera.Cameras.Where(f.IsLive).Any(cam => IsRegistered(t.camera, cam, pawn)))
+                            if (t.camera.Cameras.Where(cam => IsCamera(f, cam)).Any(cam => IsRegistered(t.camera, cam, pawn)))
                             {
                                 MatchRulesLog.Line("stocks: a fighter out of lives was back on the camera (a rollback?); taken off again");
                                 CallCamera(t.camera, pawn, on: false);
@@ -546,7 +546,7 @@ public static unsafe class StockRulesHooks
 
             if (finder != null)
             {
-                s_offCamera.RemoveWhere(pawn => !finder.IsLive(pawn));
+                s_offCamera.RemoveWhere(pawn => !finder.IsLive(pawn) || !IsFighter(finder, pawn));
             }
         }
     }
@@ -568,7 +568,7 @@ public static unsafe class StockRulesHooks
 
         var memory = finder.Memory;
         var left = new List<nint>();
-        foreach (nint cam in camera.Cameras.Where(finder.IsLive))
+        foreach (nint cam in camera.Cameras.Where(cam => IsCamera(finder, cam)))
         {
             if (!memory.TryRead(cam + Mvs.CameraTrackedActors, out nint data) || !memory.TryRead(cam + Mvs.CameraTrackedActors + 8, out int count) || count is < 0 or > 64)
             {
@@ -620,7 +620,7 @@ public static unsafe class StockRulesHooks
             return null;
         }
 
-        if (s_camera is { } cached && cached.GameMode == gameMode && cached.Cameras.Length > 0 && cached.Cameras.All(finder.IsLive))
+        if (s_camera is { } cached && cached.GameMode == gameMode && cached.Cameras.Length > 0 && cached.Cameras.All(cam => IsCamera(finder, cam)))
         {
             return cached;
         }
@@ -647,7 +647,7 @@ public static unsafe class StockRulesHooks
     private static void CallCamera(CameraTargets camera, nint pawn, bool on)
     {
         var function = on ? camera.Register : camera.Unregister;
-        if (s_finder is not { } finder || !finder.IsLive(pawn) || !TakesActorFirst(function))
+        if (s_finder is not { } finder || !finder.IsLiveOf(pawn, finder.FindClass("Actor")) || !TakesActorFirst(function))
         {
             return;
         }
@@ -655,7 +655,7 @@ public static unsafe class StockRulesHooks
         var sig = function!.Signature.Reflected!;
         Span<byte> parameters = stackalloc byte[sig.ParmsSize];
         int calls = 0;
-        foreach (nint cam in camera.Cameras.Where(finder.IsLive))
+        foreach (nint cam in camera.Cameras.Where(cam => IsCamera(finder, cam)))
         {
             if (on && IsRegistered(camera, cam, pawn))
             {
@@ -874,8 +874,11 @@ public static unsafe class StockRulesHooks
         return hud;
     }
 
+    // Still the broker and score widgets cached: at the end of a match they are destroyed and their slots reused (the server
+    // panel's crash, 2026-10-31), so a live slot is not enough.
     private static bool IsAlive(ObjectFinder finder, HudTargets hud) =>
-        finder.IsLive(hud.Broker) && hud.Widgets.All(finder.IsLive);
+        finder.IsLiveOf(hud.Broker, finder.FindClass("UI_Broker_C"))
+        && hud.Widgets.All(w => finder.IsLiveOf(w, finder.FindClass("UI_IGv3_PlayerScore_C")));
 
     private static void PushLivesToHud(HudTargets hud, HudUpdate u)
     {
@@ -959,6 +962,9 @@ public static unsafe class StockRulesHooks
         var ints = sig.Parameters.Where(p => !p.IsReturn).Take(2).ToArray();
         return ints.Length == 2 && ints.All(p => p.Type == "IntProperty") && ints[0].Offset == 0 && ints[1].Offset == 4;
     }
+
+    // A camera cached for this match that still is one: a destroyed camera's slot is given to the next object created.
+    private static bool IsCamera(ObjectFinder finder, nint cam) => finder.IsLiveOf(cam, finder.FindClass("MvsCamera"));
 
     private static bool IsFighter(ObjectFinder finder, nint pawn)
     {

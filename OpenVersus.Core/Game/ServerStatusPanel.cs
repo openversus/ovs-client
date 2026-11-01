@@ -33,6 +33,8 @@ public sealed unsafe class ServerStatusPanel(string serverUrl, IHttpTransport ht
     private volatile bool _onFrontend;
     private nint _class;
     private nint _widget;
+    // Whether the panel was last made visible (Update) and not hidden since: Hide collapses it once, not every tick.
+    private bool _shown;
     private GameFunction? _setStatus, _create, _addToViewport, _isInViewport, _setVisibility;
     private nint _widgetLibrary;
     private nint _lastState;
@@ -195,6 +197,7 @@ public sealed unsafe class ServerStatusPanel(string serverUrl, IHttpTransport ht
         }
 
         SetVisibility(HitTestInvisible);
+        _shown = true;
         Span<byte> parameters = stackalloc byte[_setStatus!.Signature.Reflected!.ParmsSize];
         parameters.Clear();
         // Engine names ignore case and keep the spelling registered first: on a PC where something else in the game made
@@ -217,19 +220,38 @@ public sealed unsafe class ServerStatusPanel(string serverUrl, IHttpTransport ht
         Reflection.Invoke(_setStatus, _widget, parameters);
     }
 
+    // Once, as the main menu goes: during a match the widget is not touched. It used to be collapsed every second, and
+    // once the level change had destroyed it and its slot held another object, that object's virtual function at
+    // SetVisibility's place ran with Collapsed (1) as a pointer: an access violation in the game that the window timer
+    // swallowed, which left .NET's stack walk broken, and the game closed a few minutes later with no Unreal crash
+    // window (0xC0000602; Tuggernuts' crash log, 2026-10-31).
     private void Hide()
     {
-        if (_widget != 0 && finder.IsLive(_widget))
+        if (!_shown)
+        {
+            return;
+        }
+
+        _shown = false;
+        if (IsOurWidget())
         {
             SetVisibility(Collapsed);
         }
+        else
+        {
+            _widget = 0;
+        }
     }
+
+    // The widget is still ours: in the object array and of our class. A live slot alone is not enough, since a destroyed
+    // widget's slot is given to the next object created.
+    private bool IsOurWidget() => _widget != 0 && finder.IsLive(_widget) && ClassName(_widget) == WidgetClassName;
 
     // The widget on screen: the class loaded from the pak once, a widget created and added to the viewport whenever there is
     // none (a level change removes viewport widgets). False, logged once, when something is missing: the panel stays off.
     private bool EnsureWidget(nint worldContext)
     {
-        if (_widget != 0 && finder.IsLive(_widget) && InViewport())
+        if (IsOurWidget() && InViewport())
         {
             return true;
         }

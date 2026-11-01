@@ -1,3 +1,4 @@
+using OpenVersus.Config;
 using OpenVersus.Game;
 using OpenVersus.Hooks;
 using OpenVersus.Memory;
@@ -52,6 +53,20 @@ public class GameBuildTests
         int isSameTeam = FinalBuild.Single(epic, FriendlyFireHooks.IsSameTeamPattern);
         int call = 0x028BC9E8 + FriendlyFireHooks.ShieldTeamCheckCall;
         Assert.Equal(isSameTeam, call + 5 + BitConverter.ToInt32(epic, call + 1));
+    }
+
+    /// <summary>The notification manager getter's fallback in each build is where the Notifications pattern's call goes.</summary>
+    [SkippableFact]
+    public void EachBuildsNotificationManagerFallbackIsThePatternsCall()
+    {
+        var pattern = BytePattern.Parse(Settings.Rows.NotificationsPattern.Default);
+        foreach (var (image, rva) in new[] { (FinalBuild.Mapped(), GameFunctions.GetNotificationManagerRva), (EpicBuild.Mapped(), GameFunctions.EpicGetNotificationManagerRva) })
+        {
+            int match = PatternScanner.FindFirst(image, pattern);
+            Assert.True(match >= 0);
+            int call = match + 19;
+            Assert.Equal((int)rva, call + 5 + BitConverter.ToInt32(image, call + 1));
+        }
     }
 }
 
