@@ -14,6 +14,10 @@ public sealed record GameBuild(string Name, uint ObjectArrayRva, uint ProcessEve
     public const ulong SteamTextHash = 0x3957B487D6644832;
     /// <summary>The .text hash of the Epic Games Store's MultiVersus-Win64-Shipping.exe.</summary>
     public const ulong EpicTextHash = 0x939CB42ED96A0548;
+    /// <summary>The PE header's TimeDateStamp of Steam's executable.</summary>
+    public const uint SteamTimeDateStamp = 0x67DB021B;
+    /// <summary>The PE header's TimeDateStamp of the Epic Games Store's executable.</summary>
+    public const uint EpicTimeDateStamp = 0x67DAFDD4;
 
     /// <summary>Steam's build, the one every RVA in this client was first read from.</summary>
     public static readonly GameBuild Steam = new("Steam", ObjectArray.GUObjectArrayRva, GameFunctions.ProcessEventRva,
@@ -31,19 +35,41 @@ public sealed record GameBuild(string Name, uint ObjectArrayRva, uint ProcessEve
     // push rbp; push rsi; push rdi; push r12: UObject::ProcessEvent's first instructions, the same in both builds.
     private static readonly byte[] s_processEventStart = [0x40, 0x55, 0x56, 0x57, 0x41, 0x54];
 
-    /// <summary>
-    /// The build of <paramref name="image"/>, by its .text hash; an unknown hash (a hook that patched .text first, say)
-    /// is told by where ProcessEvent starts. Steam's when neither says Epic, as before there was a choice.
-    /// </summary>
+    /// <summary>Sets <see cref="Current"/> to <see cref="Detect"/>'s answer, and returns it.</summary>
     public static GameBuild Select(ulong textHash, GameImage image)
     {
-        Current = textHash switch
-        {
-            SteamTextHash => Steam,
-            EpicTextHash => Epic,
-            _ => StartsProcessEvent(image, Epic.ProcessEventRva) && !StartsProcessEvent(image, Steam.ProcessEventRva) ? Epic : Steam,
-        };
+        Current = Detect(textHash, image);
         return Current;
+    }
+
+    /// <summary>
+    /// The build of <paramref name="image"/>, by its .text hash. An unknown hash (another mod that patched .text first, a
+    /// ProcessEvent hook say) is told by the PE header's timestamp, which no hook touches, then by where ProcessEvent
+    /// starts. Steam's when nothing says Epic, as before there was a choice.
+    /// </summary>
+    public static GameBuild Detect(ulong textHash, GameImage image) => textHash switch
+    {
+        SteamTextHash => Steam,
+        EpicTextHash => Epic,
+        _ => TimeDateStamp(image) switch
+        {
+            SteamTimeDateStamp => Steam,
+            EpicTimeDateStamp => Epic,
+            _ => StartsProcessEvent(image, Epic.ProcessEventRva) && !StartsProcessEvent(image, Steam.ProcessEventRva) ? Epic : Steam,
+        },
+    };
+
+    // IMAGE_FILE_HEADER.TimeDateStamp: e_lfanew at 0x3C, then the PE signature and Machine, NumberOfSections.
+    private static uint TimeDateStamp(GameImage image)
+    {
+        var bytes = image.Bytes;
+        if (bytes.Length < 0x40)
+        {
+            return 0;
+        }
+
+        int header = BitConverter.ToInt32(bytes[0x3C..]);
+        return header > 0 && header + 12 <= bytes.Length ? BitConverter.ToUInt32(bytes[(header + 8)..]) : 0;
     }
 
     private static bool StartsProcessEvent(GameImage image, uint rva) =>

@@ -55,6 +55,34 @@ public class GameBuildTests
         Assert.Equal(isSameTeam, call + 5 + BitConverter.ToInt32(epic, call + 1));
     }
 
+    /// <summary>
+    /// The build each real executable is taken for: by its .text hash; with an unknown hash, by its PE timestamp; and with
+    /// ProcessEvent's first bytes patched too (another mod's ProcessEvent hook), still by the timestamp.
+    /// </summary>
+    [SkippableFact]
+    public void EachExecutableIsTakenForItsOwnBuild()
+    {
+        foreach (var (mapped, build) in new[] { (FinalBuild.Mapped(), GameBuild.Steam), (EpicBuild.Mapped(), GameBuild.Epic) })
+        {
+            WithImage(mapped, image =>
+            {
+                Assert.Same(build, GameBuild.Detect(image.HashTextSection(), image));
+                Assert.Same(build, GameBuild.Detect(0, image));
+            });
+            mapped[(int)build.ProcessEventRva] = 0xE9;
+            WithImage(mapped, image => Assert.Same(build, GameBuild.Detect(0, image)));
+        }
+    }
+
+    // A GameImage over a mapped executable held in managed memory, pinned while it is used.
+    private static unsafe void WithImage(byte[] mapped, Action<GameImage> use)
+    {
+        fixed (byte* at = mapped)
+        {
+            use(new GameImage((nint)at, mapped.Length, PeImage.Sections(PeImage.HeadersInMemory(at))));
+        }
+    }
+
     /// <summary>The notification manager getter's fallback in each build is where the Notifications pattern's call goes.</summary>
     [SkippableFact]
     public void EachBuildsNotificationManagerFallbackIsThePatternsCall()

@@ -292,8 +292,14 @@ public sealed class ObjectFinder(GameImage image, IMemory memory, IGameNames nam
     /// <summary>Whether the object array has been opened; false means lookups scan the heap.</summary>
     public bool UsesObjectArray => _array != null;
 
-    /// <summary>Whether the object array was meant to be used and never validated: every lookup now scans the heap, for the rest of the session.</summary>
-    public bool GaveUpOnObjectArray => tryObjectArray && _array == null && _arrayAttempts >= MaxArrayAttempts;
+    /// <summary>Whether the object array will not be used this session (not tried, or never validated): every lookup scans the heap.</summary>
+    public bool GaveUpOnObjectArray => _array == null && (!tryObjectArray || _arrayAttempts >= MaxArrayAttempts);
+
+    /// <summary>
+    /// Whether the object array is open, trying to open it when an attempt is due. False while it is not: a lookup now would
+    /// scan the heap.
+    /// </summary>
+    public bool ObjectArrayOpen => Array != null;
 
     /// <summary>Whether <paramref name="obj"/> is still in the object array; true when there is no array to ask (the heap scan cannot tell).</summary>
     public bool IsLive(nint obj) => _array is not { } array || array.Contains(obj);
