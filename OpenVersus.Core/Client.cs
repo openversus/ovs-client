@@ -248,6 +248,7 @@ public sealed class Client
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         ulong hash = Image.HashTextSection();
         Log.Debug($".text hash: 0x{hash:X16} | Time: {stopwatch.Elapsed.TotalMilliseconds:F3} ms");
+        Log.Info($"[OVS] Game build: {GameBuild.Select(hash, Image).Name}");
         var cache = new PatternCache(Directory, hash, OvsVersion.Current, Layout.OldHome(Directory));
         Patterns = new PatternResolver(Image, cache, Settings, Log);
         Log.Info("Parsed Settings");

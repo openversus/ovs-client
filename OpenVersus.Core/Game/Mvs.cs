@@ -180,7 +180,7 @@ public static class Mvs
     public const int ObjectOuterPrivate = 0x28;
     /// <summary>UStruct: the parent struct or class; 0 at the root.</summary>
     public const int StructSuperStruct = 0x50;
-    // UFunction vtables in the final build: native and blueprint-generated.
+    // UFunction vtables in Steam's build: native and blueprint-generated (the running build's are GameBuild's).
     /// <summary>The RVA of a native UFunction's vtable, by which <see cref="ObjectFinder.FindFunction"/> tells a real UFunction from anything else with the same name.</summary>
     public const uint UFunctionVTableNativeRva = 0x6795E20;
     /// <summary>The RVA of a blueprint-generated UFunction's vtable; see <see cref="UFunctionVTableNativeRva"/>.</summary>

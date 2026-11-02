@@ -12,10 +12,12 @@ public static class GameFunctions
     private static readonly Dictionary<string, GameFunction> s_byName = new(StringComparer.Ordinal);
     private static readonly object s_lock = new();
 
-    /// <summary>The RVA of UObject::ProcessEvent in the final build (Dumper-7 OffsetsInfo.json).</summary>
+    /// <summary>The RVA of UObject::ProcessEvent in Steam's build (Dumper-7 OffsetsInfo.json); the running build's is <see cref="GameBuild.ProcessEventRva"/>.</summary>
     public const uint ProcessEventRva = 0x02D3D810;
     /// <summary>UMvsNotificationManager getter in the final build, used if its pattern fails.</summary>
     public const uint GetNotificationManagerRva = 0x028B1D60;
+    /// <summary><see cref="GetNotificationManagerRva"/> in the Epic Games Store's build: the call at Notifications+19 there.</summary>
+    public const uint EpicGetNotificationManagerRva = 0x027C78C0;
 
     /// <summary>Adds <paramref name="function"/> under its name, replacing any earlier function of that name, and returns it.</summary>
     public static GameFunction Register(GameFunction function)

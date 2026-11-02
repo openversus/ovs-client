@@ -54,7 +54,7 @@ public readonly record struct ObjectHeader(nint Address, nint VTable, uint Flags
 /// </summary>
 public sealed class ObjectArray
 {
-    /// <summary>The RVA of GUObjectArray in the final build.</summary>
+    /// <summary>The RVA of GUObjectArray in Steam's build; the running build's is <see cref="GameBuild.ObjectArrayRva"/>.</summary>
     public const uint GUObjectArrayRva = 0x081C5090;
     /// <summary>int32 NumElements.</summary>
     internal const int NumElementsOffset = 0xA0;
@@ -121,7 +121,8 @@ public sealed class ObjectArray
     /// </summary>
     public static ObjectArray? Open(GameImage image, IMemory memory, IGameNames names, ILogger log)
     {
-        nint global = image.Address(GUObjectArrayRva);
+        uint rva = GameBuild.Current.ObjectArrayRva;
+        nint global = image.Address(rva);
         if (!memory.TryRead(global + ObjectsOffset, out ulong encodedTable) ||
             !memory.TryRead(global + MaxElementsOffset, out int maxElements) ||
             !memory.TryRead(global + NumElementsOffset, out int numElements) ||
@@ -156,8 +157,8 @@ public sealed class ObjectArray
     {
         Span<byte> bytes = stackalloc byte[0xD0];
         log.Warn(memory.TryRead(global, bytes)
-            ? $"object array: bytes at 0x{global:X} (rva 0x{GUObjectArrayRva:X}): {Convert.ToHexString(bytes)}"
-            : $"object array: 0x{global:X} (rva 0x{GUObjectArrayRva:X}) is not readable");
+            ? $"object array: bytes at 0x{global:X} (rva 0x{GameBuild.Current.ObjectArrayRva:X}): {Convert.ToHexString(bytes)}"
+            : $"object array: 0x{global:X} (rva 0x{GameBuild.Current.ObjectArrayRva:X}) is not readable");
     }
 
     private static bool Validate(ObjectArray array, GameImage image, IMemory memory, IGameNames names, ILogger log, nint global)
@@ -291,8 +292,25 @@ public sealed class ObjectFinder(GameImage image, IMemory memory, IGameNames nam
     /// <summary>Whether the object array has been opened; false means lookups scan the heap.</summary>
     public bool UsesObjectArray => _array != null;
 
+    /// <summary>Whether the object array will not be used this session (not tried, or never validated): every lookup scans the heap.</summary>
+    public bool GaveUpOnObjectArray => _array == null && (!tryObjectArray || _arrayAttempts >= MaxArrayAttempts);
+
+    /// <summary>
+    /// Whether the object array is open, trying to open it when an attempt is due. False while it is not: a lookup now would
+    /// scan the heap.
+    /// </summary>
+    public bool ObjectArrayOpen => Array != null;
+
     /// <summary>Whether <paramref name="obj"/> is still in the object array; true when there is no array to ask (the heap scan cannot tell).</summary>
     public bool IsLive(nint obj) => _array is not { } array || array.Contains(obj);
+
+    /// <summary>
+    /// Whether <paramref name="obj"/> is still in the object array and still of <paramref name="uclass"/> or a subclass. A live
+    /// slot alone is not enough for an address kept from earlier: a destroyed object's slot is given to the next object
+    /// created, and a call through the old address then lands on that object.
+    /// </summary>
+    public bool IsLiveOf(nint obj, nint uclass) =>
+        uclass != 0 && IsLive(obj) && ObjectHeader.TryRead(memory, obj, out var header) && Inherits(memory, header.ClassPrivate, uclass);
 
     /// <summary>
     /// The object array, opened on first use rather than at plugin load: the plugin loads before
@@ -507,7 +525,7 @@ public sealed class ObjectFinder(GameImage image, IMemory memory, IGameNames nam
 
     // Only a real UFunction (by vtable) may be handed to ProcessEvent.
     private bool IsUFunction(ObjectHeader h) =>
-        h.VTable == image.Address(Mvs.UFunctionVTableNativeRva) || h.VTable == image.Address(Mvs.UFunctionVTableBlueprintRva);
+        h.VTable == image.Address(GameBuild.Current.UFunctionVTableNativeRva) || h.VTable == image.Address(GameBuild.Current.UFunctionVTableBlueprintRva);
 
     private IEnumerable<ObjectHeader> Candidates(int nameIndex)
     {

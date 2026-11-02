@@ -14,7 +14,9 @@ public static class NotificationHooks
     {
         // The C++ set the manager getter from a fixed address first, so a failed pattern still
         // left something usable. Same here: the RVA is the fallback, the pattern overrides it.
-        GameFunctions.FromRva(GameUi.GetNotificationManagerName, GameFunctions.GetNotificationManagerRva, "UMvsNotificationManager* UMvsNotificationManager::Get(const UFighterGameInstance* context)", c.Image);
+        // The build's own: Steam's address is another function in the Epic Games Store's build.
+        uint fallback = GameBuild.Current.IsEpic ? GameFunctions.EpicGetNotificationManagerRva : GameFunctions.GetNotificationManagerRva;
+        GameFunctions.FromRva(GameUi.GetNotificationManagerName, fallback, "UMvsNotificationManager* UMvsNotificationManager::Get(const UFighterGameInstance* context)", c.Image);
 
         c.Log.Info("==Notification Funcs==");
         if (!c.Status.UeFuncs)

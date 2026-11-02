@@ -36,6 +36,46 @@ public static class Layout
         Config.PatternCache.FileName, Config.PatternCache.LegacyFileName,
     ];
 
+    /// <summary>
+    /// The folder of the program a plugin in <paramref name="directory"/> was installed for: the folder that holds its
+    /// plugins/ or scripts/ folder (the ASI loader's), or that holds the plugin itself. The mod's own folder is looked
+    /// through first, so plugins/OpenVersus/ and a plugin loose in plugins/ both belong to the game beside plugins/.
+    /// </summary>
+    public static string OwnerFolder(string directory)
+    {
+        string folder = Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory));
+        if (IsHome(folder) && Path.GetDirectoryName(folder) is { } above)
+        {
+            folder = above;
+        }
+
+        string name = Path.GetFileName(folder);
+        if ((string.Equals(name, "plugins", StringComparison.OrdinalIgnoreCase) || string.Equals(name, "scripts", StringComparison.OrdinalIgnoreCase))
+            && Path.GetDirectoryName(folder) is { } owner)
+        {
+            folder = owner;
+        }
+
+        return folder;
+    }
+
+    /// <summary>
+    /// Whether the plugin in <paramref name="directory"/> was loaded by <paramref name="hostPath"/>, another program than the
+    /// one it was installed for. The game's ASI loader is found by other programs of the install
+    /// too: UE's crash reporter (Engine\Binaries\Win64\CrashReportClient.exe, after a crash) and the MultiVersus.exe
+    /// launcher at the top of the install. Running there, the plugin moved itself (or retired the game's copy) out of the
+    /// game's folder, so the next launch ran without it and the game closed on OVS_P.pak's signature (two players'
+    /// logs, 2026-10-31). The game itself is never a guest, wherever its plugin is.
+    /// </summary>
+    public static bool IsGuest(string directory, string? hostPath) =>
+        hostPath != null
+        && !string.Equals(Path.GetFileName(hostPath), GameExecutable, StringComparison.OrdinalIgnoreCase)
+        && Path.GetDirectoryName(hostPath) is { } hostDirectory
+        && !SameFolder(OwnerFolder(directory), hostDirectory);
+
+    /// <summary>The game's executable, on every store's build.</summary>
+    public const string GameExecutable = "MultiVersus-Win64-Shipping.exe";
+
     /// <summary>Whether two folder paths name the same folder, regardless of case and trailing separators.</summary>
     public static bool SameFolder(string a, string b) =>
         string.Equals(Path.TrimEndingDirectorySeparator(Path.GetFullPath(a)), Path.TrimEndingDirectorySeparator(Path.GetFullPath(b)), StringComparison.OrdinalIgnoreCase);

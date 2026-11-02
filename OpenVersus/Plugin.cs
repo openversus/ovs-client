@@ -55,6 +55,16 @@ public static unsafe class Plugin
             nint self = Kernel32.ModuleFromAddress((nint)(delegate* unmanaged<void>)&InitializeASI);
             string pluginPath = Kernel32.GetModulePath(self);
             string directory = Path.GetDirectoryName(pluginPath)!;
+            // Loaded by another program of the install (the crash reporter, the launcher): nothing is done there, not even
+            // the game's log is opened. One line says so, in a log named for that program.
+            if (Layout.IsGuest(directory, Environment.ProcessPath))
+            {
+                string host = Path.GetFileNameWithoutExtension(Environment.ProcessPath) ?? "host";
+                using var guest = Log.OpenSession(Path.Combine(directory, "logs"), $"OpenVersus-{host}", fallbackDirectory: directory);
+                guest.Info($"Loaded by {Environment.ProcessPath}, which is not the game this copy is installed for ({Layout.OwnerFolder(directory)}); doing nothing");
+                return;
+            }
+
             log = Log.OpenSession(Path.Combine(directory, "logs"), "OpenVersus", fallbackDirectory: directory);
             HookGuard.Attach(log);
             s_client = new Client(log, pluginPath, self);
