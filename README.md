@@ -56,7 +56,10 @@ ovs-rollback-server repository) must be listening. The mod runs that node:
   server, it starts `node/win-x64/OVS.Rollback.Node.exe` from the mod's folder (`plugins/OpenVersus/`).
   Under Proton or Wine it starts `node/linux-x64/OVS.Rollback.Node` instead, through Wine's
   `start /unix`, so the node runs natively on Linux and the Steam Deck; the Windows build runs under
-  Wine only when the Linux one is missing.
+  Wine only when the Linux one is missing. On a Mac (CrossOver) it starts `node/OVS.Rollback.Node.sh`
+  the same way, a launcher that runs `node/osx-arm64/OVS.Rollback.Node` on Apple silicon or
+  `node/osx-x64/OVS.Rollback.Node` on Intel (the Mac's architecture is not visible from inside Wine),
+  and the Linux node anywhere else.
 - The node is told to take any free UDP port and writes it to `node/port-<game pid>.txt`; the mod
   reports that port to the server with the player's identity (`nodePort` in `/api/identify`), and the
   server names it in the match-found notification. A node that cannot be started leaves the port at
@@ -75,8 +78,18 @@ ovs-rollback-server repository) must be listening. The mod runs that node:
   at once; through `start /unix` it is not the mod's child, and the keepalive stopping is what ends
   it, within ten seconds. A normal exit stops it directly.
 
-The node binaries are not yet part of the release or the updater (`AutoUpdate` installs the `.asi`
-only); that is an open item before P2P matches are switched on for players.
+The node ships with every release and the updater keeps it current, like the paks: the release
+carries one archive per platform (`OVS_Node_<version>_<platform>.zip` or `.tar.gz`), the mod tells
+the server which node version it runs beside the game (read from the node's executable, where the
+build stamps it; a node without one, or none at all, counts as out of date), and when the server
+says the release's is different, `Net/NodeUpdate.cs` downloads the archive for the platform the
+game runs on (a Mac is asked which it is through a small script, since that is not visible from
+inside Wine), checks its size and SHA-256, unpacks it and swaps it into `node/<platform>/`, keeping
+the previous build as `node/<platform>.old` for one launch. Under Proton, Wine or CrossOver the
+unpacked node and the launcher get their execute bits through Wine's `start /unix` and `chmod`,
+since files written through Wine have none. This happens at launch before the node is started, so
+no relaunch is needed, and whatever `AutoUpdate` says, since peers' nodes must match; a failure
+leaves the previous node in place and the game plays on (matches then go through a relay).
 
 ## Layout
 
@@ -197,9 +210,14 @@ what ships is what was built and tested. To release:
 
 The tag must equal `VERSION` (a `v` prefix does not match). A suffix, as in `2026.09.25.01-test1`,
 publishes a prerelease; remove a test release with `gh release delete <tag> --cleanup-tag`. The
-release holds `OpenVersus_v<tag>.zip` (the install), `OpenVersus_<version>.asi` (the plugin alone,
-which is what the server's `download_url` should point the auto-updater at), a `.sha256` beside
-each, and `SHA256SUMS`.
+release holds `OpenVersus_v<tag>.zip` (the install, the rollback node for every platform inside),
+`OpenVersus_<version>.asi` (the plugin alone, which is what the server's `download_url` points the
+auto-updater at), `OVS_Node_<version>_<platform>.zip` / `.tar.gz` (the node alone, per platform,
+which the updater installs; built in `build.yml` from the server repo at the commit `NODE_REF`
+names and stamped with `VERSION`, so pin `NODE_REF` to a commit before tagging a release), a
+`.sha256` beside each, and `SHA256SUMS`. To attach node archives to a release by hand, the server
+repo's `OVSRollbackNode/tools/archive-nodes.sh <version> <dir>` packs them from a
+`NODE_VERSION=<version> ./build.sh node` build; the version in their names must be the release's.
 
 The server offers a release's `.asi` asset and falls back to its zip when there is none; the
 updater handles both, installing only the one `.asi` in a zip (or the one named for the offered

@@ -5,12 +5,15 @@
 #   build.sh test            build and run the tests only (no Windows toolchain needed)
 #   build.sh publish         publish OpenVersus_<version>.asi only
 #   build.sh harness         run the hooking layer end to end under Wine
-#   build.sh package         build, test and publish, build the rollback node for both platforms (the server
+#   build.sh package         build, test and publish, build the rollback node for every platform (the server
 #                                   repo's build.sh node), and zip them for players: out/OpenVersus_<version>.zip
-#                                   holding plugins/OpenVersus/ with the .asi, OpenVersus.toml (the default file, with
-#                                   both ServerUrl lines switched to the testing server and the prod line commented out
-#                                   above each, and LogLevel trace: tools/package-config.cs) and node/{linux-x64,win-x64}.
-#                                   The testing server is the node's own (NODE_REPO/pki/testing/server-url.txt)
+#                                   holding plugins/OpenVersus/ with the .asi, OpenVersus.toml (the default file, pointing
+#                                   at prod, with LogLevel trace: tools/package-config.cs) and
+#                                   node/{win-x64,linux-x64,osx-x64,osx-arm64} with node/OVS.Rollback.Node.sh, the launcher
+#                                   that picks a Mac's node. PACKAGE_SERVER=testing makes a testing
+#                                   package instead: both ServerUrl lines switched to the testing server, the prod line
+#                                   commented out above each. The testing server is the node's own
+#                                   (NODE_REPO/pki/testing/server-url.txt), and the node always trusts both.
 #   build.sh clean           remove every bin/ and obj/
 #
 # Options:
@@ -22,7 +25,7 @@
 #   --install DIR      copy the published OpenVersus_<version>.asi into DIR/OpenVersus (DIR is the
 #                      game's plugins folder), renaming any OpenVersus*.asi in DIR or DIR/OpenVersus
 #                      to .bak, since the ASI loader would otherwise load both. Also copies the rollback
-#                      node builds into DIR/OpenVersus/node/{win-x64,linux-x64} when the server repo has
+#                      node builds into DIR/OpenVersus/node/{win-x64,linux-x64,osx-x64,osx-arm64} when the server repo has
 #                      published them (NODE_OUT, default <repo>/../ovs-rollback-server/out), replacing
 #                      what is there; without them the node folder is left alone and a note says so
 #   --skip-tests       do not run the tests in the default command or package
@@ -135,7 +138,11 @@ do_publish() {
         # The rollback node the mod starts beside the game (see README, "Rollback node"): published by
         # ovs-rollback-server's build.sh (node), one folder per platform.
         node_out=${NODE_OUT:-$here/../ovs-rollback-server/out}
-        for rid in win-x64 linux-x64; do
+        if [ -f "$node_out/OVS.Rollback.Node.sh" ]; then
+            install -m 755 "$node_out/OVS.Rollback.Node.sh" "$home/node/OVS.Rollback.Node.sh"
+            say "installed the node launcher (picks a Mac's node) to $home/node/OVS.Rollback.Node.sh"
+        fi
+        for rid in win-x64 linux-x64 osx-x64 osx-arm64; do
             if [ -d "$node_out/node-$rid" ]; then
                 rm -rf "$home/node/$rid"
                 mkdir -p "$home/node/$rid"
@@ -167,7 +174,7 @@ do_package() {
     testing=$(tr -d '[:space:]' < "$testing_file")
     prod=$(tr -d '[:space:]' < "$node_repo/pki/prod/server-url.txt")
     say "building the rollback node (the server repo's build.sh node)"
-    NODE_PKI="prod testing" "$node_repo/build.sh" node win-x64 linux-x64
+    NODE_PKI="prod testing" "$node_repo/build.sh" node win-x64 linux-x64 osx-x64 osx-arm64
 
     local stage="$here/out/package"
     local zip="$here/out/OpenVersus_$version.zip"
@@ -175,7 +182,10 @@ do_package() {
     local home="$stage/plugins/OpenVersus"
     mkdir -p "$home/node"
     cp "$published" "$home/"
-    for rid in win-x64 linux-x64; do
+    # The launcher the mod starts on a Mac: it picks osx-arm64 or osx-x64 by the machine (the Linux node anywhere else).
+    [ -f "$node_repo/out/OVS.Rollback.Node.sh" ] || fail "$node_repo/out/OVS.Rollback.Node.sh is missing: the server repo's build.sh node writes it"
+    install -m 755 "$node_repo/out/OVS.Rollback.Node.sh" "$home/node/OVS.Rollback.Node.sh"
+    for rid in win-x64 linux-x64 osx-x64 osx-arm64; do
         local exe
         exe=$(ls "$node_repo/out/node-$rid" | grep -E '^OVS\.Rollback\.Node(\.exe)?$') || fail "$node_repo/out/node-$rid has no node executable"
         grep -q -a -F "$prod " "$node_repo/out/node-$rid/$exe" && grep -q -a -F "$testing " "$node_repo/out/node-$rid/$exe" \
@@ -184,14 +194,22 @@ do_package() {
         # Everything the node runs with (its settings files, the Serilog config, the runtimeconfig), without debug symbols.
         (cd "$node_repo/out/node-$rid" && find . -type f ! -name '*.pdb' -exec cp --parents {} "$home/node/$rid/" \;)
     done
-    say "writing OpenVersus.toml (servers: $testing, prod commented out; LogLevel trace)"
     # --file: from the repo root a bare path would build the C++ project there instead.
-    dotnet run --file "$here/tools/package-config.cs" -- "$home" "$testing"
+    if [ "${PACKAGE_SERVER:-prod}" = testing ]; then
+        say "writing OpenVersus.toml (servers: $testing, prod commented out; LogLevel trace)"
+        dotnet run --file "$here/tools/package-config.cs" -- "$home" "$testing"
+    else
+        say "writing OpenVersus.toml (servers: $prod; LogLevel trace)"
+        dotnet run --file "$here/tools/package-config.cs" -- "$home"
+    fi
 
     (cd "$stage" && zip -q -r -X "$zip" plugins) || fail "zip failed"
-    # zip -X leaves out uid/gid extras, not the Unix mode: the Linux node keeps its executable bit.
-    unzip -Z "$zip" "plugins/OpenVersus/node/linux-x64/OVS.Rollback.Node" | grep -q '^-rwx' \
-        || fail "the Linux node lost its executable bit in $zip"
+    # zip -X leaves out uid/gid extras, not the Unix mode: the Linux and macOS nodes and the launcher keep their
+    # executable bit.
+    for entry in linux-x64/OVS.Rollback.Node osx-x64/OVS.Rollback.Node osx-arm64/OVS.Rollback.Node OVS.Rollback.Node.sh; do
+        unzip -Z "$zip" "plugins/OpenVersus/node/$entry" | grep -q '^-rwx' \
+            || fail "node/$entry lost its executable bit in $zip"
+    done
     say "packaged $zip ($(du -h "$zip" | cut -f1))"
     unzip -Z1 "$zip" | sed 's/^/    /'
 }

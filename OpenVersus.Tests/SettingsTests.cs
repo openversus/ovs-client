@@ -104,7 +104,7 @@ public class SettingsTests
         Assert.Equal(File.ReadAllBytes(RepoFile("sample.toml")), File.ReadAllBytes(path));
         foreach (var def in Settings.Table)
         {
-            Assert.Equal(def.Default, TomlConfig.Load(path).Get(def.Section, def.Key));
+            Assert.Equal(def.Hidden ? null : def.Default, TomlConfig.Load(path).Get(def.Section, def.Key));
         }
 
         Assert.Equal(OvsVersion.DefaultServerUrl, s.ServerUrl);
@@ -116,17 +116,18 @@ public class SettingsTests
     [Fact]
     public void TheDefaultFileExplainsEverySettingAndReadsBackAsTheDefaults()
     {
-        Assert.All(Settings.Table, def => Assert.True(DefaultConfig.Comments.ContainsKey(def), $"no comment for {def}"));
-        Assert.All(Settings.Table.Select(d => d.Section).Distinct(), section => Assert.True(DefaultConfig.Sections.ContainsKey(section), $"no banner for [{section}]"));
-        Assert.Equal(Settings.Table.Count, DefaultConfig.Comments.Count);
+        var written = Settings.Table.Where(d => !d.Hidden).ToList();
+        Assert.All(written, def => Assert.True(DefaultConfig.Comments.ContainsKey(def), $"no comment for {def}"));
+        Assert.All(written.Select(d => d.Section).Distinct(), section => Assert.True(DefaultConfig.Sections.ContainsKey(section), $"no banner for [{section}]"));
+        Assert.Equal(written.Count, DefaultConfig.Comments.Count);
 
         string dir = NewDir();
         var log = new ListLogger();
         Settings.Load(dir, log);
         var toml = TomlConfig.Load(Path.Combine(dir, Settings.FileName));
         Assert.Empty(toml.Errors);
-        Assert.All(Settings.Table, def => Assert.Equal(def.Default, toml.Get(def.Section, def.Key)));
-        Assert.Equal(Settings.Table.Count, toml.Keys().Count());
+        Assert.All(written, def => Assert.Equal(def.Default, toml.Get(def.Section, def.Key)));
+        Assert.Equal(written.Count, toml.Keys().Count());
         Assert.DoesNotContain(log.Lines, l => l.Contains("is not a setting") || l.Contains("is not true/false"));
         Directory.Delete(dir, recursive: true);
     }
@@ -145,6 +146,45 @@ public class SettingsTests
         Assert.Equal(1, log.Lines.Count(l => l.Contains("is not true/false")));
         Assert.Contains(log.Lines, l => l.Contains("AutoUpdate = \"yes\""));
         Assert.Contains("AutoUpdate = \"yes\"", File.ReadAllLines(path));
+        Directory.Delete(dir, recursive: true);
+    }
+
+    /// <summary>A hidden row is never written, and read when a file has it.</summary>
+    [Fact]
+    public void AHiddenRowIsNeverWrittenAndIsReadWhenPresent()
+    {
+        string dir = NewDir();
+        string path = Path.Combine(dir, Settings.FileName);
+        var s = Settings.Load(dir);
+        Assert.True(s.NodeUpdate);
+        Assert.DoesNotContain("NodeUpdate", File.ReadAllText(path));
+        File.WriteAllText(path, "[Settings.Debug]\nNodeUpdate = false\n");
+        var log = new ListLogger();
+        s = Settings.Load(dir, log);
+        Assert.False(s.NodeUpdate);
+        Assert.Contains("NodeUpdate = false", File.ReadAllLines(path));
+        Assert.DoesNotContain(log.Lines, l => l.Contains("NodeUpdate"));
+        Assert.True(Settings.Rows.NodeUpdate.Hidden);
+        Directory.Delete(dir, recursive: true);
+    }
+
+    /// <summary>A fairness row is the same for everyone: the file keeps the player's line, the client reads the default.</summary>
+    [Fact]
+    public void AFairnessRowReadsItsDefaultAndStaysInTheFileAsWritten()
+    {
+        string dir = NewDir();
+        string path = Path.Combine(dir, Settings.FileName);
+        File.WriteAllText(path, "[Features]\nRollbackNode = false\n[Server.Game]\nP2PRegistry = \"p2p.example\"\n");
+        var log = new ListLogger();
+
+        var s = Settings.Load(dir, log);
+        Assert.True(s.RollbackNode);
+        // An ordinary row beside it is read as written.
+        Assert.Equal("p2p.example", s.P2PRegistry);
+        Assert.Contains("RollbackNode = false", File.ReadAllLines(path));
+        Assert.DoesNotContain(log.Lines, l => l.Contains("RollbackNode"));
+        Assert.True(Settings.Rows.RollbackNode.Fairness);
+        Assert.False(Settings.Rows.P2PRegistry.Fairness);
         Directory.Delete(dir, recursive: true);
     }
 

@@ -48,7 +48,7 @@ public class RollbackNodeTests
     {
         Assert.DoesNotContain("--rendezvous", Options.Arguments("/p"));
         Assert.EndsWith(" --rendezvous \"p2p.openversus.org:41235\"", (Options with { Rendezvous = "p2p.openversus.org:41235" }).Arguments("/p"));
-        Assert.Null(NodeLaunch.Plan(Mod, underWine: false, Options with { Rendezvous = "a\"b:1" }, Files(WindowsExe), _ => null, System32, out string why));
+        Assert.Null(NodeLaunch.Plan(Mod, underWine: false, onMac: false, Options with { Rendezvous = "a\"b:1" }, Files(WindowsExe), _ => null, System32, out string why));
         Assert.Contains("quote", why);
     }
 
@@ -60,7 +60,7 @@ public class RollbackNodeTests
         Assert.EndsWith($" --log-file \"{logged.LogFile}\"", logged.Arguments("/p"));
         Assert.EndsWith(" --log-file \"/l\"", logged.Arguments("/p", "/l"));
         Assert.DoesNotContain("--log-file", logged.Arguments("/p", ""));
-        Assert.Null(NodeLaunch.Plan(Mod, underWine: false, Options with { LogFile = "C:\\odd\\\"\\RollbackNode.log" }, Files(WindowsExe), _ => null, System32, out string why));
+        Assert.Null(NodeLaunch.Plan(Mod, underWine: false, onMac: false, Options with { LogFile = "C:\\odd\\\"\\RollbackNode.log" }, Files(WindowsExe), _ => null, System32, out string why));
         Assert.Contains("quote", why);
     }
 
@@ -68,18 +68,18 @@ public class RollbackNodeTests
     public void TheLogFileReachesEitherNodeAsAPathItsSystemReads()
     {
         var logged = Options with { LogFile = Path.Combine(Mod, "logs", "RollbackNode.log") };
-        var windows = NodeLaunch.Plan(Mod, underWine: false, logged, Files(WindowsExe), _ => null, System32, out string why);
+        var windows = NodeLaunch.Plan(Mod, underWine: false, onMac: false, logged, Files(WindowsExe), _ => null, System32, out string why);
         Assert.NotNull(windows);
         Assert.Equal("", why);
         Assert.EndsWith($" --log-file \"{logged.LogFile}\"", windows.Arguments);
 
-        var linux = NodeLaunch.Plan(Mod, underWine: true, logged, Files(WindowsExe, LinuxExe), Unix, System32, out why);
+        var linux = NodeLaunch.Plan(Mod, underWine: true, onMac: false, logged, Files(WindowsExe, LinuxExe), Unix, System32, out why);
         Assert.NotNull(linux);
         Assert.Equal("", why);
         Assert.EndsWith(" --log-file \"/home/deck/game/plugins/OpenVersus/logs/RollbackNode.log\"", linux.Arguments);
 
         // Wine converts the node and its port file but not the log file: still the Linux node, without the option.
-        linux = NodeLaunch.Plan(Mod, underWine: true, logged, Files(WindowsExe, LinuxExe), p => p == logged.LogFile ? null : Unix(p), System32, out why);
+        linux = NodeLaunch.Plan(Mod, underWine: true, onMac: false, logged, Files(WindowsExe, LinuxExe), p => p == logged.LogFile ? null : Unix(p), System32, out why);
         Assert.NotNull(linux);
         Assert.False(linux.IsNodeItself);
         Assert.DoesNotContain("--log-file", linux.Arguments);
@@ -99,7 +99,7 @@ public class RollbackNodeTests
     [Fact]
     public void OnWindowsTheWindowsNodeRunsFromItsFolderWithTheOptions()
     {
-        var plan = NodeLaunch.Plan(Mod, underWine: false, Options, Files(WindowsExe, LinuxExe), _ => throw new Xunit.Sdk.XunitException("no Wine, no path conversion"), System32, out string why);
+        var plan = NodeLaunch.Plan(Mod, underWine: false, onMac: false, Options, Files(WindowsExe, LinuxExe), _ => throw new Xunit.Sdk.XunitException("no Wine, no path conversion"), System32, out string why);
         Assert.NotNull(plan);
         Assert.Equal("", why);
         Assert.Equal(WindowsExe, plan.Executable);
@@ -112,7 +112,7 @@ public class RollbackNodeTests
     [Fact]
     public void UnderWineTheLinuxNodeIsPreferredAndStartedThroughStartExeWithLinuxPaths()
     {
-        var plan = NodeLaunch.Plan(Mod, underWine: true, Options with { Port = 41234 }, Files(WindowsExe, LinuxExe), Unix, System32, out string why);
+        var plan = NodeLaunch.Plan(Mod, underWine: true, onMac: false, Options with { Port = 41234 }, Files(WindowsExe, LinuxExe), Unix, System32, out string why);
         Assert.NotNull(plan);
         Assert.Equal("", why);
         Assert.Equal(Path.Combine(System32, "start.exe"), plan.Executable);
@@ -122,9 +122,40 @@ public class RollbackNodeTests
     }
 
     [Fact]
+    public void OnAMacTheLauncherIsStartedThroughStartExeFromTheNodeFolder()
+    {
+        string launcher = Path.Combine(Mod, "node", "OVS.Rollback.Node.sh");
+        var plan = NodeLaunch.Plan(Mod, underWine: true, onMac: true, Options with { Port = 41234 }, Files(WindowsExe, LinuxExe, launcher), Unix, System32, out string why);
+        Assert.NotNull(plan);
+        Assert.Equal("", why);
+        Assert.Equal(Path.Combine(System32, "start.exe"), plan.Executable);
+        Assert.StartsWith("/unix \"/home/deck/game/plugins/OpenVersus/node/OVS.Rollback.Node.sh\" 41234 --port-file \"/home/deck/game/plugins/OpenVersus/node/port-4242.txt\" ", plan.Arguments);
+        Assert.Equal(Path.Combine(Mod, "node"), plan.WorkingDirectory);
+        Assert.False(plan.IsNodeItself);
+        Assert.Contains("the node launcher", plan.Description);
+    }
+
+    [Fact]
+    public void OnAMacWithoutTheLauncherTheLinuxNodeRunsAsBeforeAndOffAMacTheLauncherIsIgnored()
+    {
+        string launcher = Path.Combine(Mod, "node", "OVS.Rollback.Node.sh");
+        var plan = NodeLaunch.Plan(Mod, underWine: true, onMac: true, Options, Files(WindowsExe, LinuxExe), Unix, System32, out _);
+        Assert.NotNull(plan);
+        Assert.Contains("the Linux node", plan.Description);
+        plan = NodeLaunch.Plan(Mod, underWine: true, onMac: false, Options, Files(WindowsExe, LinuxExe, launcher), Unix, System32, out _);
+        Assert.NotNull(plan);
+        Assert.Contains("the Linux node", plan.Description);
+        Assert.Equal(Path.GetDirectoryName(LinuxExe), plan.WorkingDirectory);
+        // On a Mac with neither the launcher nor a Linux node, the Windows one under Wine, saying what is missing.
+        plan = NodeLaunch.Plan(Mod, underWine: true, onMac: true, Options, Files(WindowsExe), _ => "/unused", System32, out _);
+        Assert.NotNull(plan);
+        Assert.Contains("no node launcher beside it", plan.Description);
+    }
+
+    [Fact]
     public void UnderWineWithoutALinuxNodeTheWindowsOneRuns()
     {
-        var plan = NodeLaunch.Plan(Mod, underWine: true, Options, Files(WindowsExe), _ => "/unused", System32, out string why);
+        var plan = NodeLaunch.Plan(Mod, underWine: true, onMac: false, Options, Files(WindowsExe), _ => "/unused", System32, out string why);
         Assert.NotNull(plan);
         Assert.Equal("", why);
         Assert.Equal(WindowsExe, plan.Executable);
@@ -135,41 +166,41 @@ public class RollbackNodeTests
     [Fact]
     public void UnderWineAnUnconvertiblePathFallsBackToTheWindowsNodeAndSaysSo()
     {
-        var plan = NodeLaunch.Plan(Mod, underWine: true, Options, Files(WindowsExe, LinuxExe), _ => null, System32, out string why);
+        var plan = NodeLaunch.Plan(Mod, underWine: true, onMac: false, Options, Files(WindowsExe, LinuxExe), _ => null, System32, out string why);
         Assert.NotNull(plan);
         Assert.Equal(WindowsExe, plan.Executable);
         Assert.Contains("Linux path", why);
         Assert.Contains(LinuxExe, why);
 
         // The node converts but the port file does not: same fallback, naming the port file.
-        plan = NodeLaunch.Plan(Mod, underWine: true, Options, Files(WindowsExe, LinuxExe), p => p == LinuxExe ? Unix(p) : null, System32, out why);
+        plan = NodeLaunch.Plan(Mod, underWine: true, onMac: false, Options, Files(WindowsExe, LinuxExe), p => p == LinuxExe ? Unix(p) : null, System32, out why);
         Assert.NotNull(plan);
         Assert.Equal(WindowsExe, plan.Executable);
         Assert.Contains(Options.PortFile, why);
 
-        var quoted = NodeLaunch.Plan(Mod, underWine: true, Options, Files(WindowsExe, LinuxExe), _ => "/home/a\"b/node", System32, out why);
+        var quoted = NodeLaunch.Plan(Mod, underWine: true, onMac: false, Options, Files(WindowsExe, LinuxExe), _ => "/home/a\"b/node", System32, out why);
         Assert.NotNull(quoted);
         Assert.Equal(WindowsExe, quoted.Executable);
         Assert.Contains("quote", why);
 
-        Assert.Null(NodeLaunch.Plan(Mod, underWine: true, Options, Files(LinuxExe), _ => null, System32, out why));
+        Assert.Null(NodeLaunch.Plan(Mod, underWine: true, onMac: false, Options, Files(LinuxExe), _ => null, System32, out why));
     }
 
     [Fact]
     public void AQuoteInAnOptionRefusesToStartOnAnyPlatform()
     {
-        Assert.Null(NodeLaunch.Plan(Mod, underWine: false, Options with { PortFile = "C:\\odd\\\"\\port.txt" }, Files(WindowsExe), _ => null, System32, out string why));
+        Assert.Null(NodeLaunch.Plan(Mod, underWine: false, onMac: false, Options with { PortFile = "C:\\odd\\\"\\port.txt" }, Files(WindowsExe), _ => null, System32, out string why));
         Assert.Contains("quote", why);
-        Assert.Null(NodeLaunch.Plan(Mod, underWine: false, Options with { ServerUrl = "http://x/\"" }, Files(WindowsExe), _ => null, System32, out why));
+        Assert.Null(NodeLaunch.Plan(Mod, underWine: false, onMac: false, Options with { ServerUrl = "http://x/\"" }, Files(WindowsExe), _ => null, System32, out why));
     }
 
     [Fact]
     public void WithNoNodeThereIsNoPlanAndTheReasonNamesBothPaths()
     {
-        Assert.Null(NodeLaunch.Plan(Mod, underWine: true, Options, Files(), _ => null, System32, out string why));
+        Assert.Null(NodeLaunch.Plan(Mod, underWine: true, onMac: false, Options, Files(), _ => null, System32, out string why));
         Assert.Contains(WindowsExe, why);
         Assert.Contains(LinuxExe, why);
-        Assert.Null(NodeLaunch.Plan(Mod, underWine: false, Options, Files(LinuxExe), _ => null, System32, out why));
+        Assert.Null(NodeLaunch.Plan(Mod, underWine: false, onMac: false, Options, Files(LinuxExe), _ => null, System32, out why));
         Assert.DoesNotContain(LinuxExe, why);
     }
 

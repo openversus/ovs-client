@@ -9,7 +9,11 @@ using OpenVersus.Native;
 
 namespace OpenVersus.P2P;
 
-/// <summary>Where the rollback node's executables live: node/win-x64/ and node/linux-x64/ inside the mod's folder.</summary>
+/// <summary>
+/// Where the rollback node's executables live inside the mod's folder: node/win-x64/, node/linux-x64/, node/osx-x64/ and
+/// node/osx-arm64/, and node/OVS.Rollback.Node.sh, the launcher that picks a Mac's node (the Mac's architecture is not
+/// visible from inside Wine; the launcher reads it and runs the node built for it, or the Linux one anywhere else).
+/// </summary>
 public static class NodeFiles
 {
     /// <summary>The folder inside the mod's folder.</summary>
@@ -18,6 +22,8 @@ public static class NodeFiles
     public const string WindowsExe = "OVS.Rollback.Node.exe";
     /// <summary>The Linux build's file name, for Proton and Steam Deck players.</summary>
     public const string LinuxExe = "OVS.Rollback.Node";
+    /// <summary>The launcher's file name, for Mac players (CrossOver): it picks osx-arm64 or osx-x64 by the machine.</summary>
+    public const string Launcher = "OVS.Rollback.Node.sh";
     /// <summary>The node's own log in the mod's logs folder, beside OpenVersus.log: "RollbackNode.log", archived like it.</summary>
     public const string LogName = "RollbackNode";
 
@@ -25,6 +31,8 @@ public static class NodeFiles
     public static string WindowsPath(string modDirectory) => Path.Combine(modDirectory, Folder, "win-x64", WindowsExe);
     /// <summary>The Linux node for a mod in <paramref name="modDirectory"/>.</summary>
     public static string LinuxPath(string modDirectory) => Path.Combine(modDirectory, Folder, "linux-x64", LinuxExe);
+    /// <summary>The launcher for a mod in <paramref name="modDirectory"/>.</summary>
+    public static string LauncherPath(string modDirectory) => Path.Combine(modDirectory, Folder, Launcher);
 }
 
 /// <summary>The P2P rendezvous settings ([Server.Game] P2PRegistry and P2PRegistryPort), as the node wants them: host:port.</summary>
@@ -101,15 +109,20 @@ public static class NodeLaunch
     /// <summary>
     /// Under Wine or Proton the Linux build runs natively, started through Wine's <c>start /unix</c>
     /// (<paramref name="unixPath"/> turns a Windows path into the Linux one, for the node, its port
-    /// file and its log file); without a Linux build the Windows one runs under Wine. On Windows the Windows build
-    /// runs. The node's settings travel on its command line, since Wine does not pass the Windows
-    /// environment to a Linux program. Null, with <paramref name="why"/> set, when there is nothing to
+    /// file and its log file); on a Mac (<paramref name="onMac"/>: CrossOver) the launcher script is started the same
+    /// way instead, and picks the Mac's node; without a Linux build (or a launcher on a Mac) the Windows one runs under
+    /// Wine. On Windows the Windows build runs. The node's settings travel on its command line, since Wine does not
+    /// pass the Windows environment to a Unix program. Null, with <paramref name="why"/> set, when there is nothing to
     /// run; a non-empty <paramref name="why"/> with a plan is a note for the log.
     /// </summary>
-    public static LaunchPlan? Plan(string modDirectory, bool underWine, NodeOptions options, Func<string, bool> exists, Func<string, string?> unixPath, string systemDirectory, out string why)
+    public static LaunchPlan? Plan(string modDirectory, bool underWine, bool onMac, NodeOptions options, Func<string, bool> exists, Func<string, string?> unixPath, string systemDirectory, out string why)
     {
         string windows = NodeFiles.WindowsPath(modDirectory);
-        string linux = NodeFiles.LinuxPath(modDirectory);
+        string launcher = NodeFiles.LauncherPath(modDirectory);
+        // What start /unix runs: on a Mac the launcher (it picks the node), elsewhere the Linux node itself.
+        bool viaLauncher = onMac && exists(launcher);
+        string linux = viaLauncher ? launcher : NodeFiles.LinuxPath(modDirectory);
+        string what = viaLauncher ? "the node launcher" : "the Linux node";
         if (options.PortFile.Contains('"') || options.ServerUrl.Contains('"') || options.Rendezvous.Contains('"') || options.LogFile.Contains('"'))
         {
             why = "the port file path, the server URL, the rendezvous or the log file path contains a quote, which cannot be passed on a command line";
@@ -146,13 +159,13 @@ public static class NodeLaunch
             }
 
             return new LaunchPlan(Path.Combine(systemDirectory, "start.exe"), $"/unix \"{unix}\" {options.Arguments(unixPortFile, unixLogFile)}", Path.GetDirectoryName(linux)!,
-                $"the Linux node {unix} through Wine's start.exe", IsNodeItself: false);
+                $"{what} {unix} through Wine's start.exe", IsNodeItself: false);
         }
 
         if (exists(windows))
         {
             why = "";
-            return WindowsPlan(windows, options, underWine ? " under Wine (no Linux build beside it)" : "");
+            return WindowsPlan(windows, options, underWine ? $" under Wine (no {(onMac ? "node launcher" : "Linux build")} beside it)" : "");
         }
 
         why = $"no node at {windows}{(underWine ? $" or {linux}" : "")}";
@@ -248,6 +261,7 @@ public sealed class RollbackNode : IDisposable
     private readonly string _serverUrl;
     private readonly string _rendezvous;
     private readonly bool _underWine;
+    private readonly bool _onMac;
     private readonly ILogger _log;
     private readonly Func<string, string?> _unixPath;
     private readonly string _portFile;
@@ -261,12 +275,14 @@ public sealed class RollbackNode : IDisposable
 
     /// <summary>A node for the mod in <paramref name="modDirectory"/>, told to reach the OpenVersus server at <paramref name="serverUrl"/> and the rendezvous at <paramref name="rendezvous"/> (host:port, or "" for none).</summary>
     /// <param name="unixPath">Turns a Windows path into Wine's Linux path; null outside Wine.</param>
-    public RollbackNode(string modDirectory, string serverUrl, string rendezvous, bool underWine, ILogger log, Func<string, string?>? unixPath = null)
+    /// <param name="onMac">The game runs under Wine on a Mac (CrossOver): the node launcher picks the Mac's node.</param>
+    public RollbackNode(string modDirectory, string serverUrl, string rendezvous, bool underWine, ILogger log, Func<string, string?>? unixPath = null, bool onMac = false)
     {
         _modDirectory = modDirectory;
         _serverUrl = serverUrl;
         _rendezvous = rendezvous;
         _underWine = underWine;
+        _onMac = onMac;
         _log = log;
         _unixPath = unixPath ?? (_ => null);
         _portFile = PortFile.PathFor(modDirectory, Environment.ProcessId);
@@ -292,7 +308,7 @@ public sealed class RollbackNode : IDisposable
         {
             _log.Warn("[Node] No rendezvous ([Server.Game] P2PRegistry is empty or unusable): every match run between players will go through a relay");
         }
-        var plan = NodeLaunch.Plan(_modDirectory, _underWine, options, File.Exists, _unixPath, Environment.SystemDirectory, out string why);
+        var plan = NodeLaunch.Plan(_modDirectory, _underWine, _onMac, options, File.Exists, _unixPath, Environment.SystemDirectory, out string why);
         if (plan == null)
         {
             _log.Info($"[Node] Not started: {why}");

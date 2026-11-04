@@ -4,8 +4,11 @@
 # The artifact is the install exactly as it ships: plugins/OpenVersus/ holding
 # OpenVersus_<version>.asi, sample_config.toml (sample.toml under a note that it is a
 # sample; the mod writes its own OpenVersus.toml on first launch, so extracting a release never
-# replaces a player's settings), LICENSE.txt and VERSION.txt, beside the ASI loader as
-# xinput1_3.dll, its license, and readme.txt (from release-readme.txt). release.yml
+# replaces a player's settings), LICENSE.txt and VERSION.txt, the rollback node for every
+# platform under node/ (built here from the server repo at the commit NODE_REF names, stamped
+# with this VERSION), beside the ASI loader as xinput1_3.dll, its license, and readme.txt (from
+# release-readme.txt). A second artifact holds the node as the release's own assets, one archive
+# per platform (the in-game updater installs the one for the player's platform). release.yml
 # publishes the artifact of the build that already ran for a tagged commit rather than building
 # it again, so every commit that may be tagged must get a build of its own: there is no path
 # filter here, and no cancel-in-progress (a build canceled by the next push would leave its
@@ -68,9 +71,21 @@ jobs:
       LOADER_URL: https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases/download/v9.7.4/Ultimate-ASI-Loader_x64.zip
       LOADER_SHA256: 8272d83b2692662098746f2d0ad0e2d85f3c8358ab1d63f75fbe835c2c8135fd
       LOADER_LICENSE_URL: https://raw.githubusercontent.com/ThirteenAG/Ultimate-ASI-Loader/v9.7.4/license
+      # The rollback node ships with the client: the server repo's node, built here at the commit NODE_REF names (a
+      # branch builds its head; pin a commit for a release) and stamped with this VERSION, which is what the server's
+      # update check compares against the node a player runs.
+      NODE_REPO: openversus/ovs-rollback-server
+      NODE_REF: csharp-p2p
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+
+      - name: Checkout the rollback node
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.NODE_REPO }}
+          ref: ${{ env.NODE_REF }}
+          path: node-repo
 
       - name: Set short SHA
         id: short_sha
@@ -124,6 +139,20 @@ jobs:
       - name: Publish
         run: ./build.sh publish
 
+      # Self-contained ReadyToRun single files for every platform, cross-compiled here (crossgen2 targets them all);
+      # locked to the prod and testing servers (the public keys in the server repo's pki/). The version is this
+      # VERSION: the release the node belongs to.
+      - name: Build the rollback node
+        run: |
+          set -euo pipefail
+          version=$(tr -d '[:space:]' < VERSION)
+          ( cd node-repo && NODE_VERSION="$version" NODE_PKI="prod testing" ./build.sh node )
+          node-repo/OVSRollbackNode/tools/archive-nodes.sh "$version" node-assets
+          for rid in win-x64 linux-x64 osx-x64 osx-arm64; do
+            exe=node-repo/out/node-$rid/OVS.Rollback.Node; [ -f "$exe" ] || exe=$exe.exe
+            grep -a -q -F "OVS-NODE-VERSION:$version;" "$exe" || { echo "::error::the $rid node is not stamped $version"; exit 1; }
+          done
+
       - name: Stage
         run: |
           set -euo pipefail
@@ -132,6 +161,14 @@ jobs:
           home=dist/plugins/OpenVersus
           rm -rf dist && mkdir -p "$home"
           cp "$asi" "$home/"
+          # The node, unpacked, so the install zip is complete on its own; the per-platform archives are the
+          # updater's and go up as a second artifact.
+          mkdir -p "$home/node"
+          for rid in win-x64 linux-x64 osx-x64 osx-arm64; do
+            mkdir -p "$home/node/$rid"
+            ( cd "node-repo/out/node-$rid" && find . -type f ! -name '*.pdb' -exec cp --parents {} "$GITHUB_WORKSPACE/$home/node/$rid/" \; )
+          done
+          install -m 755 node-repo/out/OVS.Rollback.Node.sh "$home/node/OVS.Rollback.Node.sh"
           { printf '%s\r\n' \
               "# A sample of the settings, for reference: the mod reads OpenVersus.toml in this folder," \
               "# which it writes on its first launch with these same defaults and comments." \
@@ -153,17 +190,30 @@ jobs:
           set -euo pipefail
           version=$(tr -d '[:space:]' < VERSION)
           expected=$(printf '%s\n' LICENSE_Ultimate_ASI_Loader.txt plugins/OpenVersus/LICENSE.txt plugins/OpenVersus/sample_config.toml "plugins/OpenVersus/OpenVersus_$version.asi" plugins/OpenVersus/VERSION.txt readme.txt xinput1_3.dll | sort)
-          actual=$(cd dist && find . -type f | sed 's|^\./||' | sort)
+          # The node folder holds whatever the node's publish produced; it is checked by its executables instead.
+          actual=$(cd dist && find . -type f -not -path './plugins/OpenVersus/node/*' | sed 's|^\./||' | sort)
           [ "$actual" = "$expected" ] || { echo "::error::dist does not hold exactly the release files"; diff <(echo "$expected") <(echo "$actual") || true; exit 1; }
+          for f in node/win-x64/OVS.Rollback.Node.exe node/linux-x64/OVS.Rollback.Node node/osx-x64/OVS.Rollback.Node node/osx-arm64/OVS.Rollback.Node node/OVS.Rollback.Node.sh; do
+            [ -f "dist/plugins/OpenVersus/$f" ] || { echo "::error::the install lacks $f"; exit 1; }
+          done
+          ls -l node-assets | tee -a "$GITHUB_STEP_SUMMARY"
           for pe in "dist/plugins/OpenVersus/OpenVersus_$version.asi" dist/xinput1_3.dll; do
             [ "$(head -c 2 "$pe")" = "MZ" ] || { echo "::error::$pe is not a PE file"; exit 1; }
           done
           ( cd dist && find . -type f -exec ls -l {} + ) | tee -a "$GITHUB_STEP_SUMMARY"
 
-      # Loose files: upload-artifact zips them, and nothing here needs an execute bit.
+      # Loose files: upload-artifact zips them, and nothing here needs an execute bit (the Unix nodes in the install
+      # zip get theirs from the player's unzip or from the mod; the tarballs below keep their own).
       - name: Upload
         uses: actions/upload-artifact@v7
         with:
           name: OpenVersus-${{ steps.short_sha.outputs.SHORT_SHA }}-windows-x64
           path: dist/
+          if-no-files-found: error
+
+      - name: Upload the node archives
+        uses: actions/upload-artifact@v7
+        with:
+          name: OpenVersus-${{ steps.short_sha.outputs.SHORT_SHA }}-node
+          path: node-assets/
           if-no-files-found: error

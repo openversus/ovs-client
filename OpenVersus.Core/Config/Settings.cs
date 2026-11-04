@@ -21,14 +21,22 @@ public enum SettingKind
 /// <param name="Key">The key within the section.</param>
 /// <param name="Kind">How the value is parsed.</param>
 /// <param name="Default">The value used, and written to the file, when the key is missing or does not parse.</param>
-public sealed record SettingDef(string Section, string Key, SettingKind Kind, string Default)
+/// <param name="Fairness">
+/// The row is the same for everyone, as the rollback node's fairness settings are: it stays in the file as the player
+/// left it, and the client reads its default.
+/// </param>
+/// <param name="Hidden">
+/// The row is never written: not added to a file that lacks it, not in the default file or its comments. It is read
+/// as any other when a file has it (a development switch).
+/// </param>
+public sealed record SettingDef(string Section, string Key, SettingKind Kind, string Default, bool Fairness = false, bool Hidden = false)
 {
     /// <summary>A true/false row.</summary>
-    public static SettingDef Bool(string section, string key, bool value) => new(section, key, SettingKind.Bool, value ? "true" : "false");
+    public static SettingDef Bool(string section, string key, bool value, bool fairness = false, bool hidden = false) => new(section, key, SettingKind.Bool, value ? "true" : "false", fairness, hidden);
     /// <summary>A whole-number row.</summary>
-    public static SettingDef Int(string section, string key, ulong value) => new(section, key, SettingKind.Int, value.ToString(CultureInfo.InvariantCulture));
+    public static SettingDef Int(string section, string key, ulong value, bool fairness = false) => new(section, key, SettingKind.Int, value.ToString(CultureInfo.InvariantCulture), fairness);
     /// <summary>A text row.</summary>
-    public static SettingDef Str(string section, string key, string value) => new(section, key, SettingKind.String, value);
+    public static SettingDef Str(string section, string key, string value, bool fairness = false) => new(section, key, SettingKind.String, value, fairness);
     /// <summary>A byte-pattern row.</summary>
     public static SettingDef Pattern(string section, string key, string value) => new(section, key, SettingKind.Pattern, value);
 
@@ -83,6 +91,8 @@ public sealed class Settings
         public static readonly SettingDef CountSunsetCalls = SettingDef.Bool("Settings.Debug", "CountSunsetCalls", false);
         /// <summary>The GitHub account whose releases paks may download from (<see cref="Net.PakUpdate.IsAllowedUrl"/>); another one only to test a fork's release.</summary>
         public static readonly SettingDef ReleaseOwner = SettingDef.Str("Settings.Debug", "ReleaseOwner", "openversus");
+        /// <summary>Keeps the rollback node current from the release (<see cref="Net.NodeUpdate"/>); off keeps a node built by hand. Hidden: read when a file has it, never written.</summary>
+        public static readonly SettingDef NodeUpdate = SettingDef.Bool("Settings.Debug", "NodeUpdate", true, hidden: true);
         /// <summary>Writes logs/MatchRules.log: each match's settings, stock deaths and friendly-fire hits (<see cref="Hooks.MatchRulesLog"/>).</summary>
         public static readonly SettingDef MatchRulesLog = SettingDef.Bool("Settings.Debug", "MatchRulesLog", false);
         /// <summary>Game speed in percent for offline matches (Local Play, the Lab), for testing (<see cref="Hooks.GameSpeedHooks"/>); 100 is normal. Never online.</summary>
@@ -120,7 +130,7 @@ public sealed class Settings
         /// <summary>Logs the rollback session's stats once a second during a match, one file per match (<see cref="OpenVersus.NetStats.NetStatsLogger"/>).</summary>
         public static readonly SettingDef NetStats = SettingDef.Bool("Features", "NetStats", false);
         /// <summary>Runs the rollback node beside the game, for matches the server puts on the players' own machines (<see cref="P2P.RollbackNode"/>).</summary>
-        public static readonly SettingDef RollbackNode = SettingDef.Bool("Features", "RollbackNode", true);
+        public static readonly SettingDef RollbackNode = SettingDef.Bool("Features", "RollbackNode", true, fairness: true);
         // Patterns, valid for the final patch of the game (Unreal Engine 5.1.1.0)
         /// <summary>Finds the pak signature check's tail jump, for <see cref="Hooks.SigCheckPatch"/>.</summary>
         public static readonly SettingDef SigCheckPattern = SettingDef.Pattern("Patterns", "SigCheck", "48 8D 0D ? ? ? ? E9 ? ? ? ? CC CC CC CC 48 83 EC 28 E8 ? ? ? ? 48 89 05 ? ? ? ? 48 83 C4 28 C3 CC CC CC CC CC CC CC CC CC CC CC 48 8D 0D ? ? ? ? E9 ? ? ? ? CC CC CC CC 48 8D 0D ? ? ? ? E9 ? ? ? ? CC CC CC CC");
@@ -206,6 +216,7 @@ public sealed class Settings
         Rows.NonMvsPatching,
         Rows.CountSunsetCalls,
         Rows.ReleaseOwner,
+        Rows.NodeUpdate,
         Rows.MatchRulesLog,
         Rows.LabGameSpeedPercent,
         Rows.ServerUrl,
@@ -306,10 +317,13 @@ public sealed class Settings
             if (value == null)
             {
                 value = def.Default;
-                toml.Add(def.Section, def.Key, def.Kind, value);
+                if (!def.Hidden)
+                {
+                    toml.Add(def.Section, def.Key, def.Kind, value);
+                }
             }
 
-            settings._values[def] = Normalize(def, value, log);
+            settings._values[def] = def.Fairness ? def.Default : Normalize(def, value, log);
         }
 
         foreach ((string section, string key) in toml.Keys())
@@ -424,7 +438,7 @@ public sealed class Settings
         var settings = new Settings("");
         foreach (var def in Table)
         {
-            settings._values[def] = values.TryGetValue(def, out string? v) ? Normalize(def, v, null) : def.Default;
+            settings._values[def] = !def.Fairness && values.TryGetValue(def, out string? v) ? Normalize(def, v, null) : def.Default;
         }
 
         return settings;
@@ -477,6 +491,8 @@ public sealed class Settings
     public bool CountSunsetCalls => GetBool(Rows.CountSunsetCalls);
     /// <inheritdoc cref="Rows.ReleaseOwner"/>
     public string ReleaseOwner => Get(Rows.ReleaseOwner);
+    /// <inheritdoc cref="Rows.NodeUpdate"/>
+    public bool NodeUpdate => GetBool(Rows.NodeUpdate);
     /// <inheritdoc cref="Rows.MatchRulesLog"/>
     public bool MatchRulesLog => GetBool(Rows.MatchRulesLog);
     /// <inheritdoc cref="Rows.LabGameSpeedPercent"/>

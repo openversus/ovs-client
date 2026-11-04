@@ -10,9 +10,11 @@
 # To release: bump VERSION, push, let the build finish (or don't -- this waits for it), then
 # tag that commit and push the tag.
 #
-# Assets: OpenVersus_v<tag>.zip, the install (extracted beside the game's executable);
-# OpenVersus_<version>.asi, the plugin alone, which is what the server's download_url points
-# the auto-updater at; a .sha256 beside each, and SHA256SUMS.
+# Assets: OpenVersus_v<tag>.zip, the install (extracted beside the game's executable, the
+# rollback node for every platform inside); OpenVersus_<version>.asi, the plugin alone, which
+# is what the server's download_url points the auto-updater at; OVS_Node_<version>_<platform>
+# archives, the node alone per platform, which the updater installs beside the game; a .sha256
+# beside each, and SHA256SUMS.
 name: release
 
 on:
@@ -94,6 +96,10 @@ jobs:
           [ -n "$name" ] || { echo "::error::build run ${{ steps.build.outputs.run }} has no unexpired windows-x64 artifact"; exit 1; }
           [ "$(wc -l <<<"$name")" -eq 1 ] || { echo "::error::build run ${{ steps.build.outputs.run }} has more than one windows-x64 artifact"; exit 1; }
           echo "name=$name" >> "$GITHUB_OUTPUT"
+          node=$(grep -- '-node$' <<<"$names" || true)
+          [ -n "$node" ] || { echo "::error::build run ${{ steps.build.outputs.run }} has no unexpired node artifact"; exit 1; }
+          [ "$(wc -l <<<"$node")" -eq 1 ] || { echo "::error::build run ${{ steps.build.outputs.run }} has more than one node artifact"; exit 1; }
+          echo "node=$node" >> "$GITHUB_OUTPUT"
 
       # By name, into a directory of our own: download-artifact extracts a named artifact straight
       # into path. Downloading "all" does not reliably add a directory per artifact (v8 said it
@@ -105,6 +111,14 @@ jobs:
           run-id: ${{ steps.build.outputs.run }}
           github-token: ${{ github.token }}
           path: artifacts/install
+
+      - name: Download the node archives
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ steps.artifact.outputs.node }}
+          run-id: ${{ steps.build.outputs.run }}
+          github-token: ${{ github.token }}
+          path: artifacts/node
 
       - name: Package
         run: |
@@ -118,13 +132,18 @@ jobs:
           [ -f "$asi" ] || { echo "::error::the artifact has no plugins/OpenVersus/OpenVersus_$base.asi"; ls -R "$dir"; exit 1; }
           ( cd "$dir" && zip -qr "$GITHUB_WORKSPACE/OpenVersus_v$label.zip" . )
           cp "$asi" .
+          # The node archives, named for this version (the server offers only a release's own): one per platform.
+          for rid in win-x64 linux-x64 osx-x64 osx-arm64; do
+            ls artifacts/node/OVS_Node_"$base"_"$rid".* >/dev/null 2>&1 || { echo "::error::the node artifact has no OVS_Node_${base}_$rid archive"; ls -R artifacts/node; exit 1; }
+          done
+          cp artifacts/node/OVS_Node_"$base"_* .
           # Checksums in binary mode ("hash *file"), the explicit form a Windows sha256sum also
           # expects. One .sha256 per file so each download has its checksum beside it, plus
           # the combined SHA256SUMS. Verify with: sha256sum -c <file>.sha256
-          for f in OpenVersus_*.zip OpenVersus_*.asi; do
+          for f in OpenVersus_*.zip OpenVersus_*.asi OVS_Node_*; do
             sha256sum -b "$f" > "$f.sha256"
           done
-          sha256sum -b OpenVersus_*.zip OpenVersus_*.asi > SHA256SUMS
+          sha256sum -b OpenVersus_*.zip OpenVersus_*.asi OVS_Node_*.zip OVS_Node_*.tar.gz > SHA256SUMS
           cat SHA256SUMS
           sha256sum -c ./*.sha256   # prove each file verifies before it is published
           unzip -l "OpenVersus_v$label.zip"
@@ -137,6 +156,7 @@ jobs:
             echo
             echo "- \`OpenVersus_v${{ steps.version.outputs.label }}.zip\`: the install. Extract it beside the game's executable, \`MultiVersus-Win64-Shipping.exe\`."
             echo "- \`OpenVersus_${{ steps.version.outputs.base }}.asi\`: the plugin alone, for updating an existing install (replace the old \`OpenVersus*.asi\` in \`plugins\`; the ASI loader loads every \`.asi\` there)."
+            echo "- \`OVS_Node_${{ steps.version.outputs.base }}_<platform>.zip\` / \`.tar.gz\`: the rollback node alone, per platform (the install zip already holds all four; the mod keeps the one it needs current from these)."
             echo "- \`*.sha256\`, \`SHA256SUMS\`: checksums. Verify with \`sha256sum -c <file>.sha256\`."
           } > notes.md
           cat notes.md >> "$GITHUB_STEP_SUMMARY"
@@ -152,4 +172,5 @@ jobs:
             OpenVersus_*.zip
             OpenVersus_*.asi
             OpenVersus_*.sha256
+            OVS_Node_*
             SHA256SUMS

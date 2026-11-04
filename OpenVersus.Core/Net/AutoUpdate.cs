@@ -23,8 +23,13 @@ public sealed class AutoUpdate(string serverUrl, string pluginPath, string insta
     /// <summary>The version response, or null when the text is not that.</summary>
     public static VersionInfo? Parse(string json) => OvsJson.TryParse(json, OvsJson.Default.VersionInfo, out _);
 
-    /// <summary>The version check on <paramref name="serverUrl"/>, saying which client asks; null when that is not a URL.</summary>
-    public static Uri? VersionUrl(string serverUrl) => Urls.Join(serverUrl, $"/ovs/client-version?v={Uri.EscapeDataString(OvsVersion.Current)}");
+    /// <summary>
+    /// The version check on <paramref name="serverUrl"/>, saying which client asks and which rollback node it
+    /// runs beside it (<paramref name="nodeVersion"/>; "" for none, which the server answers as out of date); null when
+    /// that is not a URL.
+    /// </summary>
+    public static Uri? VersionUrl(string serverUrl, string nodeVersion = "") =>
+        Urls.Join(serverUrl, $"/ovs/client-version?v={Uri.EscapeDataString(OvsVersion.Current)}{(nodeVersion.Length > 0 ? $"&node={Uri.EscapeDataString(nodeVersion)}" : "")}");
 
     /// <summary>
     /// Why <paramref name="info"/> offers no plugin to install over <paramref name="running"/>, or

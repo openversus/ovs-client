@@ -309,10 +309,10 @@ public class PakUpdateTests : IDisposable
 
     // The startup step
 
-    private StartupUpdate Startup(ServedFiles http, List<string> told, List<string> notices, bool autoUpdate = false, bool withPaks = true) =>
+    private StartupUpdate Startup(ServedFiles http, List<string> told, List<string> notices, bool autoUpdate = false, bool withPaks = true, NodeUpdate? node = null) =>
         new("http://ovs.test", autoUpdate, http,
             new AutoUpdate("http://ovs.test", Path.Combine(_plugin, "OpenVersus.asi"), _plugin, http, http, _log, () => { }),
-            withPaks ? Updater(http) : null, _log, () => { }, notices.Add)
+            withPaks ? Updater(http) : null, node, _log, () => { }, notices.Add)
         {
             Exit = () => told.Add("exit"),
             Tell = (text, caption, _) => told.Add(caption),

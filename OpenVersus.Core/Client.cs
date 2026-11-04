@@ -355,8 +355,23 @@ public sealed class Client
         {
             Log.Warn($"[Update] Testing: paks may download from {paks.ReleaseOwner}'s releases ([Settings.Debug] ReleaseOwner)");
         }
+        // The rollback node beside the game: kept at the release's version for the platform the game runs on (a Mac is
+        // asked which it is, since Wine cannot see that), unless a developer keeps their own build.
+        NodeUpdate? node = null;
+        if (Settings.NodeUpdate)
+        {
+            bool onMac = Wine.IsWine && Runtime.Detect() == Identity.RuntimeEnvironment.CrossOver;
+            string? macArchitecture = onMac ? MacArchitecture.Probe(Directory, Wine.UnixPath, Environment.SystemDirectory, StartedProcess.Start, Log) : null;
+            var wanted = NodePlatform.Wanted(Wine.IsWine, onMac, macArchitecture);
+            node = new NodeUpdate(Directory, download, Log, wanted, Wine.IsWine ? Wine.UnixPath : null, Environment.SystemDirectory);
+        }
+        else
+        {
+            Log.Warn("[Update] Testing: the rollback node is not kept current ([Settings.Debug] NodeUpdate)");
+        }
+
         var state = State;
-        return new StartupUpdate(Settings.ServerUrl, Settings.AutoUpdate, Http, plugins, paks, Log, Log.Close, state.SetUpdateNotice).Run();
+        return new StartupUpdate(Settings.ServerUrl, Settings.AutoUpdate, Http, plugins, paks, node, Log, Log.Close, state.SetUpdateNotice).Run();
     }
 
     /// <summary>
@@ -391,7 +406,17 @@ public sealed class Client
             rendezvous = "";
         }
 
-        var node = new RollbackNode(Directory, Settings.ServerUrl, rendezvous, Wine.IsWine, Log, Wine.IsWine ? Wine.UnixPath : null);
+        if (Wine.IsWine)
+        {
+            // A node unpacked from the install zip has no execute bits (zips carry none through Windows tools, and
+            // files written through Wine get none); set them on whatever Unix node is there before it is started.
+            string nodeFolder = Path.Combine(Directory, NodeFiles.Folder);
+            NodeUpdate.MakeExecutable(nodeFolder, [NodePlatform.ExecutablePath(Directory, NodePlatform.Linux), NodePlatform.ExecutablePath(Directory, NodePlatform.MacArm),
+                NodePlatform.ExecutablePath(Directory, NodePlatform.MacIntel), NodeFiles.LauncherPath(Directory)], Wine.UnixPath, Environment.SystemDirectory, StartedProcess.Start, Log);
+        }
+
+        var node = new RollbackNode(Directory, Settings.ServerUrl, rendezvous, Wine.IsWine, Log, Wine.IsWine ? Wine.UnixPath : null,
+            onMac: Wine.IsWine && Runtime.Detect() == Identity.RuntimeEnvironment.CrossOver);
         if (node.Start())
         {
             _node = node;

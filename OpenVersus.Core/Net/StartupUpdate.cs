@@ -20,10 +20,11 @@ namespace OpenVersus.Net;
 /// <param name="http">The server transport.</param>
 /// <param name="plugins">The plugin updater, for its download checks and install.</param>
 /// <param name="paks">The pak updater for %LOCALAPPDATA%\MultiVersus\Saved\Paks; null when there is no local AppData folder.</param>
+/// <param name="node">The rollback node updater; null when the node is not kept current ([Settings.Debug] NodeUpdate off).</param>
 /// <param name="log">Where everything is logged.</param>
 /// <param name="beforeExit">Run just before the game is closed.</param>
 /// <param name="onUpdated">Told what was installed ("Version …", "New game content installed") before the game closes, for the toast after the relaunch.</param>
-public sealed class StartupUpdate(string serverUrl, bool autoUpdate, IHttpTransport http, AutoUpdate plugins, PakUpdate? paks, ILogger log, Action beforeExit, Action<string> onUpdated)
+public sealed class StartupUpdate(string serverUrl, bool autoUpdate, IHttpTransport http, AutoUpdate plugins, PakUpdate? paks, NodeUpdate? node, ILogger log, Action beforeExit, Action<string> onUpdated)
 {
     /// <summary>What happened.</summary>
     public enum Outcome
@@ -67,7 +68,8 @@ public sealed class StartupUpdate(string serverUrl, bool autoUpdate, IHttpTransp
         // put back from the backup folder's manifest, so the game never starts on a half-swapped set.
         paks?.Recover();
 
-        var url = AutoUpdate.VersionUrl(serverUrl);
+        string nodeVersion = node?.InstalledVersion() ?? "";
+        var url = AutoUpdate.VersionUrl(serverUrl, nodeVersion);
         if (url == null)
         {
             return Outcome.NoAnswer;
@@ -84,9 +86,16 @@ public sealed class StartupUpdate(string serverUrl, bool autoUpdate, IHttpTransp
         List<UpdateFile> due = [];
         List<UpdateFile>? listed = null;
         bool releaseHasPaks = false;
+        ReleaseFiles? files = null;
+        string? filesProblem = null;
+        if (paks != null || node != null)
+        {
+            files = ParseFiles(result.Text, out filesProblem);
+        }
+
         if (paks != null)
         {
-            var files = ParseFiles(result.Text, out string? problem);
+            string? problem = filesProblem;
             listed = problem == null ? PakUpdate.Paks(files, out problem, paks.ReleaseOwner) : null;
             if (listed == null)
             {
@@ -102,7 +111,19 @@ public sealed class StartupUpdate(string serverUrl, bool autoUpdate, IHttpTransp
         }
 
         bool pluginDue = autoUpdate && AutoUpdate.NotOffered(info, OvsVersion.Current) == null;
-        if (due.Count == 0 && !pluginDue)
+        // The node: whatever the server says, as the paks are (peers' nodes must match), except that the game can
+        // play on without it (matches then go through a relay), so its failures never close the game.
+        List<UpdateFile> nodeDue = node == null || filesProblem != null ? [] : node.Needed(info, files, paks?.ReleaseOwner ?? PakUpdate.DefaultOwner);
+        if (node != null && filesProblem != null)
+        {
+            log.Warn($"[Update] Not checking the node: {filesProblem}");
+        }
+        else if (nodeDue.Count > 0)
+        {
+            log.Info($"[Update] Node {(nodeVersion.Length > 0 ? nodeVersion : "(none)")} is not the release's {info.NodeVersion}; to download: {string.Join(", ", nodeDue.Select(f => f.Name))}");
+        }
+
+        if (due.Count == 0 && !pluginDue && nodeDue.Count == 0)
         {
             if (releaseHasPaks && !paks!.RetireLegacy())
             {
@@ -118,14 +139,15 @@ public sealed class StartupUpdate(string serverUrl, bool autoUpdate, IHttpTransp
             return Outcome.UpToDate;
         }
 
-        long total = due.Sum(f => f.Size);
+        long total = due.Sum(f => f.Size) + nodeDue.Sum(f => f.Size);
         log.Info($"[Update] Downloading {(pluginDue ? $"OpenVersus {info.LatestVersion}" : "")}{(pluginDue && due.Count > 0 ? " and " : "")}{(due.Count > 0 ? $"{due.Count} pak file(s), {(total >= 1024 * 1024 ? $"{total / (1024 * 1024)} MB" : $"{Math.Max(1, total / 1024)} KB")}" : "")}");
         (string Text, string Caption)? failure;
         bool pluginInstalled;
+        bool nodeInstalled;
         // The window is always on top, so it is gone before any message box is shown.
         using (var window = OpenWindow(total))
         {
-            failure = Apply(window, info, pluginDue, due, releaseHasPaks, out pluginInstalled);
+            failure = Apply(window, info, pluginDue, due, nodeDue, releaseHasPaks, out pluginInstalled, out nodeInstalled);
         }
 
         if (failure is { } required)
@@ -141,8 +163,15 @@ public sealed class StartupUpdate(string serverUrl, bool autoUpdate, IHttpTransp
 
         if (due.Count == 0 && !pluginInstalled)
         {
+            if (nodeDue.Count > 0 && !pluginDue)
+            {
+                // Only the node was due: it starts later in this same launch, so the game plays on either way.
+                log.Info(nodeInstalled ? "[Update] The rollback node is up to date" : "[Update] The rollback node update did not install; trying again next launch");
+                return nodeInstalled ? Outcome.UpToDate : Outcome.Failed;
+            }
+
             // Only the plugin was due and it did not install: nothing changed, so play on.
-            log.Warn("[Update] The plugin update did not install; trying again next launch");
+            log.Warn($"[Update] The plugin update did not install; trying again next launch{(nodeInstalled ? " (the rollback node was updated)" : "")}");
             return Outcome.Failed;
         }
 
@@ -159,9 +188,10 @@ public sealed class StartupUpdate(string serverUrl, bool autoUpdate, IHttpTransp
     /// message and caption to close the game with when a required part failed, else null;
     /// <paramref name="pluginInstalled"/> says whether a new plugin is in place.
     /// </summary>
-    private (string Text, string Caption)? Apply(UpdateProgressWindow? window, VersionInfo info, bool pluginDue, List<UpdateFile> due, bool releaseHasPaks, out bool pluginInstalled)
+    private (string Text, string Caption)? Apply(UpdateProgressWindow? window, VersionInfo info, bool pluginDue, List<UpdateFile> due, List<UpdateFile> nodeDue, bool releaseHasPaks, out bool pluginInstalled, out bool nodeInstalled)
     {
         pluginInstalled = false;
+        nodeInstalled = false;
         byte[]? plugin = null;
         if (pluginDue)
         {
@@ -186,6 +216,14 @@ public sealed class StartupUpdate(string serverUrl, bool autoUpdate, IHttpTransp
         }
 
         pluginInstalled = plugin != null && plugins.InstallPlugin(plugin, info.LatestVersion!);
+        if (nodeDue.Count > 0)
+        {
+            // Last, and never a reason to close the game: without a node, matches go through a relay.
+            window?.SetStatus($"Downloading the rollback node {info.NodeVersion}. Keep the game open.");
+            nodeInstalled = node!.Download(nodeDue, (name, n, count) => window?.SetFile(name, n, count), bytes => window?.AddBytes(bytes))
+                && node.Install(nodeDue);
+        }
+
         return null;
     }
 

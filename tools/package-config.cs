@@ -1,22 +1,23 @@
 #:project ../OpenVersus.Core/OpenVersus.Core.csproj
-// dotnet run --file tools/package-config.cs -- DIR TESTING_URL
+// dotnet run --file tools/package-config.cs -- DIR [TESTING_URL]
 //
 // Writes DIR/OpenVersus.toml for the release zip (build.sh package): the default file exactly as the mod writes it on a
-// first launch (Settings.Load into an empty folder), then three changes for players who switch between the servers:
-// in [Server.Game] and [Server.Prod] the prod ServerUrl line is commented out and a ServerUrl line for TESTING_URL is
-// added below it, and [Settings] LogLevel is "trace". The file is then loaded again as the game will load it, and
-// refused (exit 1) unless the testing URL and trace are what the mod reads and the commented prod lines are still there.
+// first launch (Settings.Load into an empty folder), pointing at the prod server, with [Settings] LogLevel "trace".
+// With TESTING_URL (a testing package, for players who switch between the servers) two more changes: in [Server.Game]
+// and [Server.Prod] the prod ServerUrl line is commented out and a ServerUrl line for TESTING_URL is added below it.
+// The file is then loaded again as the game will load it, and refused (exit 1) unless the intended URL and trace are
+// what the mod reads (and, for a testing package, the commented prod lines are still there).
 using OpenVersus;
 using OpenVersus.Config;
 
-if (args.Length != 2)
+if (args.Length is not (1 or 2))
 {
-    Console.Error.WriteLine("usage: dotnet run --file tools/package-config.cs -- DIR TESTING_URL");
+    Console.Error.WriteLine("usage: dotnet run --file tools/package-config.cs -- DIR [TESTING_URL]");
     return 2;
 }
 
 string dir = args[0];
-string testing = args[1];
+string? testing = args.Length == 2 ? args[1] : null;
 string path = Path.Combine(dir, Settings.FileName);
 Directory.CreateDirectory(dir);
 if (File.Exists(path))
@@ -30,6 +31,7 @@ string text = File.ReadAllText(path);
 string newLine = text.Contains("\r\n") ? "\r\n" : "\n";
 string prodLine = $"ServerUrl = \"{OvsVersion.DefaultServerUrl}\"";
 string testingLine = $"ServerUrl = \"{testing}\"";
+string expectedUrl = testing ?? OvsVersion.DefaultServerUrl;
 const string TraceLine = "LogLevel = \"trace\"";
 
 var lines = text.Split(newLine).ToList();
@@ -45,9 +47,13 @@ for (int i = 0; i < lines.Count; i++)
     }
     else if (section is "Server.Game" or "Server.Prod" && line == prodLine)
     {
-        lines[i] = "#" + prodLine;
-        lines.Insert(i + 1, testingLine);
-        i++;
+        // A prod package keeps the default lines; a testing one switches them, keeping prod's in a comment above.
+        if (testing != null)
+        {
+            lines[i] = "#" + prodLine;
+            lines.Insert(i + 1, testingLine);
+            i++;
+        }
         serverUrls++;
     }
     else if (section == "Settings" && line.StartsWith("LogLevel = ", StringComparison.Ordinal))
@@ -74,15 +80,15 @@ if (settings.Problem is { } problem)
 {
     problems.Add($"the mod reports a problem: {problem.Title}: {problem.Detail}");
 }
-if (settings.ServerUrl != testing || settings.ProdServerUrl != testing)
+if (settings.ServerUrl != expectedUrl || settings.ProdServerUrl != expectedUrl)
 {
-    problems.Add($"the mod reads ServerUrl {settings.ServerUrl} and [Server.Prod] ServerUrl {settings.ProdServerUrl}, not {testing}");
+    problems.Add($"the mod reads ServerUrl {settings.ServerUrl} and [Server.Prod] ServerUrl {settings.ProdServerUrl}, not {expectedUrl}");
 }
 if (settings.LogLevel != "trace")
 {
     problems.Add($"the mod reads LogLevel {settings.LogLevel}, not trace");
 }
-if (after.Split(newLine).Count(l => l == "#" + prodLine) != 2 || after.Split(newLine).Count(l => l == testingLine) != 2)
+if (testing != null && (after.Split(newLine).Count(l => l == "#" + prodLine) != 2 || after.Split(newLine).Count(l => l == testingLine) != 2))
 {
     problems.Add("loading the file again lost the commented prod ServerUrl lines or the testing ones");
 }
@@ -92,5 +98,5 @@ if (problems.Count > 0)
     return 1;
 }
 
-Console.WriteLine($"{path}: default settings, ServerUrl {testing} (prod commented out above it) in [Server.Game] and [Server.Prod], LogLevel trace{(after == written ? "" : "; the mod rewrote the file on loading it, and it still holds all of that")}");
+Console.WriteLine($"{path}: default settings, ServerUrl {expectedUrl}{(testing != null ? " (prod commented out above it)" : "")} in [Server.Game] and [Server.Prod], LogLevel trace{(after == written ? "" : "; the mod rewrote the file on loading it, and it still holds all of that")}");
 return 0;

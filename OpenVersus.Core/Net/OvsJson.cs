@@ -13,11 +13,14 @@ public sealed record VersionInfo(
     [property: JsonPropertyName("latest_version"), JsonConverter(typeof(LenientStringConverter))] string? LatestVersion,
     [property: JsonPropertyName("download_url"), JsonConverter(typeof(LenientStringConverter))] string? DownloadUrl,
     [property: JsonPropertyName("is_latest"), JsonConverter(typeof(LenientBoolConverter))] bool IsLatest,
-    [property: JsonPropertyName("release_name"), JsonConverter(typeof(LenientStringConverter))] string? ReleaseName);
+    [property: JsonPropertyName("release_name"), JsonConverter(typeof(LenientStringConverter))] string? ReleaseName,
+    [property: JsonPropertyName("node_version"), JsonConverter(typeof(LenientStringConverter))] string? NodeVersion = null,
+    [property: JsonPropertyName("node_is_latest"), JsonConverter(typeof(LenientBoolConverter))] bool NodeIsLatest = false);
 
 /// <summary>One file of a release as /ovs/client-version lists it under "files".</summary>
 /// <param name="Name">name: the asset's file name.</param>
-/// <param name="Kind">kind: "plugin" (the .asi) or "paks" (an OVS_* pak, utoc, ucas or sig).</param>
+/// <param name="Kind">kind: "plugin" (the .asi), "paks" (an OVS_* pak, utoc, ucas or sig) or "node" (a rollback node archive).</param>
+/// <param name="Platform">platform: node only, the platform the archive is built for (win-x64, linux-x64, osx-x64, osx-arm64).</param>
 /// <param name="Size">size: bytes, as a number or a string of digits.</param>
 /// <param name="Sha256">sha256: the SHA-256 GitHub records for the asset, lowercase hex.</param>
 /// <param name="DownloadUrl">download_url: where it downloads from.</param>
@@ -26,7 +29,8 @@ public sealed record UpdateFile(
     [property: JsonConverter(typeof(LenientStringConverter))] string? Kind,
     [property: JsonConverter(typeof(LenientInt64Converter))] long Size,
     [property: JsonConverter(typeof(LenientStringConverter))] string? Sha256,
-    [property: JsonPropertyName("download_url"), JsonConverter(typeof(LenientStringConverter))] string? DownloadUrl);
+    [property: JsonPropertyName("download_url"), JsonConverter(typeof(LenientStringConverter))] string? DownloadUrl,
+    [property: JsonConverter(typeof(LenientStringConverter))] string? Platform = null);
 
 /// <summary>The "files" list of /ovs/client-version; null when the server sent none.</summary>
 /// <param name="Files">files: every asset of the release the updater may install.</param>

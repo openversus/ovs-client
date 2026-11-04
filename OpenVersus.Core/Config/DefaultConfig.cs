@@ -165,7 +165,7 @@ internal static class DefaultConfig
 
         // A table's rows are not always next to each other in the table order (the two [Server.*]
         // tables alternate), and TOML allows a table only once, so group them.
-        foreach (IGrouping<string, SettingDef> section in Settings.Table.GroupBy(d => d.Section))
+        foreach (IGrouping<string, SettingDef> section in Settings.Table.Where(d => !d.Hidden).GroupBy(d => d.Section))
         {
             Line("");
             Line(Rule);
