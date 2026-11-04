@@ -214,8 +214,13 @@ release holds `OpenVersus_v<tag>.zip` (the install, the rollback node for every 
 `OpenVersus_<version>.asi` (the plugin alone, which is what the server's `download_url` points the
 auto-updater at), `OVS_Node_<version>_<platform>.zip` / `.tar.gz` (the node alone, per platform,
 which the updater installs; built in `build.yml` from the server repo at the commit `NODE_REF`
-names and stamped with `VERSION`, so pin `NODE_REF` to a commit before tagging a release), a
-`.sha256` beside each, and `SHA256SUMS`. To attach node archives to a release by hand, the server
+names and stamped with `VERSION`, so pin `NODE_REF` to a commit before tagging a release),
+`OpenVersus_<version>.zip` (the package `build.sh package` makes: `plugins/OpenVersus/` with the
+plugin, its settings file and every node; what MVS Buddy installs), the `OVS_*` paks of the previous
+release (GitHub's "latest", the newest that is not a prerelease), carried over so the new release
+is complete from the moment it is published (new content replaces them by hand afterwards, as
+before), a `.sha256` beside each built file, and `SHA256SUMS`. The release is created as a draft and
+published once every asset is on it. To attach node archives to a release by hand, the server
 repo's `OVSRollbackNode/tools/archive-nodes.sh <version> <dir>` packs them from a
 `NODE_VERSION=<version> ./build.sh node` build; the version in their names must be the release's.
 

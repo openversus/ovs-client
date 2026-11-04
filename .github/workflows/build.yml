@@ -8,7 +8,9 @@
 # platform under node/ (built here from the server repo at the commit NODE_REF names, stamped
 # with this VERSION), beside the ASI loader as xinput1_3.dll, its license, and readme.txt (from
 # release-readme.txt). A second artifact holds the node as the release's own assets, one archive
-# per platform (the in-game updater installs the one for the player's platform). release.yml
+# per platform (the in-game updater installs the one for the player's platform), and a third the
+# package zip build.sh package makes (plugins/OpenVersus/ with the plugin, its settings file and
+# every node: what MVS Buddy installs). release.yml
 # publishes the artifact of the build that already ran for a tagged commit rather than building
 # it again, so every commit that may be tagged must get a build of its own: there is no path
 # filter here, and no cancel-in-progress (a build canceled by the next push would leave its
@@ -136,17 +138,21 @@ jobs:
           path: ~/.cache/xwin/splat
           key: xwin-${{ env.XWIN_VERSION }}-sdk-10.0.22621-${{ env.XwinArches }}
 
-      - name: Publish
-        run: ./build.sh publish
-
-      # Self-contained ReadyToRun single files for every platform, cross-compiled here (crossgen2 targets them all);
-      # locked to the prod and testing servers (the public keys in the server repo's pki/). The version is this
-      # VERSION: the release the node belongs to.
-      - name: Build the rollback node
+      # build.sh package: the plugin (NativeAOT), then the rollback node for every platform from the server repo's
+      # checkout (self-contained ReadyToRun single files, cross-compiled here; locked to the prod and testing servers,
+      # the public keys in the server repo's pki/; stamped with this VERSION, the release the node belongs to), then
+      # the package zip, out/OpenVersus_<version>.zip. The tests already ran in the test job.
+      - name: Publish and package
         run: |
           set -euo pipefail
           version=$(tr -d '[:space:]' < VERSION)
-          ( cd node-repo && NODE_VERSION="$version" NODE_PKI="prod testing" ./build.sh node )
+          NODE_VERSION="$version" NODE_REPO=node-repo ./build.sh package --accept-license --skip-tests
+          [ -f "out/OpenVersus_$version.zip" ] || { echo "::error::build.sh package made no out/OpenVersus_$version.zip"; ls out; exit 1; }
+
+      - name: Pack the rollback node
+        run: |
+          set -euo pipefail
+          version=$(tr -d '[:space:]' < VERSION)
           # An absolute path: the script works from inside the server repo's checkout.
           node-repo/OVSRollbackNode/tools/archive-nodes.sh "$version" "$GITHUB_WORKSPACE/node-assets"
           for rid in win-x64 linux-x64 osx-x64 osx-arm64; do
@@ -198,6 +204,11 @@ jobs:
             [ -f "dist/plugins/OpenVersus/$f" ] || { echo "::error::the install lacks $f"; exit 1; }
           done
           ls -l node-assets | tee -a "$GITHUB_STEP_SUMMARY"
+          # The package zip holds the plugin, its settings file and every node.
+          for f in "plugins/OpenVersus/OpenVersus_$version.asi" plugins/OpenVersus/OpenVersus.toml plugins/OpenVersus/node/win-x64/OVS.Rollback.Node.exe plugins/OpenVersus/node/osx-arm64/OVS.Rollback.Node plugins/OpenVersus/node/OVS.Rollback.Node.sh; do
+            unzip -l "out/OpenVersus_$version.zip" | grep -q -F " $f" || { echo "::error::the package zip lacks $f"; unzip -l "out/OpenVersus_$version.zip"; exit 1; }
+          done
+          ls -l "out/OpenVersus_$version.zip" | tee -a "$GITHUB_STEP_SUMMARY"
           for pe in "dist/plugins/OpenVersus/OpenVersus_$version.asi" dist/xinput1_3.dll; do
             [ "$(head -c 2 "$pe")" = "MZ" ] || { echo "::error::$pe is not a PE file"; exit 1; }
           done
@@ -217,4 +228,11 @@ jobs:
         with:
           name: OpenVersus-${{ steps.short_sha.outputs.SHORT_SHA }}-node
           path: node-assets/
+          if-no-files-found: error
+
+      - name: Upload the package zip
+        uses: actions/upload-artifact@v7
+        with:
+          name: OpenVersus-${{ steps.short_sha.outputs.SHORT_SHA }}-package
+          path: out/OpenVersus_*.zip
           if-no-files-found: error

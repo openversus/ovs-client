@@ -11,10 +11,16 @@
 # tag that commit and push the tag.
 #
 # Assets: OpenVersus_v<tag>.zip, the install (extracted beside the game's executable, the
-# rollback node for every platform inside); OpenVersus_<version>.asi, the plugin alone, which
-# is what the server's download_url points the auto-updater at; OVS_Node_<version>_<platform>
-# archives, the node alone per platform, which the updater installs beside the game; a .sha256
-# beside each, and SHA256SUMS.
+# rollback node for every platform inside); OpenVersus_<version>.zip, the package (build.sh
+# package: plugins/OpenVersus/ with the plugin, its settings file and every node; what MVS Buddy
+# installs); OpenVersus_<version>.asi, the plugin alone, which is what the server's download_url
+# points the auto-updater at; OVS_Node_<version>_<platform> archives, the node alone per
+# platform, which the updater installs beside the game, and OVS_Node_<version>_all.zip, every
+# platform in one for hand installs, with SHA256SUMS-node; the OVS_* paks of the previous release
+# (GitHub's "latest": the newest that is not a prerelease), carried over so the server and the
+# updater see the same content under the new release; a .sha256 beside each built file, and
+# SHA256SUMS. The release is made as a draft and published once every asset is on it, so the
+# server's "latest" never shows a half-filled release.
 name: release
 
 on:
@@ -100,6 +106,10 @@ jobs:
           [ -n "$node" ] || { echo "::error::build run ${{ steps.build.outputs.run }} has no unexpired node artifact"; exit 1; }
           [ "$(wc -l <<<"$node")" -eq 1 ] || { echo "::error::build run ${{ steps.build.outputs.run }} has more than one node artifact"; exit 1; }
           echo "node=$node" >> "$GITHUB_OUTPUT"
+          package=$(grep -- '-package$' <<<"$names" || true)
+          [ -n "$package" ] || { echo "::error::build run ${{ steps.build.outputs.run }} has no unexpired package artifact"; exit 1; }
+          [ "$(wc -l <<<"$package")" -eq 1 ] || { echo "::error::build run ${{ steps.build.outputs.run }} has more than one package artifact"; exit 1; }
+          echo "package=$package" >> "$GITHUB_OUTPUT"
 
       # By name, into a directory of our own: download-artifact extracts a named artifact straight
       # into path. Downloading "all" does not reliably add a directory per artifact (v8 said it
@@ -120,6 +130,40 @@ jobs:
           github-token: ${{ github.token }}
           path: artifacts/node
 
+      - name: Download the package zip
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ steps.artifact.outputs.package }}
+          run-id: ${{ steps.build.outputs.run }}
+          github-token: ${{ github.token }}
+          path: artifacts/package
+
+      # The paks of the previous release, each checked against the SHA-256 GitHub records for it. The release being
+      # made is a draft until the end, so "latest" is still the previous one here.
+      - name: Carry the paks over
+        id: paks
+        run: |
+          set -euo pipefail
+          mkdir -p paks
+          previous=$(gh api "repos/$REPO/releases/latest" --jq '.tag_name' 2>/dev/null || true)
+          if [ -z "$previous" ]; then
+            echo "no previous release: no paks to carry over" | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "count=0" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          [ "$previous" != "${{ steps.version.outputs.label }}" ] || { echo "::error::$previous is already the latest release; was this tag released before?"; exit 1; }
+          gh api "repos/$REPO/releases/latest" --jq '.assets[] | select(.name | test("^OVS_[A-Za-z0-9._-]+\\.(pak|utoc|ucas|sig)$"; "i")) | "\(.name) \(.digest // "") \(.browser_download_url)"' > paks.list
+          count=$(wc -l < paks.list | tr -d ' ')
+          echo "previous release $previous: $count pak file(s)" | tee -a "$GITHUB_STEP_SUMMARY"
+          while read -r name digest url; do
+            [ -n "$name" ] || continue
+            curl -fsSL --retry 3 -o "paks/$name" "$url"
+            expected="${digest#sha256:}"
+            [ -n "$expected" ] || { echo "::error::GitHub records no digest for $name"; exit 1; }
+            echo "$expected  paks/$name" | sha256sum -c - >/dev/null || { echo "::error::$name does not match the digest GitHub records for it"; exit 1; }
+            echo "  $name" | tee -a "$GITHUB_STEP_SUMMARY"
+          done < paks.list
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+
       - name: Package
         run: |
           set -euo pipefail
@@ -132,11 +176,16 @@ jobs:
           [ -f "$asi" ] || { echo "::error::the artifact has no plugins/OpenVersus/OpenVersus_$base.asi"; ls -R "$dir"; exit 1; }
           ( cd "$dir" && zip -qr "$GITHUB_WORKSPACE/OpenVersus_v$label.zip" . )
           cp "$asi" .
+          # The package zip, named for VERSION (no v): what MVS Buddy installs.
+          [ -f "artifacts/package/OpenVersus_$base.zip" ] || { echo "::error::the package artifact has no OpenVersus_$base.zip"; ls -R artifacts/package; exit 1; }
+          cp "artifacts/package/OpenVersus_$base.zip" .
           # The node archives, named for this version (the server offers only a release's own): one per platform.
           for rid in win-x64 linux-x64 osx-x64 osx-arm64; do
             ls artifacts/node/OVS_Node_"$base"_"$rid".* >/dev/null 2>&1 || { echo "::error::the node artifact has no OVS_Node_${base}_$rid archive"; ls -R artifacts/node; exit 1; }
           done
           cp artifacts/node/OVS_Node_"$base"_* .
+          # The node archives' own checksum list, as the node build wrote it (SHA256SUMS below covers them too).
+          cp artifacts/node/SHA256SUMS-node .
           # Checksums in binary mode ("hash *file"), the explicit form a Windows sha256sum also
           # expects. One .sha256 per file so each download has its checksum beside it, plus
           # the combined SHA256SUMS. Verify with: sha256sum -c <file>.sha256
@@ -144,6 +193,7 @@ jobs:
             sha256sum -b "$f" > "$f.sha256"
           done
           sha256sum -b OpenVersus_*.zip OpenVersus_*.asi OVS_Node_*.zip OVS_Node_*.tar.gz > SHA256SUMS
+          if [ "${{ steps.paks.outputs.count }}" != "0" ]; then ( cd paks && sha256sum -b -- * ) >> SHA256SUMS; fi
           cat SHA256SUMS
           sha256sum -c ./*.sha256   # prove each file verifies before it is published
           unzip -l "OpenVersus_v$label.zip"
@@ -155,17 +205,22 @@ jobs:
             echo "Built from \`${GITHUB_SHA}\` in [build run ${{ steps.build.outputs.run }}](https://github.com/$REPO/actions/runs/${{ steps.build.outputs.run }})."
             echo
             echo "- \`OpenVersus_v${{ steps.version.outputs.label }}.zip\`: the install. Extract it beside the game's executable, \`MultiVersus-Win64-Shipping.exe\`."
+            echo "- \`OpenVersus_${{ steps.version.outputs.base }}.zip\`: the package (\`plugins/OpenVersus/\` with the plugin, its settings file and every node), which MVS Buddy installs."
             echo "- \`OpenVersus_${{ steps.version.outputs.base }}.asi\`: the plugin alone, for updating an existing install (replace the old \`OpenVersus*.asi\` in \`plugins\`; the ASI loader loads every \`.asi\` there)."
             echo "- \`OVS_Node_${{ steps.version.outputs.base }}_<platform>.zip\` / \`.tar.gz\`: the rollback node alone, per platform (the install zip already holds all four; the mod keeps the one it needs current from these)."
+            if [ "${{ steps.paks.outputs.count }}" != "0" ]; then echo "- \`OVS_*.pak\`, \`.utoc\`, \`.ucas\`, \`.sig\`: the game content, carried over from the previous release."; fi
             echo "- \`*.sha256\`, \`SHA256SUMS\`: checksums. Verify with \`sha256sum -c <file>.sha256\`."
           } > notes.md
           cat notes.md >> "$GITHUB_STEP_SUMMARY"
 
+      # A draft until every asset is on it (the built files here, the paks next), then published: the server's "latest"
+      # and MVS Buddy read a release's assets, and must never see this one half-filled.
       - name: Release
         uses: softprops/action-gh-release@v3
         with:
           name: OpenVersus ${{ steps.version.outputs.label }}
           body_path: notes.md
+          draft: true
           prerelease: ${{ steps.version.outputs.prerelease }}
           fail_on_unmatched_files: true
           files: |
@@ -174,3 +229,14 @@ jobs:
             OpenVersus_*.sha256
             OVS_Node_*
             SHA256SUMS
+            SHA256SUMS-node
+
+      - name: Attach the paks and publish
+        run: |
+          set -euo pipefail
+          tag="${{ steps.version.outputs.label }}"
+          if [ "${{ steps.paks.outputs.count }}" != "0" ]; then
+            gh release upload --repo "$REPO" "$tag" paks/* --clobber
+          fi
+          gh release edit --repo "$REPO" "$tag" --draft=false
+          gh release view --repo "$REPO" "$tag" --json assets --jq '.assets[] | "\(.name) \(.size)"' | tee -a "$GITHUB_STEP_SUMMARY"
