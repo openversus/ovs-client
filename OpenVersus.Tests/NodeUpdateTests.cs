@@ -256,13 +256,13 @@ public sealed class NodeUpdateTests : IDisposable
         Assert.False(failing.Install([file]));
         Assert.True(File.Exists(Path.Combine(failing.StagingDirectory, file.Name!)));
         Assert.False(Directory.Exists(Path.Combine(failing.StagingDirectory, "unpacked-linux-x64")));
-        Assert.Equal(1, server.Requested.Count);
+        Assert.Single(server.Requested);
 
         // Next launch: no second download, and this time the chmod reports back.
         string marker = Path.Combine(Mod, "node", $"chmod-{Environment.ProcessId}.txt");
         var working = new NodeUpdate(Mod, server, log, ["linux-x64"], w => "/unix/x", @"C:\windows\system32") { Sleep = _ => { }, StartProcess = (cl, dir) => { File.WriteAllText(marker, "ok"); return true; } };
         Assert.True(working.Download([file]));
-        Assert.Equal(1, server.Requested.Count);
+        Assert.Single(server.Requested);
         Assert.True(working.Install([file]));
         Assert.True(Directory.Exists(target + ".old"));
         Assert.False(Directory.Exists(working.StagingDirectory));

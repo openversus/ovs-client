@@ -39,7 +39,6 @@ public static class NodeVersion
 
             int next = rest.IndexOf(marker);
             at = next < 0 ? -1 : at + marker.Length + next;
-            bytes = bytes;
         }
 
         return "";
@@ -188,7 +187,9 @@ public static class MacArchitecture
         }
         finally
         {
-            try { File.Delete(answer); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+            try
+            { File.Delete(answer); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
         }
     }
 }
@@ -460,7 +461,9 @@ public sealed class NodeUpdate(string modDirectory, IHttpTransport download, ILo
             if (problem != null)
             {
                 log.Warn($"[Node] Not installing {file.Name}: {problem}");
-                try { File.Delete(staged); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+                try
+                { File.Delete(staged); }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
                 return false;
             }
         }
@@ -675,7 +678,9 @@ public sealed class NodeUpdate(string modDirectory, IHttpTransport download, ILo
         }
         finally
         {
-            try { File.Delete(marker); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+            try
+            { File.Delete(marker); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
         }
     }
 
