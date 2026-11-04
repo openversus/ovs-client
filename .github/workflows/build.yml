@@ -147,7 +147,8 @@ jobs:
           set -euo pipefail
           version=$(tr -d '[:space:]' < VERSION)
           ( cd node-repo && NODE_VERSION="$version" NODE_PKI="prod testing" ./build.sh node )
-          node-repo/OVSRollbackNode/tools/archive-nodes.sh "$version" node-assets
+          # An absolute path: the script works from inside the server repo's checkout.
+          node-repo/OVSRollbackNode/tools/archive-nodes.sh "$version" "$GITHUB_WORKSPACE/node-assets"
           for rid in win-x64 linux-x64 osx-x64 osx-arm64; do
             exe=node-repo/out/node-$rid/OVS.Rollback.Node; [ -f "$exe" ] || exe=$exe.exe
             grep -a -q -F "OVS-NODE-VERSION:$version;" "$exe" || { echo "::error::the $rid node is not stamped $version"; exit 1; }
