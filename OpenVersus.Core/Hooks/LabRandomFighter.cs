@@ -73,12 +73,18 @@ public static unsafe class LabRandomFighter
     private static delegate* unmanaged<nint, void> s_beginMatch;
     private static ILogger? s_log;
     private static ObjectFinder? s_finder;
-    private static Assets s_assets;
+    private static Assets? s_assets;
     private static bool s_reportedMissing;
     private static nint s_config;
 
-    /// <summary>The Random fighter and its stand-in, with the names they were found under (checked again before each use).</summary>
-    private record struct Assets(nint Random, nint Shaggy, nint ShaggySkin, FName RandomName, FName ShaggyName, FName SkinName);
+    /// <summary>One asset as it was found: its address, class, name and outer (its package), all checked again before each use.</summary>
+    private readonly record struct Asset(nint Address, nint Class, FName Name, nint Outer)
+    {
+        public static Asset Of(ObjectHeader h) => new(h.Address, h.ClassPrivate, h.Name, h.Outer);
+    }
+
+    /// <summary>The Random fighter and its stand-in. Each use works on its own copy, so nothing it holds changes under it.</summary>
+    private readonly record struct Assets(Asset Random, Asset Shaggy, Asset Skin);
 
     /// <summary>Gives the hook the object finder it looks the assets up with.</summary>
     public static void Attach(ObjectFinder finder) => s_finder = finder;
@@ -113,28 +119,34 @@ public static unsafe class LabRandomFighter
         HookGuard.Run("LabRandomFighter", setup, static s => ReplaceRandom(s));
         s_beginMatch(setup);
         // The picker in the Lab writes the match config before BeginMatch; anything BeginMatch copies there, after.
-        HookGuard.Run("LabRandomFighter", 0, static _ => ReplaceRandomInConfig());
+        HookGuard.Run("LabRandomFighter", 0, static _ =>
+        {
+            if (Resolve(ProcessMemory.Instance) is { } assets)
+            {
+                ReplaceRandomInConfig(assets);
+            }
+        });
     }
 
     private static void ReplaceRandom(nint setup)
     {
         var memory = ProcessMemory.Instance;
-        if (!Resolve(memory))
+        if (Resolve(memory) is not { } assets)
         {
             return;
         }
 
-        Replace(RandomPlayers(memory, setup, s_assets.Random), "setup");
-        ReplaceRandomInConfig();
+        Replace(RandomPlayers(memory, setup, assets.Random.Address), assets, "setup");
+        ReplaceRandomInConfig(assets);
     }
 
     /// <summary>
     /// The match config (UMvsGameplayConfig, a game-instance subsystem): its Players array is what the fighters are spawned
     /// from (a logging build saw the Lab's picker leave Random there while the setup held Shaggy, 2026-11-04).
     /// </summary>
-    private static void ReplaceRandomInConfig()
+    private static void ReplaceRandomInConfig(Assets assets)
     {
-        if (s_assets.Random == 0 || s_finder is not { } finder)
+        if (s_finder is not { } finder)
         {
             return;
         }
@@ -147,23 +159,35 @@ public static unsafe class LabRandomFighter
 
         if (s_config != 0)
         {
-            Replace(ConfigRandomPlayers(ProcessMemory.Instance, s_config, s_assets.Random), "match config");
+            Replace(ConfigRandomPlayers(ProcessMemory.Instance, s_config, assets.Random.Address), assets, "match config");
         }
     }
 
-    private static void Replace(List<nint> players, string where)
+    private static void Replace(List<nint> players, Assets assets, string where)
     {
         foreach (nint player in players)
         {
-            // Skin first: a write that fails half way leaves Random with Shaggy's skin, which the game never spawns
-            // either, rather than Shaggy with the "?" skin's one-bone mesh.
-            if (CodeWriter.TryWrite(player + GameplayPlayerDataSkin, s_assets.ShaggySkin) && CodeWriter.TryWrite(player + GameplayPlayerDataCharacter, s_assets.Shaggy))
+            // Skin first, then the character; when the character cannot be written the old skin goes back, so a player
+            // is either untouched or Shaggy in his skin, never Random in Shaggy's skin or Shaggy in the "?" skin.
+            if (!CodeWriter.TryRead(player + GameplayPlayerDataSkin, out nint oldSkin))
+            {
+                s_log?.Error($"Lab random fighter: the player at 0x{player:X} could not be read");
+                continue;
+            }
+
+            bool skinWritten = CodeWriter.TryWrite(player + GameplayPlayerDataSkin, assets.Skin.Address);
+            if (skinWritten && CodeWriter.TryWrite(player + GameplayPlayerDataCharacter, assets.Shaggy.Address))
             {
                 s_log?.Success($"Lab random fighter: a player picked Random ({where}); plays {StandInCharacter.Name} in {StandInSkin.Package}");
             }
             else
             {
-                s_log?.Error($"Lab random fighter: the player at 0x{player:X} could not be changed");
+                if (skinWritten)
+                {
+                    CodeWriter.TryWrite(player + GameplayPlayerDataSkin, oldSkin);
+                }
+
+                s_log?.Error($"Lab random fighter: the player at 0x{player:X} could not be changed; left as it was");
             }
         }
     }
@@ -231,21 +255,21 @@ public static unsafe class LabRandomFighter
     }
 
     /// <summary>
-    /// The three assets: found by name once, then each use checks they are still the same objects (the name at each address
-    /// unchanged). False, with one error in the log, when one is not loaded.
+    /// The three assets: found by name once, then each use checks they are still the same objects (class, name and outer at
+    /// each address unchanged). Null, with one error in the log, when one is not loaded. BeginMatch runs on the game thread
+    /// only; each caller works on the copy it is given.
     /// </summary>
-    private static bool Resolve(IMemory memory)
+    private static Assets? Resolve(IMemory memory)
     {
-        if (s_assets.Random != 0 && Still(memory, s_assets.Random, s_assets.RandomName) && Still(memory, s_assets.Shaggy, s_assets.ShaggyName)
-            && Still(memory, s_assets.ShaggySkin, s_assets.SkinName))
+        if (s_assets is { } cached && Still(memory, cached.Random) && Still(memory, cached.Shaggy) && Still(memory, cached.Skin))
         {
-            return true;
+            return cached;
         }
 
-        s_assets = default;
+        s_assets = null;
         if (s_finder is not { } finder)
         {
-            return false;
+            return null;
         }
 
         nint characterClass = finder.FindClass("CharacterData");
@@ -260,15 +284,17 @@ public static unsafe class LabRandomFighter
                 s_log?.Error($"Lab random fighter: not loaded: {(random.Address == 0 ? RandomCharacter.Package + " " : "")}{(shaggy.Address == 0 ? StandInCharacter.Package + " " : "")}{(skin.Address == 0 ? StandInSkin.Package : "")}; Random is left as it is");
             }
 
-            return false;
+            return null;
         }
 
-        s_assets = new Assets(random.Address, shaggy.Address, skin.Address, random.Name, shaggy.Name, skin.Name);
-        return true;
+        var found = new Assets(Asset.Of(random), Asset.Of(shaggy), Asset.Of(skin));
+        s_assets = found;
+        return found;
     }
 
-    private static bool Still(IMemory memory, nint obj, FName name) =>
-        ObjectHeader.TryRead(memory, obj, out var h) && h.Name.Index == name.Index && h.Name.Number == name.Number;
+    private static bool Still(IMemory memory, Asset asset) =>
+        ObjectHeader.TryRead(memory, asset.Address, out var h) && h.ClassPrivate == asset.Class && h.Outer == asset.Outer
+        && h.Name.Index == asset.Name.Index && h.Name.Number == asset.Name.Number;
 
     /// <summary>
     /// The live instance of <paramref name="uclass"/> with this object name in this package (compared by FName: the object's
