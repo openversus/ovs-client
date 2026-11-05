@@ -279,6 +279,7 @@ public sealed class Client
         StartRollbackNode(isGame);
         Objects = new ObjectFinder(Image, ProcessMemory.Instance, EngineNames.Instance, Log, tryObjectArray: Status.UeFuncs);
         StockRulesHooks.Attach(Objects);
+        LabRandomFighter.Attach(Objects);
         StartBackgroundWork();
         return true;
     }
@@ -595,6 +596,7 @@ public sealed class Client
             Status.FriendlyFire = Apply("Friendly Fire", c, FriendlyFireHooks.Apply);
             GameSpeedHooks.Attach(Log, Settings.LabGameSpeedPercent);
             Status.CreatorCredits = Apply("Creator Credits", c, CreatorCreditHooks.Apply);
+            Status.LabRandomFighter = Apply("Lab Random Fighter", c, LabRandomFighter.Apply);
         }
 
         if (Settings.Dialog)
