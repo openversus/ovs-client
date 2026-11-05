@@ -160,7 +160,38 @@ public sealed record Notification(string? Type, string Title = "", string Messag
 /// <param name="SteamTicket">steamTicket: the Steam session ticket as hex, or "" (the server believes the Steam id only with it).</param>
 /// <param name="ClientVersion">clientVersion: the running client's version.</param>
 /// <param name="NodePort">nodePort: the UDP port of this machine's rollback node, 0 for none.</param>
-public sealed record IdentityBody(string SteamId, string SteamTicket, string EpicId, string EpicToken, string HardwareId, string HardwareIdVersion, string HardwareIdQuality, string InstallId, string ClientVersion, int NodePort);
+/// <param name="Runtime">runtime: what the game runs on: windows, proton, crossover or wine.</param>
+/// <param name="VirtualMachine">virtualMachine: whether the firmware names a hypervisor; information for the operator.</param>
+/// <param name="DeviceIds">deviceIds: the device identifiers this machine has, each hashed on its own; absent when it has none.</param>
+public sealed record IdentityBody(string SteamId, string SteamTicket, string EpicId, string EpicToken, string HardwareId, string HardwareIdVersion, string HardwareIdQuality, string InstallId, string ClientVersion, int NodePort,
+    string Runtime, bool VirtualMachine, [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] DeviceIds? DeviceIds);
+
+/// <summary>
+/// The device identifiers of /api/identify, each the lowercase hex SHA-256 of "openversus-device-v3|kind|value" (the value
+/// trimmed and lowercased), and null when this machine has no usable value of that kind. The server bans through any of
+/// them; none picks an account.
+/// </summary>
+/// <param name="MachineGuid">machineGuid: Windows' MachineGuid (one per Windows install, or per Wine prefix).</param>
+/// <param name="BoardSerial">boardSerial: the baseboard serial as the firmware table carries it (under Wine, the Linux machine id).</param>
+/// <param name="SystemUuid">systemUuid: the system UUID as the firmware table carries it (under Wine, the Linux machine id).</param>
+/// <param name="UeMachineId">ueMachineId: the Unreal Engine's machine id from the registry (one per Windows user, or per Wine prefix).</param>
+/// <param name="OsMachineId">osMachineId: Linux's machine id through Wine (one per OS install); never on Windows.</param>
+public sealed record DeviceIds(
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? MachineGuid,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? BoardSerial,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? SystemUuid,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? UeMachineId,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? OsMachineId)
+{
+    /// <summary>Whether any identifier is there.</summary>
+    public bool HasAny() => MachineGuid != null || BoardSerial != null || SystemUuid != null || UeMachineId != null || OsMachineId != null;
+
+    /// <summary>Each kind as present or unavailable, for the log; never the hashes.</summary>
+    public string Summary() =>
+        $"machineGuid {Word(MachineGuid)}, boardSerial {Word(BoardSerial)}, systemUuid {Word(SystemUuid)}, ueMachineId {Word(UeMachineId)}, osMachineId {Word(OsMachineId)}";
+
+    private static string Word(string? id) => id == null ? "unavailable" : "present";
+}
 
 /// <summary>What /api/identify sends back. The server also sends accountId, which the client has no use for.</summary>
 /// <param name="Ok">ok: whether the identity was registered.</param>
@@ -182,6 +213,7 @@ public sealed record IdentifyResponse(
 [JsonSerializable(typeof(VersionInfo))]
 [JsonSerializable(typeof(Notification))]
 [JsonSerializable(typeof(IdentityBody))]
+[JsonSerializable(typeof(DeviceIds))]
 [JsonSerializable(typeof(IdentifyResponse))]
 [JsonSerializable(typeof(ReleaseFiles))]
 [JsonSerializable(typeof(PakInstallManifest))]

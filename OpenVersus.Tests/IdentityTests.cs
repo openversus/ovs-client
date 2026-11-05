@@ -267,8 +267,9 @@ public class IdentityTests : IDisposable
         Assert.Equal("14000000AABB", doc.RootElement.GetProperty("steamTicket").GetString());
         var root = doc.RootElement;
         Assert.Equal(
-            ["steamId", "steamTicket", "epicId", "epicToken", "hardwareId", "hardwareIdVersion", "hardwareIdQuality", "installId", "clientVersion", "nodePort"],
+            ["steamId", "steamTicket", "epicId", "epicToken", "hardwareId", "hardwareIdVersion", "hardwareIdQuality", "installId", "clientVersion", "nodePort", "runtime", "virtualMachine"],
             root.EnumerateObject().Select(p => p.Name));
+        Assert.Equal("crossover", root.GetProperty("runtime").GetString());
         Assert.Equal(0, root.GetProperty("nodePort").GetInt32());
         env.NodePort = 51561;
         using var withPort = JsonDocument.Parse(IdentityRegistration.Body(env));
