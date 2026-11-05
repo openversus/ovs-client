@@ -597,6 +597,13 @@ public sealed class Client
             Status.CreatorCredits = Apply("Creator Credits", c, CreatorCreditHooks.Apply);
         }
 
+        // CloseForUpdate uses it to close the game the engine's way; a quit the game asks for itself is reported to the server.
+        Status.GameExit = Apply("GameExit", c, GameExitHook.Apply);
+        if (Settings.EnableServerProxy && !string.IsNullOrEmpty(Settings.ServerUrl))
+        {
+            GameExitHook.Attach(Settings.ServerUrl, Http);
+        }
+
         if (Settings.Dialog)
         {
             Status.Dialog = Apply("Dialog", c, DialogHooks.Apply);
@@ -728,10 +735,14 @@ public sealed class Client
 
     /// <summary>
     /// The server's update_required: tells the player <paramref name="message"/>, stops the background work (the rollback
-    /// node, the poller, ...), closes the log and ends the process, so the relaunch's startup update installs the new
-    /// content. Runs on the poller's thread, which the message box holds until the player answers it.
+    /// node, the poller, ...) and closes the game, so the relaunch's startup update installs the new content: through the
+    /// engine's own exit request when it is resolved (<see cref="GameExitHook"/>), which shuts the game down as a quit from
+    /// the menu does and lets the exit watch close the log; else, or when the engine has not exited within
+    /// <see cref="s_exitGrace"/>, by ending the process. Runs on the poller's thread, which the message box holds until the
+    /// player answers it.
     /// </summary>
     private static readonly TimeSpan s_updateCloseDelay = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan s_exitGrace = TimeSpan.FromSeconds(20);
 
     private void CloseForUpdate(string message)
     {
@@ -746,6 +757,13 @@ public sealed class Client
         })
         { IsBackground = true, Name = "OVS update notice" }.Start();
         answered.Wait(s_updateCloseDelay);
+        if (GameExitHook.Request(Log))
+        {
+            // The engine is shutting down; this thread goes with the process. Still here after the grace: end it.
+            Thread.Sleep(s_exitGrace);
+            Log.Warn($"[Update] The game has not exited {s_exitGrace.TotalSeconds:0} s after the engine was asked to; ending the process");
+        }
+
         Shutdown();
         Log.Close(); // TerminateProcess gives no exit moment, so the log is closed and archived here
         Firmware.TerminateProcess(Kernel32.GetCurrentProcess(), 0);

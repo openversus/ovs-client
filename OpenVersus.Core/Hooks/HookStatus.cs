@@ -44,10 +44,12 @@ public sealed class HookStatus
     public bool HydraZstd { get; set; }
     /// <summary>1v1 and 2v2 queues never switch to bots: PFG.PvPBots is found and set to 0 once the game is up (<see cref="PvPBotsPatch"/>).</summary>
     public bool PvPBotsOff { get; set; }
+    /// <summary>The engine's RequestExit is resolved, so an update closes the game through the engine (<see cref="GameExitHook"/>).</summary>
+    public bool GameExit { get; set; }
 
     /// <summary>Every flag as name=value on one line, for the log.</summary>
     public override string ToString() =>
-        $"sigcheck={AntiSigCheck} gameEndpoint={GameEndpointSwap} prodEndpoint={ProdEndpointSwap} sunset={SunsetDate} ue={UeFuncs} dialog={Dialog} notifs={Notifications} stocks={Stocks} friendlyFire={FriendlyFire} creatorCredits={CreatorCredits} postMatchFreeze={PostMatchFreeze} sunsetCallers={SunsetCallers} requestHeaders={RequestHeaders} telemetryOff={TelemetryOff} telemetryRecordOff={TelemetryRecordOff} telemetryShopOff={TelemetryShopOff} pvpBotsOff={PvPBotsOff} hydraZstd={HydraZstd}";
+        $"sigcheck={AntiSigCheck} gameEndpoint={GameEndpointSwap} prodEndpoint={ProdEndpointSwap} sunset={SunsetDate} ue={UeFuncs} dialog={Dialog} notifs={Notifications} stocks={Stocks} friendlyFire={FriendlyFire} creatorCredits={CreatorCredits} postMatchFreeze={PostMatchFreeze} sunsetCallers={SunsetCallers} requestHeaders={RequestHeaders} telemetryOff={TelemetryOff} telemetryRecordOff={TelemetryRecordOff} telemetryShopOff={TelemetryShopOff} pvpBotsOff={PvPBotsOff} hydraZstd={HydraZstd} gameExit={GameExit}";
 }
 
 /// <summary>What every hook needs: the image, the pattern resolver, the settings and the log.</summary>
