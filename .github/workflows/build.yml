@@ -1,0 +1,238 @@
+# Builds the .NET client: tests, the formatting check, and the NativeAOT plugin,
+# cross-compiled on Linux with lld-link and an xwin Windows SDK sysroot.
+#
+# The artifact is the install exactly as it ships: plugins/OpenVersus/ holding
+# OpenVersus_<version>.asi, sample_config.toml (sample.toml under a note that it is a
+# sample; the mod writes its own OpenVersus.toml on first launch, so extracting a release never
+# replaces a player's settings), LICENSE.txt and VERSION.txt, the rollback node for every
+# platform under node/ (built here from the server repo at the commit NODE_REF names, stamped
+# with this VERSION), beside the ASI loader as xinput1_3.dll, its license, and readme.txt (from
+# release-readme.txt). A second artifact holds the node as the release's own assets, one archive
+# per platform (the in-game updater installs the one for the player's platform), and a third the
+# package zip build.sh package makes (plugins/OpenVersus/ with the plugin, its settings file and
+# every node: what MVS Buddy installs). release.yml
+# publishes the artifact of the build that already ran for a tagged commit rather than building
+# it again, so every commit that may be tagged must get a build of its own: there is no path
+# filter here, and no cancel-in-progress (a build canceled by the next push would leave its
+# commit with nothing to release).
+name: build
+
+on:
+  push:
+    # Branches only. A tag push goes to release.yml, which uses this workflow's artifact.
+    branches: [ '**' ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  # ------------------------------------------------------------------ tests
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Build and test
+        run: ./build.sh test
+
+      - name: Check formatting
+        run: dotnet format OpenVersus.slnx --verify-no-changes
+
+  # ----------------------------------------------------------- windows x64
+  windows-x64:
+    needs: test
+    runs-on: ubuntu-latest
+    env:
+      XWIN_VERSION: "0.10.0"
+      XWIN_SHA256: d870eb4b2f390878af6da1ccd3cf321d22fcb72720984853b4be732ae597fc88
+      # Accepts the Visual Studio Build Tools license for the Windows SDK that xwin downloads,
+      # on the repository owner's behalf. build.sh asks otherwise, and a runner has no one to ask.
+      ACCEPT_VS_BUILD_TOOLS_LICENSE: "true"
+      # The x64 SDK libraries only; the cross-compile package fetches aarch64 as well by
+      # default. An environment variable reaches MSBuild as a property of the same name.
+      XwinArches: x86_64
+      # The ASI loader, pinned to a tagged upstream release and to its digest. Upstream ships one
+      # DLL per release (dinput8.dll in Ultimate-ASI-Loader_x64.zip) that takes its role from its
+      # file name, so it is renamed to xinput1_3.dll here; the pre-renamed xinput1_3-x64.zip
+      # exists only under the moving x64-latest release, which upstream replaces with every
+      # release (v10.0.0 on 2026-10-21 broke the build that pinned its digest). To move to a
+      # newer loader, check it, then change the tag in both URLs and the digest together.
+      LOADER_TAG: v9.7.4
+      LOADER_URL: https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases/download/v9.7.4/Ultimate-ASI-Loader_x64.zip
+      LOADER_SHA256: 8272d83b2692662098746f2d0ad0e2d85f3c8358ab1d63f75fbe835c2c8135fd
+      LOADER_LICENSE_URL: https://raw.githubusercontent.com/ThirteenAG/Ultimate-ASI-Loader/v9.7.4/license
+      # The rollback node ships with the client: the server repo's node, built here at the commit NODE_REF names (a
+      # branch builds its head; pin a commit for a release) and stamped with this VERSION, which is what the server's
+      # update check compares against the node a player runs.
+      NODE_REPO: openversus/ovs-rollback-server
+      NODE_REF: csharp-p2p
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Checkout the rollback node
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.NODE_REPO }}
+          ref: ${{ env.NODE_REF }}
+          path: node-repo
+
+      - name: Set short SHA
+        id: short_sha
+        run: echo "SHORT_SHA=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Install lld
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq lld
+
+      - name: Install xwin
+        run: |
+          set -euo pipefail
+          name="xwin-$XWIN_VERSION-x86_64-unknown-linux-musl"
+          curl -fsSL -o "$RUNNER_TEMP/$name.tar.gz" "https://github.com/Jake-Shadle/xwin/releases/download/$XWIN_VERSION/$name.tar.gz"
+          # Checked before anything in it runs.
+          echo "$XWIN_SHA256  $RUNNER_TEMP/$name.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/$name.tar.gz" -C "$RUNNER_TEMP"
+          mkdir -p "$HOME/.local/bin"
+          install -m 755 "$RUNNER_TEMP/$name/xwin" "$HOME/.local/bin/xwin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Preflight
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$*"; exit 1; }
+          # The publish needs both, and build.sh would say so too, but only after restoring;
+          # this names what is missing, with what the lld package actually installed.
+          command -v lld-link >/dev/null || { ls -l /usr/bin/*lld* /usr/lib/llvm-*/bin/lld-link 2>/dev/null || true; fail "lld-link is not on PATH after installing lld"; }
+          command -v xwin >/dev/null || fail "xwin is not on PATH"
+          echo "### Toolchain" >> "$GITHUB_STEP_SUMMARY"
+          { dotnet --version; lld-link --version | head -1; xwin --version; } \
+            | sed 's/^/    /' | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # The cross-compile package runs xwin only when the splat is missing, and the splat is
+      # all it reads, so the splat is all that is cached. The key names everything that
+      # decides its contents: the xwin version, the SDK version the package asks for, and
+      # the architectures.
+      - name: Windows SDK sysroot
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/xwin/splat
+          key: xwin-${{ env.XWIN_VERSION }}-sdk-10.0.22621-${{ env.XwinArches }}
+
+      # build.sh package: the plugin (NativeAOT), then the rollback node for every platform from the server repo's
+      # checkout (self-contained ReadyToRun single files, cross-compiled here; locked to the prod and testing servers,
+      # the public keys in the server repo's pki/; stamped with this VERSION, the release the node belongs to), then
+      # the package zip, out/OpenVersus_<version>.zip. The tests already ran in the test job.
+      - name: Publish and package
+        run: |
+          set -euo pipefail
+          version=$(tr -d '[:space:]' < VERSION)
+          NODE_VERSION="$version" NODE_REPO=node-repo ./build.sh package --accept-license --skip-tests
+          [ -f "out/OpenVersus_$version.zip" ] || { echo "::error::build.sh package made no out/OpenVersus_$version.zip"; ls out; exit 1; }
+
+      - name: Pack the rollback node
+        run: |
+          set -euo pipefail
+          version=$(tr -d '[:space:]' < VERSION)
+          # An absolute path: the script works from inside the server repo's checkout.
+          node-repo/OVSRollbackNode/tools/archive-nodes.sh "$version" "$GITHUB_WORKSPACE/node-assets"
+          for rid in win-x64 linux-x64 osx-x64 osx-arm64; do
+            exe=node-repo/out/node-$rid/OVS.Rollback.Node; [ -f "$exe" ] || exe=$exe.exe
+            grep -a -q -F "OVS-NODE-VERSION:$version;" "$exe" || { echo "::error::the $rid node is not stamped $version"; exit 1; }
+          done
+
+      - name: Stage
+        run: |
+          set -euo pipefail
+          version=$(tr -d '[:space:]' < VERSION)
+          asi="OpenVersus/bin/Release/net10.0/win-x64/publish/OpenVersus_$version.asi"
+          home=dist/plugins/OpenVersus
+          rm -rf dist && mkdir -p "$home"
+          cp "$asi" "$home/"
+          # The node, unpacked, so the install zip is complete on its own; the per-platform archives are the
+          # updater's and go up as a second artifact.
+          mkdir -p "$home/node"
+          for rid in win-x64 linux-x64 osx-x64 osx-arm64; do
+            mkdir -p "$home/node/$rid"
+            ( cd "node-repo/out/node-$rid" && find . -type f ! -name '*.pdb' -exec cp --parents {} "$GITHUB_WORKSPACE/$home/node/$rid/" \; )
+          done
+          install -m 755 node-repo/out/OVS.Rollback.Node.sh "$home/node/OVS.Rollback.Node.sh"
+          { printf '%s\r\n' \
+              "# A sample of the settings, for reference: the mod reads OpenVersus.toml in this folder," \
+              "# which it writes on its first launch with these same defaults and comments." \
+              "#"
+            cat sample.toml; } > "$home/sample_config.toml"
+          cp release-readme.txt dist/readme.txt
+          cp LICENSE "$home/LICENSE.txt"
+          cp VERSION "$home/VERSION.txt"
+          curl -fsSL -o "$RUNNER_TEMP/loader.zip" "$LOADER_URL"
+          echo "$LOADER_SHA256  $RUNNER_TEMP/loader.zip" | sha256sum -c - \
+            || { echo "::error::the ASI loader $LOADER_TAG at $LOADER_URL is not the file that was checked; verify it and update LOADER_SHA256 in build.yml"; exit 1; }
+          # The release's one DLL, under the name the game loads it by (the loader reads its own file name).
+          unzip -q -j "$RUNNER_TEMP/loader.zip" dinput8.dll -d "$RUNNER_TEMP"
+          mv "$RUNNER_TEMP/dinput8.dll" dist/xinput1_3.dll
+          curl -fsSL -o dist/LICENSE_Ultimate_ASI_Loader.txt "$LOADER_LICENSE_URL"
+
+      - name: Guard - the artifact is what ships
+        run: |
+          set -euo pipefail
+          version=$(tr -d '[:space:]' < VERSION)
+          expected=$(printf '%s\n' LICENSE_Ultimate_ASI_Loader.txt plugins/OpenVersus/LICENSE.txt plugins/OpenVersus/sample_config.toml "plugins/OpenVersus/OpenVersus_$version.asi" plugins/OpenVersus/VERSION.txt readme.txt xinput1_3.dll | sort)
+          # The node folder holds whatever the node's publish produced; it is checked by its executables instead.
+          actual=$(cd dist && find . -type f -not -path './plugins/OpenVersus/node/*' | sed 's|^\./||' | sort)
+          [ "$actual" = "$expected" ] || { echo "::error::dist does not hold exactly the release files"; diff <(echo "$expected") <(echo "$actual") || true; exit 1; }
+          for f in node/win-x64/OVS.Rollback.Node.exe node/linux-x64/OVS.Rollback.Node node/osx-x64/OVS.Rollback.Node node/osx-arm64/OVS.Rollback.Node node/OVS.Rollback.Node.sh; do
+            [ -f "dist/plugins/OpenVersus/$f" ] || { echo "::error::the install lacks $f"; exit 1; }
+          done
+          ls -l node-assets | tee -a "$GITHUB_STEP_SUMMARY"
+          # The package zip holds the plugin, its settings file and every node.
+          for f in "plugins/OpenVersus/OpenVersus_$version.asi" plugins/OpenVersus/OpenVersus.toml plugins/OpenVersus/node/win-x64/OVS.Rollback.Node.exe plugins/OpenVersus/node/osx-arm64/OVS.Rollback.Node plugins/OpenVersus/node/OVS.Rollback.Node.sh; do
+            unzip -l "out/OpenVersus_$version.zip" | grep -q -F " $f" || { echo "::error::the package zip lacks $f"; unzip -l "out/OpenVersus_$version.zip"; exit 1; }
+          done
+          ls -l "out/OpenVersus_$version.zip" | tee -a "$GITHUB_STEP_SUMMARY"
+          for pe in "dist/plugins/OpenVersus/OpenVersus_$version.asi" dist/xinput1_3.dll; do
+            [ "$(head -c 2 "$pe")" = "MZ" ] || { echo "::error::$pe is not a PE file"; exit 1; }
+          done
+          ( cd dist && find . -type f -exec ls -l {} + ) | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # Loose files: upload-artifact zips them, and nothing here needs an execute bit (the Unix nodes in the install
+      # zip get theirs from the player's unzip or from the mod; the tarballs below keep their own).
+      - name: Upload
+        uses: actions/upload-artifact@v7
+        with:
+          name: OpenVersus-${{ steps.short_sha.outputs.SHORT_SHA }}-windows-x64
+          path: dist/
+          if-no-files-found: error
+
+      - name: Upload the node archives
+        uses: actions/upload-artifact@v7
+        with:
+          name: OpenVersus-${{ steps.short_sha.outputs.SHORT_SHA }}-node
+          path: node-assets/
+          if-no-files-found: error
+
+      - name: Upload the package zip
+        uses: actions/upload-artifact@v7
+        with:
+          name: OpenVersus-${{ steps.short_sha.outputs.SHORT_SHA }}-package
+          path: out/OpenVersus_*.zip
+          if-no-files-found: error

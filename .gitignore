@@ -427,9 +427,13 @@ FodyWeavers.xsd
 *.vsix
 
 # Local-only stuff
-/.codegraph/
-/graphify-out/
+.codegraph/
+codegraph.json
+graphify-out/
+.graphifyignore
+.memorymesh/
 /local/
+.idea/
 
 # Windows Installer files from build outputs
 *.cab

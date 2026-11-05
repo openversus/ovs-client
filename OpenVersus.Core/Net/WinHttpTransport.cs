@@ -1,0 +1,135 @@
+using System.Runtime.InteropServices;
+using OpenVersus.Native;
+
+namespace OpenVersus.Net;
+
+/// <summary>
+/// <see cref="IHttpTransport"/> on WinHTTP, one session per request. Connects directly unless
+/// <paramref name="useSystemProxy"/> asks for the proxy configured for WinHTTP.
+/// </summary>
+/// <param name="agent">The User-Agent.</param>
+/// <param name="useSystemProxy">Whether to use the WinHTTP proxy setting.</param>
+/// <param name="headers">Extra request headers, each ending in CRLF, asked for on every request; null or "" for none.</param>
+public sealed class WinHttpTransport(string agent = "OVS/1.0", bool useSystemProxy = false, Func<string?>? headers = null) : IHttpTransport
+{
+    /// <inheritdoc/>
+    public HttpResult Get(Uri url, TimeSpan timeout)
+    {
+        string? extra = headers?.Invoke();
+        return Send(url, "GET", string.IsNullOrEmpty(extra) ? null : extra, default, timeout);
+    }
+
+    /// <inheritdoc/>
+    public HttpResult Post(Uri url, string contentType, ReadOnlySpan<byte> body, TimeSpan timeout) =>
+        Send(url, "POST", $"Content-Type: {contentType}\r\n{headers?.Invoke()}", body, timeout);
+
+    /// <inheritdoc/>
+    public HttpResult Download(Uri url, Stream destination, TimeSpan timeout, Action<int>? progress = null)
+    {
+        string? extra = headers?.Invoke();
+        return Send(url, "GET", string.IsNullOrEmpty(extra) ? null : extra, default, timeout, destination, progress);
+    }
+
+    /// <summary>
+    /// One request. With <paramref name="sink"/>, a 2xx body is written there as it arrives and a
+    /// read that fails part way is a failure; without it the body is collected and returned.
+    /// </summary>
+    private HttpResult Send(Uri url, string verb, string? headers, ReadOnlySpan<byte> body, TimeSpan timeout, Stream? sink = null, Action<int>? progress = null)
+    {
+        nint session = 0, connect = 0, request = 0;
+        try
+        {
+            session = WinHttp.WinHttpOpen(agent, useSystemProxy ? WinHttp.WINHTTP_ACCESS_TYPE_DEFAULT_PROXY : WinHttp.WINHTTP_ACCESS_TYPE_NO_PROXY, null, null, 0);
+            if (session == 0)
+            {
+                return HttpResult.Failed($"WinHttpOpen failed ({Marshal.GetLastPInvokeError()})");
+            }
+
+            int ms = (int)timeout.TotalMilliseconds;
+            WinHttp.WinHttpSetTimeouts(session, ms, ms, ms, ms);
+
+            connect = WinHttp.WinHttpConnect(session, url.Host, (ushort)url.Port, 0);
+            if (connect == 0)
+            {
+                return HttpResult.Failed($"WinHttpConnect failed ({Marshal.GetLastPInvokeError()})");
+            }
+
+            bool https = url.Scheme == "https";
+            request = WinHttp.WinHttpOpenRequest(connect, verb, url.PathAndQuery, null, null, 0, https ? WinHttp.WINHTTP_FLAG_SECURE : 0);
+            if (request == 0)
+            {
+                return HttpResult.Failed($"WinHttpOpenRequest failed ({Marshal.GetLastPInvokeError()})");
+            }
+
+            if (!WinHttp.WinHttpSendRequest(request, headers, headers == null ? 0 : uint.MaxValue, body, (uint)body.Length, (uint)body.Length, 0))
+            {
+                return HttpResult.Failed($"WinHttpSendRequest failed ({Marshal.GetLastPInvokeError()})");
+            }
+
+            if (!WinHttp.WinHttpReceiveResponse(request, 0))
+            {
+                return HttpResult.Failed($"WinHttpReceiveResponse failed ({Marshal.GetLastPInvokeError()})");
+            }
+
+            uint status = 0, size = sizeof(uint), index = 0;
+            WinHttp.WinHttpQueryHeaders(request, WinHttp.WINHTTP_QUERY_STATUS_CODE | WinHttp.WINHTTP_QUERY_FLAG_NUMBER, 0, ref status, ref size, ref index);
+
+            bool ok = status is >= 200 and < 300;
+            if (sink != null && ok)
+            {
+                var buffer = new byte[256 * 1024];
+                while (true)
+                {
+                    if (!WinHttp.WinHttpQueryDataAvailable(request, out uint available))
+                    {
+                        return HttpResult.Failed($"WinHttpQueryDataAvailable failed ({Marshal.GetLastPInvokeError()})");
+                    }
+
+                    if (available == 0)
+                    {
+                        return new HttpResult(true, (int)status, [], null);
+                    }
+
+                    uint want = Math.Min(available, (uint)buffer.Length);
+                    if (!WinHttp.WinHttpReadData(request, buffer, want, out uint got) || got == 0)
+                    {
+                        return HttpResult.Failed($"WinHttpReadData failed ({Marshal.GetLastPInvokeError()})");
+                    }
+
+                    sink.Write(buffer, 0, (int)got);
+                    progress?.Invoke((int)got);
+                }
+            }
+
+            var data = new MemoryStream();
+            while (WinHttp.WinHttpQueryDataAvailable(request, out uint available) && available > 0)
+            {
+                var chunk = new byte[available];
+                if (!WinHttp.WinHttpReadData(request, chunk, available, out uint read) || read == 0)
+                {
+                    break;
+                }
+
+                data.Write(chunk, 0, (int)read);
+            }
+            return new HttpResult(ok, (int)status, data.ToArray(), null);
+        }
+        finally
+        {
+            if (request != 0)
+            {
+                WinHttp.WinHttpCloseHandle(request);
+            }
+
+            if (connect != 0)
+            {
+                WinHttp.WinHttpCloseHandle(connect);
+            }
+
+            if (session != 0)
+            {
+                WinHttp.WinHttpCloseHandle(session);
+            }
+        }
+    }
+}

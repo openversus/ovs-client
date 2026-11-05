@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>OpenVersus.HookTest</AssemblyName>
+    <RootNamespace>OpenVersus.HookTest</RootNamespace>
+    <!-- A native DLL with an InitializeASI export, loaded by Ultimate ASI Loader. No
+         RuntimeIdentifier here: the test project builds Core for the host, and publish passes
+         -r win-x64. NativeAOT cannot run managed code from DllMain, so InitializeASI is the only
+         entry point. -->
+    <PublishAot>true</PublishAot>
+    <!-- Hooks run on game threads; a concurrent GC adds a background thread and gains nothing
+         for a heap this small. -->
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+    <!-- The package defaults to caching the xwin sysroot inside its own NuGet folder. xwin's
+         splat contains a self-referencing symlink, and NuGet restore walks into that loop. -->
+    <XWinCache Condition="'$(XWinCache)' == ''">$(HOME)/.cache/xwin/</XWinCache>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Lets `dotnet publish -r win-x64` link on Linux with lld-link and an xwin sysroot.
+         Only active for win-* RIDs on a Linux host. -->
+    <PackageReference Include="PublishAotCrossXWin" Version="1.2.0" />
+    <ProjectReference Include="../OpenVersus.Core/OpenVersus.Core.csproj" />
+  </ItemGroup>
+
+  <!-- Ultimate ASI Loader only picks up *.asi. The file is the same PE as the .dll. -->
+  <Target Name="CopyAsAsi" AfterTargets="Publish" Condition="$(RuntimeIdentifier.StartsWith('win'))">
+    <Copy SourceFiles="$(PublishDir)$(TargetName).dll" DestinationFiles="$(PublishDir)$(TargetName).asi" />
+  </Target>
+
+</Project>

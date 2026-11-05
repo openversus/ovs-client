@@ -1,0 +1,277 @@
+using System.Text.Json;
+using OpenVersus.Game;
+using OpenVersus.Memory;
+using Microsoft.Extensions.Logging;
+
+namespace OpenVersus.Net;
+
+/// <summary>
+/// Polls /ovs/notifications every two seconds and acts on what comes back: a banner in the
+/// game's own notification widget, and for match_cancel, a walk of the pre-match state machine
+/// to send the player back to the lobby the way the native timeout would. Anything that
+/// touches the engine is handed to the game thread. A reidentify notification (the server lost the
+/// Steam session it held for this client's ticket) runs <paramref name="reidentify"/> on a thread of
+/// its own, one at a time: it mints a new ticket, which can wait on Steam, and registers again. An
+/// update_required notification (new OpenVersus content is out) runs <paramref name="closeForUpdate"/>
+/// once, with the message to show: it tells the player and closes the game, and the relaunch's startup
+/// update installs the content.
+/// </summary>
+public sealed class NotificationPoller(string serverUrl, IHttpTransport http, ObjectFinder finder, GameImage image, ILogger log, Action? reidentify = null, Action<string>? closeForUpdate = null)
+{
+    /// <summary>Shown when an update_required notification carries no message of its own.</summary>
+    public const string UpdateRequiredMessage = "New OpenVersus content is out. MultiVersus will close in 5 seconds; please relaunch it to install the update.";
+
+    // Lives as long as the process; never disposed, since the loop thread may be waiting on it.
+    private CancellationTokenSource? _stopping;
+    private int _reidentifying;
+    private int _closingForUpdate;
+
+    /// <summary>
+    /// Starts polling on a background thread, after an eight-second wait for the hooks. Does nothing
+    /// when it is already running or the server URL does not parse.
+    /// </summary>
+    public void Start()
+    {
+        if (_stopping != null)
+        {
+            log.Info("[NotifPoller] Already running");
+            return;
+        }
+        if (Urls.Join(serverUrl, "/ovs/notifications") is not { } url)
+        {
+            log.Warn($"[NotifPoller] Failed to parse server URL: {serverUrl}");
+            return;
+        }
+        _stopping = new CancellationTokenSource();
+        CancellationToken token = _stopping.Token;
+        new Thread(() => Loop(url, token)) { IsBackground = true, Name = "OVS notification poller" }.Start();
+        log.Info("[NotifPoller] Started");
+    }
+
+    /// <summary>Tells the polling thread to stop.</summary>
+    public void Stop() => _stopping?.Cancel();
+
+    private void Loop(Uri url, CancellationToken stopping)
+    {
+        stopping.WaitHandle.WaitOne(8000); // let the hooks finish before polling
+        log.Info($"[NotifPoller] Polling {url} every 2s");
+        int failures = 0, badPolls = 0;
+        while (!stopping.IsCancellationRequested)
+        {
+            var result = http.Get(url, TimeSpan.FromSeconds(2));
+            if (!result.Ok)
+            {
+                failures++;
+                if (failures == 1 || failures % 30 == 0)
+                {
+                    log.Warn($"[NotifPoller] Poll failed (count={failures}): {result.Error ?? $"HTTP {result.Status}"}");
+                }
+            }
+            else
+            {
+                failures = 0;
+                var notifications = Parse(result.Text, out var problems);
+                // A bad item may sit in the queue for a while; say so once, then every thirty polls.
+                badPolls = problems.Count == 0 ? 0 : badPolls + 1;
+                if (badPolls == 1 || badPolls % 30 == 0)
+                {
+                    foreach (string problem in problems)
+                    {
+                        log.Warn($"[NotifPoller] {problem}{(badPolls > 1 ? $" (for {badPolls} polls)" : "")}");
+                    }
+                }
+
+                foreach (var n in notifications)
+                {
+                    Dispatch(n);
+                }
+            }
+            stopping.WaitHandle.WaitOne(2000);
+        }
+        log.Info("[NotifPoller] Thread exiting");
+    }
+
+    /// <summary>
+    /// The notifications in a poll response. Each item is read on its own, so one the server got
+    /// wrong (a numeric title, a string timeout) is skipped while the rest are still delivered,
+    /// with a line in <paramref name="problems"/> saying what was wrong. An item without a type
+    /// is skipped quietly; a body that is not a list gives none.
+    /// </summary>
+    public static List<Notification> Parse(string json, out List<string> problems)
+    {
+        var list = new List<Notification>();
+        problems = [];
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != JsonValueKind.Array)
+            {
+                return list;
+            }
+
+            foreach (JsonElement item in doc.RootElement.EnumerateArray())
+            {
+                try
+                {
+                    if (JsonSerializer.Deserialize(item, OvsJson.Default.Notification) is { Type: not null } n)
+                    {
+                        list.Add(n);
+                    }
+                }
+                catch (JsonException e)
+                {
+                    string raw = item.GetRawText();
+                    problems.Add($"skipping a notification the server got wrong ({e.Message}): {(raw.Length > 200 ? raw[..200] + "..." : raw)}");
+                }
+            }
+        }
+        catch (JsonException e)
+        {
+            problems.Add($"poll response is not JSON: {e.Message}");
+        }
+
+        return list;
+    }
+
+    /// <summary>
+    /// The notifications in a poll response. Items without a type, items that do not parse, and a
+    /// response that is not a JSON array are skipped.
+    /// </summary>
+    public static List<Notification> Parse(string json) => Parse(json, out _);
+
+    internal void Dispatch(Notification n)
+    {
+        switch (n.Type!)
+        {
+            case "reidentify":
+                Reidentify();
+                break;
+            case "update_required":
+                CloseForUpdate(string.IsNullOrEmpty(n.Message) ? UpdateRequiredMessage : n.Message);
+                break;
+            case "match_cancel":
+                log.Info($"[NotifPoller] Match cancel received: {n.Title} — {n.Message}");
+                ShowBanner("Match Canceled", "Opponent left the match", 5.0f);
+                GameThread.Post("CancelMatch", CancelMatchOnGameThread);
+                break;
+            case "toast_received":
+                log.Info($"[NotifPoller] Toast received: {n.Message}");
+                ShowBanner(n.Title, n.Message, 4.0f);
+                break;
+            case "admin_banner":
+                ShowBanner(n.Title, n.Message, (float)(n.Timeout ?? 8.0));
+                break;
+            default:
+                log.Info($"[NotifPoller] Unknown notification type '{n.Type}' — ignoring");
+                break;
+        }
+    }
+
+    // Once at a time: a second notification while one runs (the server queues one per lost session) is dropped.
+    private void Reidentify()
+    {
+        if (reidentify == null)
+        {
+            log.Info("[NotifPoller] Reidentify requested, but this client registers no identity — ignoring");
+            return;
+        }
+
+        if (Interlocked.CompareExchange(ref _reidentifying, 1, 0) != 0)
+        {
+            log.Info("[NotifPoller] Reidentify requested while one is in progress — ignoring");
+            return;
+        }
+
+        log.Info("[NotifPoller] Reidentify requested: the server lost this client's Steam session; registering again with a new ticket");
+        new Thread(() =>
+        {
+            try
+            {
+                reidentify();
+            }
+            catch (Exception e)
+            {
+                log.Warn($"[NotifPoller] Reidentify failed: {e.Message}");
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _reidentifying, 0);
+            }
+        })
+        {
+            IsBackground = true,
+            Name = "OVS reidentify"
+        }.Start();
+    }
+
+    // Once per process: the game is closing, so a second one (the server sent it again) is dropped.
+    private void CloseForUpdate(string message)
+    {
+        if (closeForUpdate == null)
+        {
+            log.Info("[NotifPoller] Update required, but this client cannot close the game — ignoring");
+            return;
+        }
+
+        if (Interlocked.Exchange(ref _closingForUpdate, 1) != 0)
+        {
+            log.Info("[NotifPoller] Update required while the game is already closing — ignoring");
+            return;
+        }
+
+        log.Info($"[NotifPoller] Update required: {message}");
+        closeForUpdate(message);
+    }
+
+    private void ShowBanner(string title, string message, float timeoutSeconds)
+    {
+        log.Info($"[NotifPoller] Banner queued: top='{title}' bottom='{message}' timeout={timeoutSeconds:F1}s");
+        GameThread.Post("Banner", () =>
+        {
+            nint manager = GameUi.ShowNotification(title.Length > 0 ? title : null, message.Length > 0 ? message : null,
+                timeoutSeconds > 0 ? timeoutSeconds : 8.0f, autoDismissWhenClicked: true, setWidgetClass: true);
+            log.Info(manager != 0 ? "[NotifPoller] Banner shown on game thread" : "[NotifPoller] Banner: notification manager unavailable");
+        });
+    }
+
+    /// <summary>
+    /// If the player is still in the pre-match flow, invoke the transition-failed handler on
+    /// the current state so the game returns to the lobby. In active gameplay there is no
+    /// pre-match game state, and nothing is done.
+    /// </summary>
+    private void CancelMatchOnGameThread()
+    {
+        nint preMatchClass = finder.FindClass("MvsPreMatchGameState");
+        nint preMatch = preMatchClass == 0 ? 0 : finder.FindInstanceOfClass(preMatchClass);
+        if (preMatch == 0)
+        {
+            log.Info("[CancelMatch] No AMvsPreMatchGameState — player is in active gameplay, ignoring");
+            return;
+        }
+
+        if (!finder.Memory.TryRead(preMatch + Mvs.PreMatchStateMachine, out nint stateMachine) || !Plausible(stateMachine))
+        {
+            log.Info($"[CancelMatch] StateMachine ptr invalid (0x{stateMachine:X})");
+            return;
+        }
+        if (!finder.Memory.TryRead(stateMachine + Mvs.StateMachineCurrentState, out nint currentState) || !Plausible(currentState))
+        {
+            log.Info($"[CancelMatch] CurrentState ptr invalid (0x{currentState:X}) — no-op");
+            return;
+        }
+        string className = ObjectHeader.TryRead(finder.Memory, currentState, out var h) && ObjectHeader.TryRead(finder.Memory, h.ClassPrivate, out var cls) ? finder.Names.ToString(cls.Name) ?? "?" : "?";
+        log.Info($"[CancelMatch] CurrentState=0x{currentState:X} class='{className}'");
+
+        var handler = Reflection.Find(finder, image, "MvsPreMatchTransitioningToGameplayState", "HandleTransitionToGameplayFailed");
+        if (handler == null)
+        {
+            log.Info("[CancelMatch] UFunction HandleTransitionToGameplayFailed on MvsPreMatchTransitioningToGameplayState not found — no-op");
+            return;
+        }
+        log.Info($"[CancelMatch] Invoking {handler.Signature} via ProcessEvent on state 0x{currentState:X}");
+        Reflection.Invoke(handler, currentState, Span<byte>.Empty);
+        log.Info("[CancelMatch] ProcessEvent returned cleanly — player should be transitioning");
+    }
+
+    private static bool Plausible(nint p) => p >= 0x10000 && p <= 0x00007FFFFFFFFFFF;
+}

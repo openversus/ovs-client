@@ -1,0 +1,466 @@
+using OpenVersus.Identity;
+using OpenVersus.Net;
+
+namespace OpenVersus.Tests;
+
+public class NetTests
+{
+    [Fact]
+    public void UrlsJoinStripsTheTrailingSlashAndKeepsTheScheme()
+    {
+        Assert.Equal("https://prod.openversus.org/api/identify", Urls.Join("https://prod.openversus.org/", "/api/identify")!.ToString());
+        Assert.Equal("http://testing.openversus.org:8000/ovs/notifications", Urls.Join("http://testing.openversus.org:8000/", "/ovs/notifications")!.ToString());
+        Assert.Equal("http://host/x", Urls.Join("host", "/x")!.ToString());
+        Assert.Null(Urls.Join("", "/x"));
+    }
+
+    [Theory]
+    [InlineData("http://blah.something.com/", "http", 80, "http://blah.something.com/ovs/notifications")]
+    [InlineData("http://blah.something.com:80/", "http", 80, "http://blah.something.com/ovs/notifications")]
+    [InlineData("https://blah.something.com/", "https", 443, "https://blah.something.com/ovs/notifications")]
+    [InlineData("https://blah.something.com:443/", "https", 443, "https://blah.something.com/ovs/notifications")]
+    [InlineData("https://blah.something.com:57013/", "https", 57013, "https://blah.something.com:57013/ovs/notifications")]
+    [InlineData("blah.something.com:57013", "http", 57013, "http://blah.something.com:57013/ovs/notifications")]
+    public void ServerUrlsWithAndWithoutPortsParse(string text, string scheme, int port, string joined)
+    {
+        var url = Urls.Parse(text);
+        Assert.NotNull(url);
+        Assert.Equal(scheme, url!.Scheme);
+        Assert.Equal(port, url.Port);
+        Assert.Equal("blah.something.com", url.Host);
+        Assert.Equal(joined, Urls.Join(text, "/ovs/notifications")!.ToString());
+    }
+
+    [Fact]
+    public void VersionResponseParses()
+    {
+        var info = AutoUpdate.Parse("""{"latest_version":"2026.04.08.14","download_url":"https://example.org/OpenVersus.asi","is_latest":true,"release_name":"2026.04.08.14 prerelease"}""");
+        Assert.NotNull(info);
+        Assert.True(info!.IsLatest);
+        Assert.Equal("2026.04.08.14", info.LatestVersion);
+        Assert.Equal("https://example.org/OpenVersus.asi", info.DownloadUrl);
+        Assert.Null(AutoUpdate.Parse("not json"));
+    }
+
+    [Theory]
+    [InlineData("true", true)]
+    [InlineData("false", false)]
+    [InlineData("1", true)]
+    [InlineData("0", false)]
+    [InlineData("2", false)]
+    [InlineData("\"TRUE\"", true)]
+    [InlineData("\"tRuE\"", true)]
+    [InlineData("\"on\"", true)]
+    [InlineData("\"OFF\"", false)]
+    [InlineData("\"yes\"", false)]
+    [InlineData("null", false)]
+    [InlineData("{}", false)]
+    [InlineData("[1]", false)]
+    public void IsLatestForgivesTheServersSpelling(string json, bool expected)
+    {
+        var info = AutoUpdate.Parse($$"""{"latest_version":"1","is_latest":{{json}}}""");
+        Assert.NotNull(info);
+        Assert.Equal(expected, info!.IsLatest);
+    }
+
+    [Fact]
+    public void AReidentifyNotificationRunsTheRegistrationOnceAtATime()
+    {
+        int runs = 0;
+        using var started = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        var log = new ListLogger();
+        var poller = new NotificationPoller("http://ovs.test", new NoHttp(), null!, null!, log, reidentify: () => { Interlocked.Increment(ref runs); started.Set(); release.Wait(5000); });
+        var notification = Assert.Single(NotificationPoller.Parse("""[{"type":"reidentify","title":"","message":"","data":{"steamId":"1"},"timestamp":1}]"""));
+
+        poller.Dispatch(notification);
+        Assert.True(started.Wait(5000));
+        poller.Dispatch(notification);
+        release.Set();
+
+        Assert.Equal(1, runs);
+        Assert.Contains(log.Lines, l => l.Contains("in progress"));
+        // Without a registration to run, the notification is logged and dropped.
+        new NotificationPoller("http://ovs.test", new NoHttp(), null!, null!, log).Dispatch(notification);
+        Assert.Contains(log.Lines, l => l.Contains("registers no identity"));
+    }
+
+    [Fact]
+    public void AnUpdateRequiredNotificationClosesTheGameOnce()
+    {
+        var closes = new List<string>();
+        var log = new ListLogger();
+        var poller = new NotificationPoller("http://ovs.test", new NoHttp(), null!, null!, log, closeForUpdate: closes.Add);
+        var list = NotificationPoller.Parse("""[{"type":"update_required","title":"","message":"New paks are out.","data":{},"timestamp":1},{"type":"update_required","message":"Again."}]""");
+
+        foreach (var n in list)
+        {
+            poller.Dispatch(n);
+        }
+
+        Assert.Equal(["New paks are out."], closes);
+        Assert.Contains(log.Lines, l => l.Contains("already closing"));
+        // Without a message of its own the player is told the default; without a close, it is logged and dropped.
+        new NotificationPoller("http://ovs.test", new NoHttp(), null!, null!, log, closeForUpdate: closes.Add).Dispatch(new Notification("update_required"));
+        Assert.Equal(NotificationPoller.UpdateRequiredMessage, closes[1]);
+        new NotificationPoller("http://ovs.test", new NoHttp(), null!, null!, log).Dispatch(list[0]);
+        Assert.Contains(log.Lines, l => l.Contains("cannot close the game"));
+    }
+
+    [Fact]
+    public void NotificationsParseAndUnknownFieldsAreTolerated()
+    {
+        var list = NotificationPoller.Parse("""[{"type":"admin_banner","title":"Top","message":"Bottom","timeout":10.0,"timestamp":1},{"type":"match_cancel"},{"nope":1},{"type":"toast_received","message":"X toasted you!","extra":[1,2]}]""");
+        Assert.Equal(3, list.Count);
+        Assert.Equal(("admin_banner", "Top", "Bottom", 10.0), (list[0].Type, list[0].Title, list[0].Message, list[0].Timeout));
+        Assert.Equal(("match_cancel", "", "", (double?)null), (list[1].Type, list[1].Title, list[1].Message, list[1].Timeout));
+        Assert.Equal("X toasted you!", list[2].Message);
+        Assert.Empty(NotificationPoller.Parse("{}"));
+        Assert.Empty(NotificationPoller.Parse("garbage"));
+    }
+
+    [Fact]
+    public void VersionStringsForgiveTheServersTypes()
+    {
+        var info = AutoUpdate.Parse("""{"latest_version":20260924,"download_url":null,"is_latest":false,"release_name":{"x":1}}""");
+        Assert.NotNull(info);
+        Assert.Equal("20260924", info!.LatestVersion);
+        Assert.Null(info.DownloadUrl);
+        Assert.Null(info.ReleaseName);
+    }
+
+    [Fact]
+    public void OneBadNotificationDoesNotLoseTheOthers()
+    {
+        var list = NotificationPoller.Parse("""[{"type":"toast_received","title":5},{"type":"admin_banner","title":"ok","message":"m"},{"type":"toast_received","timeout":"soon"}]""", out var problems);
+        Assert.Single(list);
+        Assert.Equal("ok", list[0].Title);
+        Assert.Equal(2, problems.Count);
+        Assert.All(problems, p => Assert.Contains("skipping", p));
+        Assert.Empty(NotificationPoller.Parse("garbage", out problems));
+        Assert.Contains(problems, p => p.Contains("not JSON"));
+    }
+
+    [Theory]
+    [InlineData("2026.09.25.01", "2026.09.24.01", true)]
+    [InlineData("2026.09.24.02", "2026.09.24.01", true)]
+    [InlineData("2026.09.24.01", "2026.09.24.01", false)]
+    [InlineData("2026.09.23.09", "2026.09.24.01", false)]
+    [InlineData(" 2026.10.01.01 ", "2026.09.24.01", true)]
+    public void OnlyALaterVersionIsAnUpdate(string offered, string running, bool expected) => Assert.Equal(expected, AutoUpdate.IsNewer(offered, running));
+
+    [Fact]
+    public void AnUpdateInstallsUnderTheNewVersionsNameWhereTheClientSays()
+    {
+        string home = Path.Combine(Path.GetTempPath(), "plugins", "OpenVersus");
+        Assert.Equal(Path.Combine(home, "OpenVersus_2026.10.01.01.asi"), AutoUpdate.InstallPath(home, " 2026.10.01.01 "));
+    }
+
+    [Fact]
+    public void DownloadsThatAreNotAPluginAreRefused()
+    {
+        Assert.Contains("too small", AutoUpdate.Validate(new byte[9999]));
+        Assert.Contains("not a Windows binary", AutoUpdate.Validate(new byte[20000]));
+        var html = new byte[20000];
+        "<!DOCTYPE html><html>"u8.CopyTo(html);
+        Assert.Contains("not a Windows binary", AutoUpdate.Validate(html));
+
+        // "MZ" with a header offset past the end of the body must be refused, not thrown.
+        var junk = new byte[20000];
+        junk[0] = (byte)'M';
+        junk[1] = (byte)'Z';
+        BitConverter.TryWriteBytes(junk.AsSpan(0x3C), 0x7FFFFFFF);
+        Assert.Contains("outside the file", AutoUpdate.Validate(junk));
+
+        // The smallest thing that passes: an MZ header pointing at a PE signature with a size.
+        var pe = new byte[20000];
+        pe[0] = (byte)'M';
+        pe[1] = (byte)'Z';
+        BitConverter.TryWriteBytes(pe.AsSpan(0x3C), 0x80);
+        "PE\0\0"u8.CopyTo(pe.AsSpan(0x80));
+        BitConverter.TryWriteBytes(pe.AsSpan(0x80 + 24 + 56), 0x1000u);
+        Assert.Null(AutoUpdate.Validate(pe));
+    }
+
+    /// <summary>The smallest body <see cref="AutoUpdate.Validate"/> accepts, marked so it can be told apart.</summary>
+    private static byte[] Plugin(byte mark)
+    {
+        var pe = new byte[20000];
+        pe[0] = (byte)'M';
+        pe[1] = (byte)'Z';
+        BitConverter.TryWriteBytes(pe.AsSpan(0x3C), 0x80);
+        "PE\0\0"u8.CopyTo(pe.AsSpan(0x80));
+        BitConverter.TryWriteBytes(pe.AsSpan(0x80 + 24 + 56), 0x1000u);
+        pe[^1] = mark;
+        return pe;
+    }
+
+    /// <summary>The version the fake server offers: far enough ahead that the running client is always older.</summary>
+    private const string Offered = "2099.01.01.01";
+
+    /// <summary>A plugin that passes <see cref="AutoUpdate.Validate"/> and carries <paramref name="version"/>
+    /// in its version resource, marked so it can be told apart.</summary>
+    private static byte[] Versioned(byte mark, string version = Offered)
+    {
+        var plugin = new byte[20000];
+        DuplicatePluginsTests.PeWithVersion(Version.Parse(version)).CopyTo(plugin, 0);
+        plugin[^1] = mark;
+        return plugin;
+    }
+
+    private static byte[] Zip(params (string Name, byte[] Body)[] entries)
+    {
+        var stream = new MemoryStream();
+        using (var zip = new System.IO.Compression.ZipArchive(stream, System.IO.Compression.ZipArchiveMode.Create, leaveOpen: true))
+        {
+            foreach (var (name, body) in entries)
+            {
+                using var entry = zip.CreateEntry(name).Open();
+                entry.Write(body);
+            }
+        }
+
+        return stream.ToArray();
+    }
+
+    [Fact]
+    public void ThePluginInAReleaseZipIsInstalledAndNothingElse()
+    {
+        byte[] release = Zip(
+            ("xinput1_3.dll", Plugin(1)),
+            ("plugins/OpenVersus_2026.10.01.01.asi", Plugin(2)),
+            ("plugins/OpenVersus.toml", "[Settings]\n"u8.ToArray()));
+
+        byte[]? plugin = AutoUpdate.PluginFrom(release, "2026.10.01.01", out string source, out string? problem);
+        Assert.Null(problem);
+        Assert.Equal(Plugin(2), plugin);
+        Assert.Equal("plugins/OpenVersus_2026.10.01.01.asi from the zip", source);
+    }
+
+    [Fact]
+    public void ABareAsiIsInstalledAsBefore()
+    {
+        Assert.Equal(Plugin(3), AutoUpdate.PluginFrom(Plugin(3), "2026.10.01.01", out string source, out _));
+        Assert.Equal("the download", source);
+    }
+
+    [Fact]
+    public void AZipIsRefusedUnlessOnePluginInItIsClearlyTheOne()
+    {
+        // Several .asi files: the one named for the offered version wins.
+        byte[] two = Zip(("OpenVersus_2026.09.01.01.asi", Plugin(4)), ("OpenVersus_2026.10.01.01.asi", Plugin(5)));
+        Assert.Equal(Plugin(5), AutoUpdate.PluginFrom(two, "2026.10.01.01", out _, out _));
+        Assert.Null(AutoUpdate.PluginFrom(two, "2026.11.01.01", out _, out string? ambiguous));
+        Assert.Contains("2 .asi files and none named OpenVersus_2026.11.01.01.asi", ambiguous);
+
+        Assert.Null(AutoUpdate.PluginFrom(Zip(("readme.txt", "hi"u8.ToArray())), "2026.10.01.01", out _, out string? none));
+        Assert.Equal("a zip with no .asi in it", none);
+
+        Assert.Null(AutoUpdate.PluginFrom(Zip(("OpenVersus.asi", new byte[20000])), "2026.10.01.01", out _, out string? notPe));
+        Assert.Contains("OpenVersus.asi is not a Windows binary", notPe);
+
+        byte[] damaged = Zip(("OpenVersus.asi", Plugin(6)))[..40];
+        Assert.Null(AutoUpdate.PluginFrom(damaged, "2026.10.01.01", out _, out string? broken));
+        Assert.StartsWith("a damaged zip", broken);
+    }
+
+    [Theory]
+    [InlineData("""{"betaSpeedPercent":120}""", 120)]
+    [InlineData("""{"betaSpeedPercent":110,"later":"more"}""", 110)]
+    [InlineData("""{"betaSpeedPercent":1.1}""", null)]
+    [InlineData("""{"betaSpeedPercent":"120"}""", null)]
+    [InlineData("""{"betaSpeed":120}""", null)]
+    [InlineData("""[120]""", null)]
+    [InlineData("<html>not found</html>", null)]
+    [InlineData("", null)]
+    public void ClientSettingsGiveTheServersBetaSpeed(string body, int? percent) => Assert.Equal(percent, ClientSettingsFetch.ParseBetaSpeed(body));
+
+    /// <summary>Serves its results in order, the last one again after that.</summary>
+    private sealed class SequenceHttp(params HttpResult[] results) : IHttpTransport
+    {
+        public List<string> Requested { get; } = [];
+
+        public HttpResult Get(Uri url, TimeSpan timeout)
+        {
+            Requested.Add(url.ToString());
+            return results[Math.Min(Requested.Count, results.Length) - 1];
+        }
+
+        public HttpResult Post(Uri url, string contentType, ReadOnlySpan<byte> body, TimeSpan timeout) => throw new NotSupportedException();
+    }
+
+    [Fact]
+    public void ClientSettingsAreAskedForAgainUntilTheServerAnswers()
+    {
+        var http = new SequenceHttp(HttpResult.Failed("timed out"), new HttpResult(false, 502, [], null), Served("""{"betaSpeedPercent":120}"""u8.ToArray()));
+        var taken = new List<int>();
+        var waits = new List<TimeSpan>();
+
+        bool ok = new ClientSettingsFetch("http://testing.openversus.org:8000/", http, new ListLogger(), p => { taken.Add(p); return true; }, waits.Add).Run();
+
+        Assert.True(ok);
+        Assert.Equal([120], taken);
+        Assert.Equal(3, http.Requested.Count);
+        Assert.All(http.Requested, u => Assert.Equal("http://testing.openversus.org:8000/ovs/client-settings", u));
+        Assert.Equal([TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(20)], waits);
+    }
+
+    [Fact]
+    public void WithoutAnAnswerTheClientKeepsItsBetaSpeedAndSaysSo()
+    {
+        var http = new SequenceHttp(new HttpResult(false, 404, [], null));
+        var log = new ListLogger();
+        var taken = new List<int>();
+
+        bool ok = new ClientSettingsFetch("http://host/", http, log, p => { taken.Add(p); return true; }, _ => { }).Run();
+
+        // Three tries, then it stops.
+        Assert.False(ok);
+        Assert.Equal(3, http.Requested.Count);
+        Assert.Empty(taken);
+        Assert.Contains(log.Lines, l => l.Contains("Gave up") && l.Contains("110%"));
+
+        // A speed the client refuses (outside 50 to 200) is a failed try too.
+        http = new SequenceHttp(Served("""{"betaSpeedPercent":500}"""u8.ToArray()));
+        Assert.False(new ClientSettingsFetch("http://host/", http, new ListLogger(), InTheServersRange, _ => { }).Run());
+        Assert.Equal(3, http.Requested.Count);
+    }
+
+    // GameSpeedHooks.SetBetaSpeed's range, without its process-wide value.
+    private static bool InTheServersRange(int percent) => percent is >= 50 and <= 200;
+
+    /// <summary>Serves a fixed result per URL, 404 for anything else, and records what was asked for.</summary>
+    private sealed class FakeHttp(Dictionary<string, HttpResult> results) : IHttpTransport
+    {
+        public List<string> Requested { get; } = [];
+
+        public HttpResult Get(Uri url, TimeSpan timeout)
+        {
+            Requested.Add(url.ToString());
+            return results.TryGetValue(url.ToString(), out var result) ? result : new HttpResult(false, 404, [], null);
+        }
+
+        public HttpResult Post(Uri url, string contentType, ReadOnlySpan<byte> body, TimeSpan timeout) => throw new NotSupportedException();
+    }
+
+    private const string AsiUrl = "https://github.com/openversus/ovs-client/releases/download/2026.10.01.01/OpenVersus_2026.10.01.01.asi";
+
+    private static string Sha256Line(byte[] body, string name) =>
+        Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(body)).ToLowerInvariant() + " *" + name + "\n";
+
+    private static HttpResult Served(byte[] body) => new(true, 200, body, null);
+
+    private static (byte[]? Plugin, ListLogger Log, FakeHttp Http) FetchWith(HttpResult? checksum, byte[]? body = null, string url = AsiUrl)
+    {
+        body ??= Versioned(7);
+        var results = new Dictionary<string, HttpResult> { [url] = Served(body) };
+        if (checksum != null)
+        {
+            results[url + ".sha256"] = checksum;
+        }
+
+        var http = new FakeHttp(results);
+        var log = new ListLogger();
+        var update = new AutoUpdate("https://prod.openversus.org/", "OpenVersus_2026.09.25.06.asi", ".", http, http, log, () => { });
+        byte[]? plugin = update.Fetch(new VersionInfo(Offered, url, false, ""));
+        return (plugin, log, http);
+    }
+
+    [Fact]
+    public void TheChecksumFileIsReadAsSha256sumWritesIt()
+    {
+        byte[] body = Plugin(8);
+        string line = Sha256Line(body, "OpenVersus_2026.10.01.01.asi");
+        Assert.Null(AutoUpdate.CheckSha256(line, "OpenVersus_2026.10.01.01.asi", body));
+        Assert.Null(AutoUpdate.CheckSha256(line.ToUpperInvariant().Replace(" *OPENVERSUS_2026.10.01.01.ASI", " *OpenVersus_2026.10.01.01.asi"), "OpenVersus_2026.10.01.01.asi", body));
+        Assert.Null(AutoUpdate.CheckSha256(line.Split(' ')[0], "OpenVersus_2026.10.01.01.asi", body));
+
+        Assert.Contains("but the release says", AutoUpdate.CheckSha256(line, "OpenVersus_2026.10.01.01.asi", Plugin(9)));
+        Assert.Contains("is for OpenVersus_2026.10.01.01.asi, not other.asi", AutoUpdate.CheckSha256(line, "other.asi", body));
+        Assert.Contains("does not hold a SHA-256", AutoUpdate.CheckSha256("", "x.asi", body));
+        Assert.Contains("does not hold a SHA-256", AutoUpdate.CheckSha256("<html>Not Found</html>", "x.asi", body));
+    }
+
+    [Fact]
+    public void AMatchingChecksumInstalls()
+    {
+        byte[] body = Versioned(10);
+        var (plugin, log, http) = FetchWith(Served(System.Text.Encoding.UTF8.GetBytes(Sha256Line(body, "OpenVersus_2026.10.01.01.asi"))), body);
+        Assert.Equal(body, plugin);
+        Assert.Equal([AsiUrl, AsiUrl + ".sha256"], http.Requested);
+        Assert.Contains(log.Lines, l => l.Contains("SHA-256 matches"));
+    }
+
+    [Fact]
+    public void AMismatchedChecksumDoesNotInstall()
+    {
+        var (plugin, log, _) = FetchWith(Served(System.Text.Encoding.UTF8.GetBytes(Sha256Line(Versioned(11), "OpenVersus_2026.10.01.01.asi"))), Versioned(12));
+        Assert.Null(plugin);
+        Assert.Contains(log.Lines, l => l.Contains("Not installing the download") && l.Contains("but the release says"));
+    }
+
+    /// <summary>No .sha256 is treated like a mismatch: nothing this client could install lacks one.</summary>
+    [Fact]
+    public void AReleaseWithoutAChecksumIsNotInstalled()
+    {
+        var (plugin, log, _) = FetchWith(checksum: null);
+        Assert.Null(plugin);
+        Assert.Contains(log.Lines, l => l.Contains("Not installing the download: the release publishes no checksum"));
+    }
+
+    [Theory]
+    [InlineData(500)]
+    [InlineData(0)]
+    public void AChecksumThatCannotBeFetchedWaitsForTheNextLaunch(int status)
+    {
+        var failed = status == 0 ? HttpResult.Failed("timed out") : new HttpResult(false, status, [], null);
+        var (plugin, log, _) = FetchWith(failed);
+        Assert.Null(plugin);
+        Assert.Contains(log.Lines, l => l.Contains("Could not fetch the checksum") && l.Contains("trying again next launch"));
+    }
+
+    /// <summary>A zip is checked as downloaded, against the zip's own .sha256, before anything is taken out of it.</summary>
+    [Fact]
+    public void AZipIsCheckedAgainstTheZipsChecksum()
+    {
+        const string zipUrl = "https://github.com/openversus/ovs-client/releases/download/2026.10.01.01/OpenVersus_v2026.10.01.01.zip";
+        byte[] zip = Zip(("plugins/OpenVersus_2026.10.01.01.asi", Versioned(13)));
+        var (plugin, _, _) = FetchWith(Served(System.Text.Encoding.UTF8.GetBytes(Sha256Line(zip, "OpenVersus_v2026.10.01.01.zip"))), zip, zipUrl);
+        Assert.Equal(Versioned(13), plugin);
+
+        var (refused, _, _) = FetchWith(Served(System.Text.Encoding.UTF8.GetBytes(Sha256Line(Versioned(13), "OpenVersus_v2026.10.01.01.zip"))), zip, zipUrl);
+        Assert.Null(refused);
+    }
+
+    /// <summary>The version built into the download decides, not the server's label.</summary>
+    [Fact]
+    public void OnlyANewerBuildThatIsWhatWasOfferedInstalls()
+    {
+        const string running = "2026.09.25.12";
+        Assert.Null(AutoUpdate.VersionProblem(Versioned(1, "2026.12.31.01"), "2026.12.31.01", running));
+        Assert.Contains("not newer than this client (2026.9.25.12)", AutoUpdate.VersionProblem(Versioned(1, "2026.09.25.12"), "2026.12.31.01", running));
+        Assert.Contains("not newer", AutoUpdate.VersionProblem(Versioned(1, "2026.04.08.14"), "2026.04.08.14", running));
+        Assert.Contains("but the server offered 2027.01.01.01", AutoUpdate.VersionProblem(Versioned(1, "2026.12.31.01"), "2027.01.01.01", running));
+        Assert.Contains("no version resource", AutoUpdate.VersionProblem(Plugin(1), "2026.12.31.01", running));
+    }
+
+    /// <summary>What happened with the mock server: an offer labeled newer whose file is the running build.
+    /// It downloads, the checksum matches, and it is still not installed.</summary>
+    [Fact]
+    public void AMislabeledOfferOfTheRunningBuildIsNotInstalled()
+    {
+        byte[] same = Versioned(14, OvsVersion.Current);
+        var (plugin, log, _) = FetchWith(Served(System.Text.Encoding.UTF8.GetBytes(Sha256Line(same, "OpenVersus_2026.10.01.01.asi"))), same);
+        Assert.Null(plugin);
+        Assert.Contains(log.Lines, l => l.Contains("SHA-256 matches"));
+        Assert.Contains(log.Lines, l => l.Contains("Not installing the download: it is version") && l.Contains("not newer than this client"));
+    }
+
+    // The poller never calls the transport from Dispatch.
+    private sealed class NoHttp : IHttpTransport
+    {
+        public HttpResult Get(Uri url, TimeSpan timeout) => throw new NotSupportedException();
+
+        public HttpResult Post(Uri url, string contentType, ReadOnlySpan<byte> body, TimeSpan timeout) => throw new NotSupportedException();
+    }
+}

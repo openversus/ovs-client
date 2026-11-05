@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>OpenVersus</RootNamespace>
+    <!-- Everything the .asi does lives here so the tests and the Wine harness plugin can share
+         it. The .asi project itself only holds the InitializeASI export. -->
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
+    <DocumentationFile>bin\Release\net10.0\OpenVersus.Core.xml</DocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.12" />
+    <!-- OpenVersus.toml. Only the syntax tree is used (Tomlyn.Parsing, Tomlyn.Syntax), which is
+         reflection-free and keeps comments and spacing; the serializer is not. -->
+    <PackageReference Include="Tomlyn" Version="2.10.1" />
+    <PackageReference Include="ZstdSharp.Port" Version="0.8.8" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="OpenVersus.Tests" />
+  </ItemGroup>
+
+  <!-- OvsVersion.Current, from the VERSION file (see Directory.Build.props). -->
+  <Target Name="GenerateOvsVersion" BeforeTargets="CoreCompile" DependsOnTargets="AddSourceRevisionToInformationalVersion;AddBuildDateToInformationalVersion">
+    <PropertyGroup>
+      <OvsVersionSource>$(IntermediateOutputPath)OvsVersion.g.cs</OvsVersionSource>
+    </PropertyGroup>
+    <WriteLinesToFile File="$(OvsVersionSource)" Overwrite="true" WriteOnlyWhenDifferent="true"
+      Lines="// Generated from the repository's VERSION file at build time. Do not edit.;namespace OpenVersus%3B;public static partial class OvsVersion;{;    /// &lt;summary&gt;The client version, from the VERSION file at the repository root.&lt;/summary&gt;;    public const string Current = &quot;$(OvsVersion)&quot;%3B;    /// &lt;summary&gt;The product version in the version resource: the version, the commit and the build date.&lt;/summary&gt;;    public const string Informational = &quot;$(InformationalVersion)&quot;%3B;    /// &lt;summary&gt;The copyright line in the version resource.&lt;/summary&gt;;    public const string Copyright = &quot;$(Copyright)&quot;%3B;}" />
+    <ItemGroup>
+      <Compile Include="$(OvsVersionSource)" />
+      <FileWrites Include="$(OvsVersionSource)" />
+    </ItemGroup>
+  </Target>
+
+</Project>
