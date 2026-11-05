@@ -1,5 +1,14 @@
 # OpenVersus Mod Client
 
+## TL;DR;/I just wanna play MVS via OpenVersus:
+
+### Releases of the official OpenVersus installer `MVS Buddy` are available in the OpenVersus [MVS Buddy repository](https://github.com/openversus/mvs-buddy/releases). If you just want to install OpenVersus, please download and run MVS Buddy, as it is by far the easiest and most user-friendly method to install and manage OpenVersus installations. This repository (`ovs-client`) is aimed toward developers and its releases are primarily consumed by MVS Buddy and the client's built-in updater.
+
+#### To get MVS Buddy for Windows, [download the zip file here](https://github.com/openversus/mvs-buddy/releases/download/2026.10.16.24/MvsBuddy-2026.10.16.24-win-x64.zip), and then run then `exe` inside of it.
+
+#### To get MVS Buddy for Steam Deck and ordinary Linux installs. [download the tarball here](https://github.com/openversus/mvs-buddy/releases/download/2026.10.16.24/MvsBuddy-2026.10.16.24-linux-x64.tar.gz), and then run the the `MvsBuddy` file inside of it. It should extract from the tarball with the exec bit already set.
+
+---
 This is the source repository of the OpenVersus client-side DLL, a fork based on the publicly-available original work of [thethiny](https://github.com/thethiny) and [multiversuskoth](https://github.com/multiversuskoth).
 
 The source code for the OpenVersus client-side DLL is available here, as well as prebuilt binary releases of the client. Binary releases are also maintained [in this repo](https://github.com/christopher-conley/openversus) for backward-compatibility.
