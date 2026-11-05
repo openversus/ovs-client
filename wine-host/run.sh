@@ -57,7 +57,28 @@ if $node_test; then
     if node_alive; then echo "NODE: FAILED to exit within 30 s of the keepalives stopping"; node_ok=false; else echo "NODE: exited within $i s of the keepalives stopping"; fi
     ls "$work"/node/port-*.txt >/dev/null 2>&1 && { echo "NODE: FAILED to remove its port file"; node_ok=false; } || true
 fi
-if [ $status = 0 ] && $node_ok && tr -d '\r' < host.out | grep -q '^PASS$' && grep -q 'guarded read: ok' OpenVersus.HookTest.log && grep -q 'trampoline page .* (as expected)' OpenVersus.HookTest.log && grep -q 'stale swap refused, slot unchanged' OpenVersus.HookTest.log; then
+# The device identifiers the plugin read through Wine, against this prefix's registry and the host's /etc/machine-id.
+# The engine's machine id must be absent: no Unreal game ever ran in this prefix.
+device_ok=false
+if [ -f device-ids.txt ]; then
+    h() { printf 'openversus-device-v3|%s|%s' "$1" "$2" | sha256sum | cut -c1-64; }
+    guid=$(grep -A2 '^\[Software\\\\Microsoft\\\\Cryptography\]' prefix/system.reg | sed -n 's/^"MachineGuid"="\(.*\)"$/\1/p' | tr 'A-Z' 'a-z')
+    host_id=$(tr -d '\n' < /etc/machine-id 2>/dev/null || true)
+    sent_guid=$(sed -n 's/^machineGuid //p' device-ids.txt)
+    sent_ue=$(sed -n 's/^ueMachineId //p' device-ids.txt)
+    sent_os=$(sed -n 's/^osMachineId //p' device-ids.txt)
+    sent_serial=$(sed -n 's/^boardSerial //p' device-ids.txt)
+    if [ -n "$guid" ] && [ "$sent_guid" = "$(h machineGuid "$guid")" ] && [ -z "$sent_ue" ] && { [ -z "$host_id" ] && [ -z "$sent_os" ] || [ "$sent_os" = "$(h osMachineId "$host_id")" ]; }; then
+        echo "DEVICE IDS: machineGuid is the prefix's, osMachineId is the host's, ueMachineId absent"; device_ok=true
+        # Wine (11.20) fills the baseboard serial with the machine id too; another Wine may leave it empty or carry a real one.
+        if [ -n "$sent_serial" ] && [ "$sent_serial" = "$(h boardSerial "$host_id")" ]; then echo "DEVICE IDS: boardSerial is the host's machine id (Wine's table)"; else echo "DEVICE IDS: boardSerial ${sent_serial:+sent, not the machine id}${sent_serial:-absent}"; fi
+    else
+        echo "DEVICE IDS: WRONG (prefix guid '$guid' sent '$sent_guid'; ue '$sent_ue'; host id '${host_id:+set}' sent '$sent_os')"
+    fi
+else
+    echo "DEVICE IDS: WRONG (device-ids.txt was not written)"
+fi
+if [ $status = 0 ] && $node_ok && $device_ok && tr -d '\r' < host.out | grep -q '^PASS$' && grep -q 'guarded read: ok' OpenVersus.HookTest.log && grep -q 'trampoline page .* (as expected)' OpenVersus.HookTest.log && grep -q 'stale swap refused, slot unchanged' OpenVersus.HookTest.log; then
     echo "WINE TEST: passed"
 else
     echo "WINE TEST: FAILED (see $work/wine.err)"; exit 1

@@ -96,6 +96,7 @@ public static unsafe class Plugin
         }
 
         SwapTableSlot(log, image, bytes);
+        ReportDeviceIds(log, pluginDirectory);
         RunNode(log, pluginDirectory);
 
         // The guarded read must refuse an unmapped address instead of taking the process down.
@@ -119,6 +120,27 @@ public static unsafe class Plugin
     /// start.exe), waits for its port, keeps it alive for a few seconds and stops it. run.sh then checks
     /// that the node process ends once the keepalives stop.
     /// </summary>
+    /// <summary>
+    /// The device identifiers as the mod would send them from this process (the registry and Z:\etc\machine-id through
+    /// Wine): each kind present or not in the log, and the hashes in device-ids.txt beside the plugin, which run.sh
+    /// checks against the prefix's registry and /etc/machine-id (which Wine also puts in its firmware table as the
+    /// baseboard serial). The engine's machine id is expected absent: no Unreal game ever ran in the harness's prefix.
+    /// </summary>
+    private static void ReportDeviceIds(ILogger log, string pluginDirectory)
+    {
+        try
+        {
+            var env = new Identity.EnvInfo(Identity.Runtime.Detect());
+            log.Info($"device ids ({Identity.Runtime.WireName(env.Runtime)}): {env.DeviceIds.Summary()}; vm {(env.VirtualMachine ? "yes" : "no")}");
+            File.WriteAllText(Path.Combine(pluginDirectory, "device-ids.txt"),
+                $"machineGuid {env.DeviceIds.MachineGuid}\nueMachineId {env.DeviceIds.UeMachineId}\nosMachineId {env.DeviceIds.OsMachineId}\nboardSerial {env.DeviceIds.BoardSerial}\n");
+        }
+        catch (Exception e)
+        {
+            log.Error($"device ids: WRONG ({e.Message})");
+        }
+    }
+
     private static void RunNode(ILogger log, string pluginDirectory)
     {
         if (!File.Exists(NodeFiles.LinuxPath(pluginDirectory)) && !File.Exists(NodeFiles.WindowsPath(pluginDirectory)))

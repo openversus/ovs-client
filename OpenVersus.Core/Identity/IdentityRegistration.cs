@@ -20,9 +20,14 @@ public static class IdentityRegistration
     /// <summary>How long after a registration without the port a late one is still waited for and sent.</summary>
     public static readonly TimeSpan LateNodePortWait = TimeSpan.FromSeconds(60);
 
-    /// <summary>The JSON body: Steam id and its session ticket, Epic id and its ID token, hardware id with its version and quality, install id, client version and the rollback node's port.</summary>
+    /// <summary>
+    /// The JSON body: Steam id and its session ticket, Epic id and its ID token, hardware id with its version and quality,
+    /// install id, client version, the rollback node's port, the runtime, the VM flag and the device identifiers (only
+    /// when there are any).
+    /// </summary>
     public static string Body(EnvInfo env) =>
-        JsonSerializer.Serialize(new IdentityBody(env.SteamId, env.SteamTicket, env.EpicId, env.EpicToken, env.HardwareId, env.HardwareIdVersion, env.HardwareIdQuality, env.InstallId, OvsVersion.Current, env.NodePort), OvsJson.Default.IdentityBody);
+        JsonSerializer.Serialize(new IdentityBody(env.SteamId, env.SteamTicket, env.EpicId, env.EpicToken, env.HardwareId, env.HardwareIdVersion, env.HardwareIdQuality, env.InstallId, OvsVersion.Current, env.NodePort,
+            Runtime.WireName(env.Runtime), env.VirtualMachine, env.DeviceIds.HasAny() ? env.DeviceIds : null), OvsJson.Default.IdentityBody);
 
     /// <summary>What /api/identify sent back, or null when it is not that JSON.</summary>
     public static IdentifyResponse? ParseResponse(string json) => OvsJson.TryParse(json, OvsJson.Default.IdentifyResponse, out _);
@@ -249,9 +254,11 @@ public static class IdentityRegistration
     /// </summary>
     private static Outcome Send(EnvInfo env, Uri url, IHttpTransport http, ServerIdentity identity, ILogger log, Func<string, string>? replaceInstallId = null)
     {
+        // The engine's machine id may have been written since the last look (a fresh user or prefix).
+        env.RefreshDeviceIds();
         // The body is not logged: the install id stands in for an account for players without a
         // Steam or Epic id, and logs get shared.
-        log.Debug($"[OVS] RegisterIdentity: sending (Steam {(env.IsSteam ? "yes" : "no")}, Epic {(env.IsEpic ? "yes" : "no")}, install id {(env.InstallId.Length > 0 ? "yes" : "no")}, hardware id {(env.HardwareId.Length > 0 ? "yes" : "no")})");
+        log.Debug($"[OVS] RegisterIdentity: sending (Steam {(env.IsSteam ? "yes" : "no")}, Epic {(env.IsEpic ? "yes" : "no")}, install id {(env.InstallId.Length > 0 ? "yes" : "no")}, hardware id {(env.HardwareId.Length > 0 ? "yes" : "no")}, device ids: {env.DeviceIds.Summary()})");
         var result = http.Post(url, "application/json", Encoding.UTF8.GetBytes(Body(env)), TimeSpan.FromSeconds(5));
         if (result.Ok)
         {

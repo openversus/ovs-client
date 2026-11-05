@@ -60,6 +60,15 @@ public static class Runtime
         _ => "Native Windows",
     };
 
+    /// <summary>The name the registration sends (runtime in /api/identify).</summary>
+    public static string WireName(RuntimeEnvironment runtime) => runtime switch
+    {
+        RuntimeEnvironment.Proton => "proton",
+        RuntimeEnvironment.CrossOver => "crossover",
+        RuntimeEnvironment.Wine => "wine",
+        _ => "windows",
+    };
+
     private static bool HasEnv(string name) => !string.IsNullOrEmpty(Environment.GetEnvironmentVariable(name));
 
     private static unsafe string? WineBuildId(nint ntdll)

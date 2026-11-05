@@ -127,7 +127,7 @@ leaves the previous node in place and the game plays on (matches then go through
   - `P2P/`: the rollback node the mod runs beside the game (`RollbackNode`): how it is started on
     Windows and under Proton, the file it reports its port in, and the keepalive that lets it
     outlive a crashed game by seconds rather than forever.
-  - `Identity/`: the Steam/Epic identity and hardware fingerprint sent to the server.
+  - `Identity/`: the Steam/Epic identity, hardware fingerprint and per-device identifiers sent to the server.
   - `NetStats/`: the per-match rollback statistics log.
   - `Native/`: P/Invoke declarations, with Windows SDK names.
 - `OpenVersus.HookTest/`: a plugin for the Wine harness that proves the hooking layer on a small

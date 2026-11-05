@@ -1,7 +1,7 @@
 using System.Runtime.Intrinsics.X86;
 using System.Security.Cryptography;
 using System.Text;
-using OpenVersus.Native;
+using OpenVersus.Net;
 
 namespace OpenVersus.Identity;
 
@@ -43,6 +43,10 @@ public sealed class EnvInfo
     public string HardwareIdVersion { get; } = "";
     /// <summary>"strong" with a fingerprint, else "".</summary>
     public string HardwareIdQuality { get; } = "";
+    /// <summary>The device identifiers this machine has, each hashed on its own (<see cref="DeviceIdentity"/>); absent ones are null.</summary>
+    public DeviceIds DeviceIds { get; private set; } = new(null, null, null, null, null);
+    /// <summary>Whether the firmware names a hypervisor as the system's maker: told to the server, never acted on here.</summary>
+    public bool VirtualMachine { get; }
     /// <summary>Whether a Steam id is known.</summary>
     public bool IsSteam { get; set; }
     /// <summary>
@@ -63,13 +67,19 @@ public sealed class EnvInfo
     /// generic, and the Proton one is switched off in the C++ too), and the SteamID variable is
     /// ignored because it can outlive an account switch: only the Steam API is trusted there.
     /// </summary>
-    public EnvInfo(RuntimeEnvironment runtime = RuntimeEnvironment.NativeWindows)
+    /// <param name="runtime">What the game runs on.</param>
+    /// <param name="sources">Where the device identifiers are read from; this machine's registry, firmware and files by default.</param>
+    public EnvInfo(RuntimeEnvironment runtime = RuntimeEnvironment.NativeWindows, DeviceSources? sources = null)
     {
         Runtime = runtime;
+        _sources = sources ?? DeviceSources.Real();
         SteamId = runtime == RuntimeEnvironment.NativeWindows ? Env("SteamID") : "Unknown";
         GameId = Env("SteamGameId");
         AppId = Env("SteamAppId");
         EpicId = FindEpicId();
+        SmbiosInfo? smbios = Smbios.TryRead(_sources.ReadFirmware);
+        MotherboardSerial = BaseboardSerial(smbios);
+        string machineGuid = _sources.ReadLocalMachine(DeviceIdentity.MachineGuidKey, DeviceIdentity.MachineGuidValue);
         if (runtime == RuntimeEnvironment.NativeWindows)
         {
             if (X86Base.IsSupported)
@@ -77,8 +87,7 @@ public sealed class EnvInfo
                 CpuLeaf0 = X86Base.CpuId(0, 0);
                 CpuLeaf1 = X86Base.CpuId(1, 0);
             }
-            MotherboardSerial = ReadBaseboardSerial();
-            string machineGuid = Advapi32.ReadLocalMachineString(@"SOFTWARE\Microsoft\Cryptography", "MachineGuid");
+            // The V2 fingerprint as the server in production knows it: both values, exactly as read, or nothing.
             if (IsStrongSerial(MotherboardSerial) && IsStrongMachineGuid(machineGuid))
             {
                 HardwareId = ComputeHardwareIdV2(MotherboardSerial, machineGuid);
@@ -86,8 +95,25 @@ public sealed class EnvInfo
                 HardwareIdQuality = "strong";
             }
         }
+        DeviceIds = DeviceIdentity.Collect(runtime, _sources, smbios, machineGuid, MotherboardSerial);
+        VirtualMachine = DeviceIdentity.IsVirtualMachine(smbios);
         IsSteam = SteamId != "Unknown" && SteamId.Length > 0;
         IsEpic = EpicId != "Unknown" && EpicId.Length > 0;
+    }
+
+    private readonly DeviceSources _sources;
+
+    /// <summary>
+    /// Reads the engine's machine id again when the first read found none: the engine writes it at its own start, which
+    /// can come after this client's first registration on a fresh Windows user or Wine prefix. Called before each
+    /// registration, so a later one carries it.
+    /// </summary>
+    public void RefreshDeviceIds()
+    {
+        if (DeviceIds.UeMachineId == null && DeviceIdentity.ReadUeMachineId(_sources) is { } id)
+        {
+            DeviceIds = DeviceIds with { UeMachineId = id };
+        }
     }
 
     /// <summary>SHA-256 of "openversus-device-v2|windows|serial|machine GUID" as lowercase hex, both exactly as read.</summary>
@@ -135,6 +161,8 @@ public sealed class EnvInfo
         $"[OVS] MoboSerial : {(IsStrongSerial(MotherboardSerial) ? "validated" : "unavailable")}\n" +
         $"[OVS] HardwareID : {(HardwareId.Length > 0 ? "present" : "unavailable")}\n" +
         $"[OVS] HW Version : {(HardwareIdVersion.Length > 0 ? HardwareIdVersion : "none")}  |  Quality : {(HardwareIdQuality.Length > 0 ? HardwareIdQuality : "unavailable")}\n" +
+        $"[OVS] DeviceIDs  : {DeviceIds.Summary()}\n" +
+        $"[OVS] VM         : {(VirtualMachine ? "yes (per the firmware)" : "no")}\n" +
         $"[OVS] IsSteam    : {(IsSteam ? "true" : "false")}  |  IsEpic : {(IsEpic ? "true" : "false")}";
 
     private static string Env(string name)
@@ -180,70 +208,18 @@ public sealed class EnvInfo
         }
     }
 
-    /// <summary>SMBIOS type 2 (baseboard) serial, minus the usual OEM placeholders.</summary>
-    private static string ReadBaseboardSerial()
+    /// <summary>The first SMBIOS type 2 (baseboard) serial that is not one of the usual OEM placeholders, else "Unknown".</summary>
+    private static string BaseboardSerial(SmbiosInfo? smbios)
     {
-        try
+        foreach (string serial in smbios?.BoardSerials ?? [])
         {
-            uint size = Firmware.GetSystemFirmwareTable(Firmware.RSMB, 0, [], 0);
-            if (size < 8)
+            if (serial.Length > 0 && serial != "To Be Filled By O.E.M." && serial != "Default string" && serial != "None"
+                && serial != "N/A" && serial != "Not Applicable" && !serial.Contains("00000000"))
             {
-                return "Unknown";
-            }
-
-            var buffer = new byte[size];
-            if (Firmware.GetSystemFirmwareTable(Firmware.RSMB, 0, buffer, size) != size)
-            {
-                return "Unknown";
-            }
-
-            int tableLength = BitConverter.ToInt32(buffer, 4);
-            int table = 8, end = Math.Min(buffer.Length, 8 + tableLength);
-            int pos = table;
-            while (pos + 4 <= end)
-            {
-                byte type = buffer[pos], length = buffer[pos + 1];
-                if (length < 4 || pos + length > end || type == 127)
-                {
-                    break;
-                }
-
-                if (type == 2 && length >= 8)
-                {
-                    byte serialIndex = buffer[pos + 7];
-                    int s = pos + length;
-                    for (int i = 1; i < serialIndex && s < end; i++)
-                    {
-                        s += StrLen(buffer, s, end) + 1;
-                    }
-
-                    if (serialIndex > 0 && s < end && buffer[s] != 0)
-                    {
-                        string serial = Encoding.UTF8.GetString(buffer, s, StrLen(buffer, s, end));
-                        if (serial.Length > 0 && serial != "To Be Filled By O.E.M." && serial != "Default string" && serial != "None"
-                            && serial != "N/A" && serial != "Not Applicable" && !serial.Contains("00000000"))
-                        {
-                            return serial;
-                        }
-                    }
-                }
-                int q = pos + length;
-                while (q + 1 < end && !(buffer[q] == 0 && buffer[q + 1] == 0))
-                {
-                    q++;
-                }
-
-                pos = q + 2;
+                return serial;
             }
         }
-        catch { }
-        return "Unknown";
-    }
 
-    /// <summary>Length of the NUL-terminated string at <paramref name="at"/>, or to <paramref name="end"/> if it never ends.</summary>
-    private static int StrLen(byte[] buffer, int at, int end)
-    {
-        int nul = buffer.AsSpan(at, end - at).IndexOf((byte)0);
-        return nul < 0 ? end - at : nul;
+        return "Unknown";
     }
 }

@@ -258,7 +258,7 @@ public sealed class Client
         // switch to Proton.
         var runtime = Runtime.Detect();
         Env = new EnvInfo(runtime) { InstallId = installId };
-        Log.Info($"[OVS] Runtime: {Runtime.Name(runtime)}; hardware fingerprint {(Env.HardwareId.Length > 0 ? "v2" : "none")}");
+        Log.Info($"[OVS] Runtime: {Runtime.Name(runtime)}; hardware fingerprint {(Env.HardwareId.Length > 0 ? "v2" : "none")}; device ids: {Env.DeviceIds.Summary()}{(Env.VirtualMachine ? "; virtual machine per the firmware" : "")}");
 
         if (Settings.MatchRulesLog)
         {

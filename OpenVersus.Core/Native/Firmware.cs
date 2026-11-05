@@ -12,6 +12,19 @@ public static partial class Firmware
     [LibraryImport("kernel32.dll", SetLastError = true)]
     public static partial uint GetSystemFirmwareTable(uint provider, uint table, Span<byte> buffer, uint size);
 
+    /// <summary>The raw SMBIOS table (its 8-byte header included), or null when the system has none or the read fails.</summary>
+    public static byte[]? ReadSmbios()
+    {
+        uint size = GetSystemFirmwareTable(RSMB, 0, [], 0);
+        if (size < 8)
+        {
+            return null;
+        }
+
+        var buffer = new byte[size];
+        return GetSystemFirmwareTable(RSMB, 0, buffer, size) == size ? buffer : null;
+    }
+
     /// <summary>TerminateProcess.</summary>
     [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
