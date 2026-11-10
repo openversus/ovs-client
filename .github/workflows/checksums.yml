@@ -1,0 +1,100 @@
+# Rewrites a release's SHA256SUMS from the assets the release holds now. Run by hand (Actions,
+# "checksums", Run workflow) with the release's tag.
+#
+# release.yml leaves a draft whose SHA256SUMS lists the files as that run attached them. An asset
+# replaced or added on the draft afterwards (new paks in place of the carried-over ones) is not in
+# it, so before the draft is published this brings the list up to date: every install zip, plugin,
+# node archive and OVS_* pak file on the release, in release.yml's order and its "hash *file" form.
+#
+# The hashes are the ones GitHub records for each asset (its digest), so nothing is downloaded; an
+# asset GitHub has no digest for is downloaded and hashed here. The .sha256 beside each built file
+# and SHA256SUMS-node are left alone: they belong to files this does not change.
+#
+# A published release is refused unless asked for (allow_published): the list of a release people
+# are already downloading from should not change under them by accident.
+name: checksums
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The release's tag (a bare version, as in VERSION)
+        required: true
+        type: string
+      allow_published:
+        description: Rewrite the list of a release that is already published
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write   # read a draft's assets, replace SHA256SUMS
+
+jobs:
+  checksums:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      # From the environment, never pasted into the script: an input is text someone typed.
+      TAG: ${{ inputs.tag }}
+      ALLOW_PUBLISHED: ${{ inputs.allow_published }}
+    steps:
+      - name: Rewrite SHA256SUMS
+        run: |
+          set -euo pipefail
+          [[ "$TAG" =~ ^[0-9][0-9A-Za-z._-]*$ ]] || { echo "::error::\"$TAG\" is not a release tag (a bare version, such as 2026.09.25.01)"; exit 1; }
+
+          # A draft is not found through the API's by-tag route: it is picked out of the list (which holds drafts for
+          # a token that may write).
+          gh api "repos/$REPO/releases" --paginate --jq '.[] | select(.tag_name == env.TAG)' | jq -s '.' > releases.json
+          count=$(jq 'length' releases.json)
+          [ "$count" = 1 ] || { echo "::error::$count releases have the tag $TAG; expected one"; exit 1; }
+          jq '.[0]' releases.json > release.json
+          draft=$(jq -r '.draft' release.json)
+          if [ "$draft" != true ] && [ "$ALLOW_PUBLISHED" != true ]; then
+            echo "::error::release $TAG is already published; run again with allow_published to rewrite its SHA256SUMS anyway"; exit 1
+          fi
+
+          # release.yml's order: the install and package zips, the plugin, the node archives (zip, then tar.gz), the paks.
+          : > names.list
+          for pattern in '^OpenVersus_.*\.zip$' '^OpenVersus_.*\.asi$' '^OVS_Node_.*\.zip$' '^OVS_Node_.*\.tar\.gz$'; do
+            jq -r --arg p "$pattern" '.assets[].name | select(test($p))' release.json | LC_ALL=C sort >> names.list
+          done
+          # The pak files as release.yml picks them out of a release (any case in the extension).
+          jq -r '.assets[].name | select(test("^OVS_[A-Za-z0-9._-]+\\.(pak|utoc|ucas|sig)$"; "i"))' release.json | LC_ALL=C sort >> names.list
+          [ -s names.list ] || { echo "::error::release $TAG has none of the files SHA256SUMS lists"; exit 1; }
+
+          : > SHA256SUMS
+          while read -r name; do
+            digest=$(jq -r --arg n "$name" '.assets[] | select(.name == $n) | .digest // ""' release.json)
+            hash="${digest#sha256:}"
+            if ! [[ "$hash" =~ ^[0-9a-f]{64}$ ]]; then
+              echo "GitHub records no SHA-256 for $name: downloading it"
+              rm -rf download && mkdir download
+              gh release download "$TAG" --repo "$REPO" --pattern "$name" --dir download
+              hash=$(sha256sum -b "download/$name" | cut -d' ' -f1)
+            fi
+            echo "$hash *$name" >> SHA256SUMS
+          done < names.list
+          cat SHA256SUMS
+
+          # What changes, for the run's summary: the list as the release has it now against the new one.
+          rm -rf before && mkdir before
+          gh release download "$TAG" --repo "$REPO" --pattern SHA256SUMS --dir before 2>/dev/null || true
+          {
+            echo "### SHA256SUMS of $([ "$draft" = true ] && echo 'draft ' || echo '')release $TAG"
+            echo
+            if [ -f before/SHA256SUMS ] && cmp -s before/SHA256SUMS SHA256SUMS; then
+              echo "Already up to date: $(wc -l < SHA256SUMS | tr -d ' ') files, nothing changed."
+            else
+              echo '```diff'
+              diff -u <([ -f before/SHA256SUMS ] && cat before/SHA256SUMS || true) SHA256SUMS | tail -n +3 || true
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if ! { [ -f before/SHA256SUMS ] && cmp -s before/SHA256SUMS SHA256SUMS; }; then
+            gh release upload "$TAG" SHA256SUMS --repo "$REPO" --clobber
+            echo "SHA256SUMS replaced on release $TAG"
+          fi

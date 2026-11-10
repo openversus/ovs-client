@@ -389,6 +389,12 @@ banners and netstats are Information.
 
 ### Netstats
 
+The netcode's figures are sampled in every match played on an OpenVersus server, whatever this setting says:
+five seconds into a match and every ten after, the mod posts the player's input delay, ping and the average
+depth of the rollbacks since its last report to the server (`POST /ovs/netstats`), which shows them beside the
+player on its live matches page while the match is played. Nothing is posted while spectating. `[Features]
+NetStats` decides only whether the figures are also logged here.
+
 With `[Features] NetStats = true` the per-second `NETSTATS` lines go to `logs/NetStats.log`, one
 file per match: it opens when a session starts playing and closes at the summary, which archives
 it as `NetStats_<match start time>_<match id>[_with_<teammates>]_vs_<opponents>.log` with the same
@@ -399,9 +405,15 @@ description keeps the plain stamp, and at Debug level the main log lists what ea
 (every pointer followed, checked for being an object). A closed match log stays on disk as
 `NetStats.log` and is not archived a second time by the next open.
 
-The main log gets only the session start and end, the match log open and close, and the
-`NETSTATS-SUMMARY` line; anything that used to grep the main log for `NETSTATS` reads the match
-logs now. Between matches the session is looked up through the object array every five seconds,
+The main log gets only the session start and end, the match log open and close, the
+`NETSTATS-CONSTANTS` line and the `NETSTATS-SUMMARY` line; anything that used to grep the main log
+for `NETSTATS` reads the match logs now. `NETSTATS-CONSTANTS` is written once per match, as soon as
+the state manager can be read: `rollback_buffer` is how many frames the game can roll back before it
+disconnects with "Rollback amount too high", and `checksum_interval` is how often it reports a real
+frame checksum. Neither is a constant in the binary, so this is where their values come from. Each
+per-second `NETSTATS` line ends with `loss=`: the packet loss the rollback server last told the game, in
+percent (0 from a server or node that does not measure it, and always while spectating). The
+summary repeats both, or `unread` if the state manager never gave them. Between matches the session is looked up through the object array every five seconds,
 and every sample asks the array whether the session object is still listed, so a freed session is
 never sampled.
 

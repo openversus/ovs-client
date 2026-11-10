@@ -53,10 +53,13 @@ public class NetStatsTests
         nint stateManager = game.AddBlock(0x500);
         game.Memory.Write(session + Mvs.SessionStateManager, (long)stateManager);
         game.Memory.Write(stateManager + Mvs.StateManagerCurrentFrame, frame);
+        game.Memory.Write(stateManager + Mvs.StateManagerRollbackBufferLength, (ushort)256);
+        game.Memory.Write(stateManager + Mvs.StateManagerChecksumInterval, (ushort)2);
         game.Memory.Write(session + Mvs.SessionState, state);
         game.Memory.Write(session + Mvs.SessionPlayerIndex, 1);
         game.Memory.Write(session + Mvs.SessionInputDelay, 3);
         game.Memory.Write(session + Mvs.SessionPing, ping);
+        game.Memory.Write(session + Mvs.SessionPacketLossPercent, BitConverter.SingleToInt32Bits(2.5f));
         game.Memory.Write(session + Mvs.SessionResimCount, 10);
         return (session, stateManager);
     }
@@ -159,7 +162,13 @@ public class NetStatsTests
             Assert.DoesNotContain(main.Lines, l => l.StartsWith("NETSTATS player="));
             string line = first.Lines.Lines.First(l => l.StartsWith("NETSTATS player=1 "));
             Assert.Contains("delay=3 ping=42", line);
+            // The packet loss the rollback server told the game, last on the line.
+            Assert.EndsWith(" loss=2.50", line);
             Assert.Contains("frame=100", line);
+
+            // The state manager's two constants are read once, into the match log and the main log.
+            Assert.Single(first.Lines.Lines, l => l == "NETSTATS-CONSTANTS rollback_buffer=256 checksum_interval=2");
+            Assert.Contains(main.Lines, l => l == "NETSTATS-CONSTANTS rollback_buffer=256 checksum_interval=2");
 
             // A rollback of depth three, then the match ends: summary in both, match log closed.
             game.Memory.Write(session + Mvs.SessionResimCount, 13);
@@ -168,7 +177,7 @@ public class NetStatsTests
             game.Memory.Write(session + Mvs.SessionState, (byte)7);
             Assert.True(WaitFor(() => first.Closed, TimeSpan.FromSeconds(10)), "match log not closed at state 7");
             string summary = main.Lines.First(l => l.StartsWith("NETSTATS-SUMMARY"));
-            Assert.Contains("frames=600 resim_total=3 rollbacks=1 mean_depth=3.00 max_depth=3 final_delay=3 state=7", summary);
+            Assert.Contains("frames=600 resim_total=3 rollbacks=1 mean_depth=3.00 max_depth=3 final_delay=3 state=7 rollback_buffer=256 checksum_interval=2", summary);
             Assert.Contains(first.Lines.Lines, l => l == summary);
             Assert.Single(factory.Opened);
 
@@ -182,6 +191,7 @@ public class NetStatsTests
             Assert.True(WaitFor(() => factory.Opened.Count == 2 && factory.Opened[1].Lines.Lines.Any(l => l.StartsWith("NETSTATS ")), TimeSpan.FromSeconds(10)), "second match log not opened");
             var second = factory.Opened[1];
             Assert.Contains("resim_total=0", second.Lines.Lines.First(l => l.StartsWith("NETSTATS ")));
+            Assert.Single(second.Lines.Lines, l => l.StartsWith("NETSTATS-CONSTANTS "));
             Assert.False(second.Closed);
             game.Memory.Write(stateManager + Mvs.StateManagerCurrentFrame, 1300);
             // The summary reports the last sampled frame, so let a sample see 1300 before ending the match.
@@ -319,6 +329,103 @@ public class NetStatsTests
         {
             logger.Stop();
             Engine.ReadyOverride = null;
+        }
+    }
+
+    [Fact]
+    // The sampler reports a match live whether or not the player logs it: with the logging off (loggers that keep
+    // nothing) the first report comes a moment into the match and then at each interval, with the delay and ping as
+    // they are and the mean depth of the rollbacks since the report before.
+    public void AMatchIsReportedLiveWithNothingLoggedHere()
+    {
+        var game = new FakeGame();
+        nint sessionClass = game.AddClass("PfgNetcodeSession");
+        var (session, _) = AddSession(game, sessionClass, state: 4, frame: 100, ping: 42);
+        AddPlayers(game, filled: true);
+
+        var main = new ListLogger();
+        var reports = new System.Collections.Concurrent.ConcurrentQueue<NetStatsReport>();
+        Engine.ReadyOverride = () => true;
+        var logger = new NetStatsLogger(game.Finder(), new WarningsOnly(main), _ => Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance,
+            findInterval: TimeSpan.FromMilliseconds(20), report: reports.Enqueue, reportAfter: TimeSpan.FromMilliseconds(100), reportEvery: TimeSpan.FromMilliseconds(100));
+        logger.Start();
+        try
+        {
+            Assert.True(WaitFor(() => !reports.IsEmpty, TimeSpan.FromSeconds(10)), "no live report within 10 s");
+            Assert.True(reports.TryPeek(out var first));
+            Assert.Equal(new NetStatsReport("match-777", 3, 42, 0), first);
+
+            // Two rollbacks, 4 and 2 frames deep: the next report's mean is 3, and the one after starts over.
+            game.Memory.Write(session + Mvs.SessionResimCount, 14);
+            Thread.Sleep(60);
+            game.Memory.Write(session + Mvs.SessionResimCount, 16);
+            Assert.True(WaitFor(() => reports.Any(r => r.MeanRollbackDepth > 0), TimeSpan.FromSeconds(10)), "the rollbacks were never reported");
+            int seen = reports.Count;
+            Assert.True(WaitFor(() => reports.Count > seen + 1, TimeSpan.FromSeconds(10)));
+            // In one report (their mean, 3) or, when an interval's end fell between them, in two (4, then 2).
+            var depths = reports.Select(r => r.MeanRollbackDepth).Where(d => d > 0).ToList();
+            Assert.True(depths is [3] or [4, 2], string.Join(", ", depths));
+            Assert.Equal(0, reports.Last().MeanRollbackDepth);
+
+            // The match ends: one last report, final, with the whole match's mean depth (two rollbacks, 4 and 2).
+            game.Memory.Write(session + Mvs.SessionState, (byte)7);
+            Assert.True(WaitFor(() => reports.Any(r => r.Final), TimeSpan.FromSeconds(10)), "no final report at the match's end");
+            Assert.Equal(new NetStatsReport("match-777", 3, 42, 3, Final: true), reports.Last());
+            Thread.Sleep(300);
+            Assert.Single(reports, r => r.Final);
+
+            // The next match on the session, spectated: nothing is reported.
+            game.Memory.Write(session + Mvs.SessionPlayerIndex, NetStatsLogger.SpectatorIndex);
+            game.Memory.Write(session + Mvs.SessionState, (byte)4);
+            seen = reports.Count;
+            Thread.Sleep(500);
+            Assert.Equal(seen, reports.Count);
+            Assert.Empty(main.Lines);
+        }
+        finally
+        {
+            logger.Stop();
+            Engine.ReadyOverride = null;
+        }
+    }
+
+    [Fact]
+    public void AReportIsOneSmallPostAndAFailureIsSaidOnce()
+    {
+        Assert.Equal("""{"matchId":"6aef688ae150068aed6cf25f","delay":3,"ping":42,"depth":1.75}""",
+            NetStatsReporter.Body(new NetStatsReport("6aef688ae150068aed6cf25f", 3, 42, 1.75)));
+        Assert.Equal("""{"matchId":"m","delay":4,"ping":50,"depth":2.25,"final":true}""", NetStatsReporter.Body(new NetStatsReport("m", 4, 50, 2.25, Final: true)));
+        // Nothing in a match id can end the string.
+        Assert.Equal("""{"matchId":"ab","delay":0,"ping":0,"depth":0.00}""", NetStatsReporter.Body(new NetStatsReport("a\"\\b", 0, 0, 0)));
+
+        var log = new ListLogger();
+        var http = new Answers(new OpenVersus.Net.HttpResult(true, 200, "{}"u8.ToArray(), null), OpenVersus.Net.HttpResult.Failed("timed out"), OpenVersus.Net.HttpResult.Failed("timed out"));
+        var reporter = new NetStatsReporter(http, new Uri("http://ovs.test/ovs/netstats"), log);
+        var report = new NetStatsReport("m", 1, 2, 3);
+        Assert.True(reporter.Post(report));
+        Assert.Equal(("http://ovs.test/ovs/netstats", "application/json", NetStatsReporter.Body(report)), http.Sent[0]);
+        Assert.False(reporter.Post(report));
+        Assert.False(reporter.Post(report));
+        Assert.Single(log.Lines, l => l.Contains("did not land"));
+
+        // A report the server answers but does not keep is not a landed one, and its reason is said.
+        var refusing = new NetStatsReporter(new Answers(new OpenVersus.Net.HttpResult(true, 200, """{"ok":false,"reason":"not a player of that match"}"""u8.ToArray(), null)),
+            new Uri("http://ovs.test/ovs/netstats"), log);
+        Assert.False(refusing.Post(report));
+        Assert.Contains(log.Lines, l => l.Contains("not a player of that match"));
+    }
+
+    private sealed class Answers(params OpenVersus.Net.HttpResult[] results) : OpenVersus.Net.IHttpTransport
+    {
+        private int _next;
+        public List<(string Url, string Type, string Body)> Sent { get; } = [];
+
+        public OpenVersus.Net.HttpResult Get(Uri url, TimeSpan timeout) => throw new NotSupportedException();
+
+        public OpenVersus.Net.HttpResult Post(Uri url, string contentType, ReadOnlySpan<byte> body, TimeSpan timeout)
+        {
+            Sent.Add((url.ToString(), contentType, System.Text.Encoding.UTF8.GetString(body)));
+            return results[_next++];
         }
     }
 

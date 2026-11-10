@@ -43,13 +43,20 @@ public sealed record MatchInfo(string MatchId, IReadOnlyList<string> Teammates, 
 }
 
 /// <summary>
+/// A match's figures (<see cref="NetStatsLogger"/>): the input delay and ping when it was made, and the mean depth of
+/// the rollbacks since the one before; or, <paramref name="Final"/>, the last one, made when the match ended: the
+/// delay it ended on, its last ping, and the mean depth of every rollback of the match.
+/// </summary>
+public sealed record NetStatsReport(string MatchId, int InputDelay, int Ping, double MeanRollbackDepth, bool Final = false);
+
+/// <summary>
 /// Turns "the match felt choppy" into numbers. While a netcode session is in the playing
 /// state, the session's own counters are sampled at 60 Hz through guarded reads and one
 /// NETSTATS line per second goes to a log opened for that match through
 /// <paramref name="openMatchLog"/>; when the match ends locally, a summary goes there and to
 /// the main log, and the match log is closed (disposed), which is what archives it under the
-/// match's start time. The next match gets a fresh one. See HANDOFF-netstats. Opt-in through
-/// [Features] NetStats.
+/// match's start time. The next match gets a fresh one. See HANDOFF-netstats. The logging is opt-in
+/// through [Features] NetStats.
 /// <para>
 /// The session object is found through the object array, and the array stays the authority on
 /// whether it is still alive: every sample first asks the array whether the object is still in
@@ -66,9 +73,25 @@ public sealed record MatchInfo(string MatchId, IReadOnlyList<string> Teammates, 
 /// there yet" and "never there" can be told apart in the log. Nothing is asked of the engine until
 /// <see cref="Engine.IsUp"/>; asking for a name before that took the game down (2026-09-24).
 /// </para>
+/// <para>
+/// The sampling runs whether or not the player logs it: [Features] NetStats decides only what is written here
+/// (with it off, the caller passes loggers that keep nothing). While a match is playing, <paramref name="report"/>
+/// is handed the match's live figures <paramref name="reportAfter"/> (5 s) into it and every
+/// <paramref name="reportEvery"/> (10 s) after: the input delay and ping as they are then, and the mean depth of
+/// the rollbacks since the report before (a rolling figure: the summary's mean is the whole match's). When the
+/// match ends it is handed one last report, marked final, with the summary's figures: the whole match's. Not while
+/// spectating (the game pins a spectator's delay and skips its ping), and not before the match's id is read.
+/// </para>
 /// </summary>
-public sealed class NetStatsLogger(ObjectFinder finder, ILogger log, Func<MatchInfo, ILogger> openMatchLog, Action<ILogger, MatchInfo>? nameMatchLog = null, TimeSpan? findInterval = null)
+public sealed class NetStatsLogger(ObjectFinder finder, ILogger log, Func<MatchInfo, ILogger> openMatchLog, Action<ILogger, MatchInfo>? nameMatchLog = null, TimeSpan? findInterval = null,
+    Action<NetStatsReport>? report = null, TimeSpan? reportAfter = null, TimeSpan? reportEvery = null)
 {
+    /// <summary>The player index the game gives a spectator.</summary>
+    public const int SpectatorIndex = 8888;
+
+    private readonly long _reportAfterMs = (long)(reportAfter ?? TimeSpan.FromSeconds(5)).TotalMilliseconds;
+    private readonly long _reportEveryMs = (long)(reportEvery ?? TimeSpan.FromSeconds(10)).TotalMilliseconds;
+
     /// <summary>Readings of the match description before giving up on naming the log: the first, then one per second.</summary>
     public const int MaxDescribeAttempts = 10;
 
@@ -109,6 +132,17 @@ public sealed class NetStatsLogger(ObjectFinder finder, ILogger log, Func<MatchI
         public double DepthSum { get; set; }
         public int DescribeAttempts { get; set; }
         public bool Described { get; set; }
+        /// <summary>The state manager's rollback buffer length, in frames; -1 until it has been read this match.</summary>
+        public int RollbackBufferLength { get; set; } = -1;
+        /// <summary>The state manager's checksum interval, in frames; -1 until it has been read this match.</summary>
+        public int ChecksumInterval { get; set; } = -1;
+        /// <summary>The match's id, once read; "" until then.</summary>
+        public string MatchId { get; set; } = "";
+        /// <summary>When the next live report is due, on the loop's clock; null until the match's first playing second.</summary>
+        public long? NextReportAt { get; set; }
+        /// <summary>The rollbacks since the last live report, and the sum of their depths.</summary>
+        public int ReportRollbacks { get; set; }
+        public double ReportDepthSum { get; set; }
     }
 
     private enum Sampled
@@ -197,6 +231,19 @@ public sealed class NetStatsLogger(ObjectFinder finder, ILogger log, Func<MatchI
 
                                 Line(match);
                             }
+
+                            if (report != null)
+                            {
+                                if (match.NextReportAt is not { } due)
+                                {
+                                    match.NextReportAt = now + _reportAfterMs;
+                                }
+                                else if (now >= due)
+                                {
+                                    match.NextReportAt = now + _reportEveryMs;
+                                    Report(match);
+                                }
+                            }
                             break;
                     }
                 }
@@ -276,12 +323,18 @@ public sealed class NetStatsLogger(ObjectFinder finder, ILogger log, Func<MatchI
                 m.StartFrame = Frame(m.Session);
                 m.StartResim = m.LastResim = m.ResimAtSecond = resim;
             }
+            if (m.RollbackBufferLength < 0)
+            {
+                ReadConstants(m);
+            }
             if (resim > m.LastResim)
             {
                 int depth = resim - m.LastResim;
                 m.Rollbacks++;
                 m.Rollbacks1s++;
                 m.DepthSum += depth;
+                m.ReportRollbacks++;
+                m.ReportDepthSum += depth;
                 if (depth > m.MaxDepth)
                 {
                     m.MaxDepth = depth;
@@ -300,9 +353,10 @@ public sealed class NetStatsLogger(ObjectFinder finder, ILogger log, Func<MatchI
         {
             int frames = m.LastFrame - m.StartFrame, total = m.LastResim - m.StartResim;
             finder.Memory.TryRead(m.Session + Mvs.SessionInputDelay, out int delay);
-            string summary = $"NETSTATS-SUMMARY frames={frames} resim_total={total} rollbacks={m.Rollbacks} mean_depth={(m.Rollbacks > 0 ? m.DepthSum / m.Rollbacks : 0):F2} max_depth={m.MaxDepth} final_delay={delay} state={state}";
+            string summary = $"NETSTATS-SUMMARY frames={frames} resim_total={total} rollbacks={m.Rollbacks} mean_depth={(m.Rollbacks > 0 ? m.DepthSum / m.Rollbacks : 0):F2} max_depth={m.MaxDepth} final_delay={delay} state={state} rollback_buffer={Constant(m.RollbackBufferLength)} checksum_interval={Constant(m.ChecksumInterval)}";
             m.Stats.Info(summary);
             log.Info(summary);
+            Report(m, final: true);
             EndMatch(m, "match ended");
             return Sampled.Idle;
         }
@@ -322,7 +376,12 @@ public sealed class NetStatsLogger(ObjectFinder finder, ILogger log, Func<MatchI
         m.DepthSum = 0;
         m.DescribeAttempts = 1;
         m.Described = false;
+        m.RollbackBufferLength = m.ChecksumInterval = -1;
+        m.NextReportAt = null;
+        m.ReportRollbacks = 0;
+        m.ReportDepthSum = 0;
         MatchInfo info = DescribeMatch(m.Session, m.DescribeAttempts);
+        m.MatchId = info.MatchId;
         m.Stats = openMatchLog(info);
         m.Described = info.IsComplete;
         if (!info.IsEmpty)
@@ -333,11 +392,41 @@ public sealed class NetStatsLogger(ObjectFinder finder, ILogger log, Func<MatchI
         log.Info($"[NetStats] match started on session 0x{m.Session:X} ({info}); match log opened");
     }
 
+    /// <summary>
+    /// The two state-manager constants the netcode runs on, read once per match as soon as the state
+    /// manager is there and written to the match log as a NETSTATS-CONSTANTS line. The rollback buffer
+    /// length is the bound a late correction must stay under or the client disconnects; the server's own
+    /// input history has been sized without knowing it. Both are u16 and neither changes during a match.
+    /// </summary>
+    private void ReadConstants(Match m)
+    {
+        if (!finder.Memory.TryRead(m.Session + Mvs.SessionStateManager, out nint manager) || manager == 0
+            || !finder.Memory.TryRead(manager + Mvs.StateManagerRollbackBufferLength, out ushort buffer)
+            || !finder.Memory.TryRead(manager + Mvs.StateManagerChecksumInterval, out ushort interval))
+        {
+            return;
+        }
+
+        m.RollbackBufferLength = buffer;
+        m.ChecksumInterval = interval;
+        string line = $"NETSTATS-CONSTANTS rollback_buffer={buffer} checksum_interval={interval}";
+        m.Stats?.Info(line);
+        log.Info(line);
+    }
+
+    /// <summary>A constant for the summary: its value, or "unread" when the state manager never gave it.</summary>
+    private static string Constant(int value) => value < 0 ? "unread" : value.ToString();
+
     /// <summary>A later reading of the description, for a match whose first reading was incomplete.</summary>
     private void Describe(Match m)
     {
         m.DescribeAttempts++;
         MatchInfo info = DescribeMatch(m.Session, m.DescribeAttempts);
+        if (info.MatchId.Length > 0)
+        {
+            m.MatchId = info.MatchId;
+        }
+
         if (!info.IsEmpty && m.Stats != null)
         {
             nameMatchLog?.Invoke(m.Stats, info);
@@ -494,6 +583,34 @@ public sealed class NetStatsLogger(ObjectFinder finder, ILogger log, Func<MatchI
         m.Stats = null;
     }
 
+    /// <summary>
+    /// The match's figures to <c>report</c>: the input delay and ping now, and the mean depth of the rollbacks since
+    /// the last one (0 when there were none), which then start over; <paramref name="final"/>, at the match's end, the
+    /// mean depth of all of them. Nothing for a spectator, or while the match's id has not been read (the next one is
+    /// tried when it is due).
+    /// </summary>
+    private void Report(Match m, bool final = false)
+    {
+        nint s = m.Session;
+        if (report == null || m.MatchId.Length == 0 || !finder.Memory.TryRead(s + Mvs.SessionPlayerIndex, out int player) || player >= SpectatorIndex
+            || !finder.Memory.TryRead(s + Mvs.SessionInputDelay, out int delay) || !finder.Memory.TryRead(s + Mvs.SessionPing, out int ping))
+        {
+            return;
+        }
+
+        double depth = final ? (m.Rollbacks > 0 ? m.DepthSum / m.Rollbacks : 0) : m.ReportRollbacks > 0 ? m.ReportDepthSum / m.ReportRollbacks : 0;
+        m.ReportRollbacks = 0;
+        m.ReportDepthSum = 0;
+        try
+        {
+            report.Invoke(new NetStatsReport(m.MatchId, delay, ping, depth, final));
+        }
+        catch (Exception e)
+        {
+            log.Warn($"[NetStats] the live report failed: {e.Message}");
+        }
+    }
+
     private void Line(Match m)
     {
         nint s = m.Session;
@@ -509,8 +626,11 @@ public sealed class NetStatsLogger(ObjectFinder finder, ILogger log, Func<MatchI
         finder.Memory.TryRead(s + Mvs.SessionNumPredictedOverrides, out int pred);
         finder.Memory.TryRead(s + Mvs.SessionNumZeroedOverrides, out int zero);
         finder.Memory.TryRead(s + Mvs.SessionPlayerIndex, out int player);
+        // What the rollback server last told this game of its packet loss, in percent (0 from a server that does not
+        // measure it, and always for a spectator: a spectating game skips it).
+        finder.Memory.TryRead(s + Mvs.SessionPacketLossPercent, out float loss);
         int resim1s = m.LastResim - m.ResimAtSecond;
-        m.Stats.Info($"NETSTATS player={player} frame={m.LastFrame} delay={delay} ping={ping} rift={rift:F2} resim_total={m.LastResim - m.StartResim} resim_1s={resim1s} rollbacks_1s={m.Rollbacks1s} max_depth_1s={m.MaxDepth1s} pred={pred} zero={zero}");
+        m.Stats.Info($"NETSTATS player={player} frame={m.LastFrame} delay={delay} ping={ping} rift={rift:F2} resim_total={m.LastResim - m.StartResim} resim_1s={resim1s} rollbacks_1s={m.Rollbacks1s} max_depth_1s={m.MaxDepth1s} pred={pred} zero={zero} loss={loss:F2}");
         m.ResimAtSecond = m.LastResim;
         m.Rollbacks1s = 0;
         m.MaxDepth1s = 0;

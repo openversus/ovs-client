@@ -48,6 +48,18 @@ public static class Mvs
     public const int SessionStateManager = 0x710;
     /// <summary>int32: the current frame, in the state manager.</summary>
     public const int StateManagerCurrentFrame = 0x420;
+    /// <summary>
+    /// uint16, in the state manager: how many frames back the client can roll. A correction older than this
+    /// disconnects it with "Rollback amount too high" while playing (netcode/inputs-and-rollback.md in the RE
+    /// archive; the offset read from 0x14125e040 and 0x141241b30 on 2026-09-22 and again with Ghidra on
+    /// 2026-11-07). Its runtime value is configuration, not a constant in the binary, which is why it is logged.
+    /// </summary>
+    public const int StateManagerRollbackBufferLength = 0x430;
+    /// <summary>
+    /// uint16, in the state manager: the client reports a real checksum only for frames that are a multiple of
+    /// this and the placeholder 0xCE58 for the rest (netcode/input-message.md). Production logs put it at 2.
+    /// </summary>
+    public const int StateManagerChecksumInterval = 0x432;
     // AMvsPreMatchGameState: its state machine, and the machine's current state.
     /// <summary>Pointer to the pre-match game state's state machine.</summary>
     public const int PreMatchStateMachine = 0x320;

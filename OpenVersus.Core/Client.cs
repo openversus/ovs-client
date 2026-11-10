@@ -512,6 +512,23 @@ public sealed class Client
             Log.Warn("[AutoUpdate] Good luck, hopefully the game still works for you.");
         }
 
+        // The netcode's figures are sampled in every match played on an OpenVersus server: its live matches page shows
+        // each player's input delay, ping and rollback depth (NetStatsReporter). [Features] NetStats decides only
+        // whether they are logged here as well.
+        Uri? reportUrl = Settings.EnableServerProxy && !string.IsNullOrEmpty(Settings.ServerUrl) ? Urls.Join(Settings.ServerUrl, NetStatsReporter.Path) : null;
+        Action<NetStatsReport>? report = reportUrl == null ? null : new NetStatsReporter(Http, reportUrl, Log).Send;
+        if (!Settings.NetStats && report != null && !Status.UeFuncs)
+        {
+            Log.Info("[NetStats] not sampling for the server's live matches page: the engine functions were not found ([Features] HookUE)");
+        }
+        else if (!Settings.NetStats && report != null)
+        {
+            var stats = new NetStatsLogger(Objects, new WarningsOnly(Log), _ => Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance, report: report);
+            stats.Start();
+            _shutdown.Add(stats.Stop);
+            Log.Info("[NetStats] sampling matches for the server's live matches page; not logged here ([Features] NetStats is off)");
+        }
+
         if (Settings.NetStats)
         {
             // One file per match beside the main log, with the same writer thread, archive
@@ -537,7 +554,7 @@ public sealed class Client
                 {
                     session.ArchiveSuffix = info.FileSuffix;
                 }
-            });
+            }, report: report);
             stats.Start();
             _shutdown.Add(stats.Stop);
         }

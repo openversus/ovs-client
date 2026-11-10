@@ -1,4 +1,4 @@
-# Publishes a release when a version tag is pushed.
+# Makes a draft release when a version tag is pushed; publishing it is done by hand.
 #
 # Nothing is built here. The release is made from the artifact of the build that already ran
 # for the tagged commit (build.yml): the exact files that were built and tested, not a rebuild
@@ -8,7 +8,9 @@
 # suffix such as 2026.09.25.01-test1 publishes as a prerelease.
 #
 # To release: bump VERSION, push, let the build finish (or don't -- this waits for it), then
-# tag that commit and push the tag.
+# tag that commit and push the tag. When this has run, the draft holds every asset: change what
+# needs changing (new paks in place of the carried-over ones, for one), then publish it on GitHub
+# (the release's Edit page, or gh release edit <tag> --draft=false).
 #
 # Assets: OpenVersus_v<tag>.zip, the install (extracted beside the game's executable, the
 # rollback node for every platform inside); OpenVersus_<version>.zip, the package (build.sh
@@ -19,8 +21,11 @@
 # platform in one for hand installs, with SHA256SUMS-node; the OVS_* paks of the previous release
 # (GitHub's "latest": the newest that is not a prerelease), carried over so the server and the
 # updater see the same content under the new release; a .sha256 beside each built file, and
-# SHA256SUMS. The release is made as a draft and published once every asset is on it, so the
-# server's "latest" never shows a half-filled release.
+# SHA256SUMS. The release stays a draft: nothing reads a draft (the server's "latest" and MVS
+# Buddy see only published releases), so it can be filled and corrected at leisure and is never
+# seen half-filled. SHA256SUMS lists the carried-over paks as they were attached here: a pak
+# replaced by hand afterwards is not in it until the checksums workflow (checksums.yml, run by
+# hand with the tag) rewrites the list from what the draft holds.
 name: release
 
 on:
@@ -213,8 +218,8 @@ jobs:
           } > notes.md
           cat notes.md >> "$GITHUB_STEP_SUMMARY"
 
-      # A draft until every asset is on it (the built files here, the paks next), then published: the server's "latest"
-      # and MVS Buddy read a release's assets, and must never see this one half-filled.
+      # A draft, and left one: the built files here, the paks next, and publishing is by hand. The server's "latest"
+      # and MVS Buddy read a published release's assets, and never see this one until then.
       - name: Release
         uses: softprops/action-gh-release@v3
         with:
@@ -231,12 +236,15 @@ jobs:
             SHA256SUMS
             SHA256SUMS-node
 
-      - name: Attach the paks and publish
+      - name: Attach the paks
         run: |
           set -euo pipefail
           tag="${{ steps.version.outputs.label }}"
           if [ "${{ steps.paks.outputs.count }}" != "0" ]; then
             gh release upload --repo "$REPO" "$tag" paks/* --clobber
           fi
-          gh release edit --repo "$REPO" "$tag" --draft=false
           gh release view --repo "$REPO" "$tag" --json assets --jq '.assets[] | "\(.name) \(.size)"' | tee -a "$GITHUB_STEP_SUMMARY"
+          {
+            echo
+            echo "**Draft release $tag: not published.** Review its assets (after replacing any, run the checksums workflow with this tag to bring SHA256SUMS up to date), then publish it on GitHub or with \`gh release edit $tag --draft=false\`."
+          } >> "$GITHUB_STEP_SUMMARY"
